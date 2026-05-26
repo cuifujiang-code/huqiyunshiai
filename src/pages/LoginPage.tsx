@@ -2,22 +2,13 @@ import { useEffect, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import Logo from '../components/Logo'
 import { useAuth } from '../context/AuthContext'
-import { mockSignInWithPhone } from '../lib/mockAuth'
+import {
+  authenticateWithPhone,
+  formatPhoneE164,
+  sendPhoneOtp,
+  validatePassword,
+} from '../lib/phoneAuth'
 import type { UserRole } from '../lib/supabase'
-
-function formatPhone(phone: string): string {
-  const digits = phone.replace(/\D/g, '')
-  if (digits.startsWith('86') && digits.length === 13) {
-    return `+${digits}`
-  }
-  if (digits.length === 11) {
-    return `+86${digits}`
-  }
-  if (phone.startsWith('+')) {
-    return phone
-  }
-  return `+86${digits}`
-}
 
 function defaultDashboard(role: UserRole) {
   return role === 'teacher' ? '/teacher/dashboard' : '/student/dashboard'
@@ -36,6 +27,7 @@ export default function LoginPage() {
   const { profile, ensureProfile, applyLocalMockProfile, isAuthenticated } = useAuth()
 
   const [phone, setPhone] = useState('')
+  const [password, setPassword] = useState('')
   const [role, setRole] = useState<UserRole>('student')
   const [otp, setOtp] = useState('')
   const [otpSent, setOtpSent] = useState(false)
@@ -65,7 +57,7 @@ export default function LoginPage() {
   }, [countdown])
 
   const validatePhone = (): string | null => {
-    const formattedPhone = formatPhone(phone.trim())
+    const formattedPhone = formatPhoneE164(phone.trim())
     if (!/^\+86\d{11}$/.test(formattedPhone)) {
       setError('请输入有效的 11 位中国大陆手机号')
       return null
@@ -73,35 +65,72 @@ export default function LoginPage() {
     return formattedPhone
   }
 
-  /** 模拟发送验证码：不调用短信接口，仅展示验证码输入框 */
   const handleSendOtp = async () => {
-    setError('')
-    setMessage('')
-
-    if (!validatePhone()) return
-
-    setOtpSent(true)
-    setCountdown(60)
-    setOtp('123456')
-    setMessage('模拟验证码已发送（开发模式：可输入任意 6 位数字）')
-  }
-
-  /** 模拟确认登录：跳过短信校验，使用 signInWithPassword 登录虚拟账号 */
-  const handleVerifyOtp = async () => {
     setError('')
     setMessage('')
 
     const formattedPhone = validatePhone()
     if (!formattedPhone) return
 
-    if (!otp.trim()) {
+    const pwdError = validatePassword(password)
+    if (pwdError) {
+      setError(pwdError)
+      return
+    }
+
+    setLoading(true)
+    try {
+      await sendPhoneOtp(formattedPhone, password, role)
+      setOtpSent(true)
+      setCountdown(60)
+      setMessage(
+        '验证码已发送。开发阶段请在 Supabase 控制台配置 Test Phone Numbers，使用测试验证码（如 123456）完成验证。',
+      )
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : '发送验证码失败'
+      if (msg === 'SUPABASE_NOT_CONFIGURED') {
+        setOtpSent(true)
+        setCountdown(60)
+        setMessage('未配置 Supabase，开发模式：验证码可输入 123456')
+      } else {
+        setError(msg)
+      }
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleConfirmLogin = async () => {
+    setError('')
+    setMessage('')
+
+    const formattedPhone = validatePhone()
+    if (!formattedPhone) return
+
+    const pwdError = validatePassword(password)
+    if (pwdError) {
+      setError(pwdError)
+      return
+    }
+
+    if (otpSent && !otp.trim()) {
       setError('请输入验证码')
       return
     }
 
     setLoading(true)
     try {
-      const result = await mockSignInWithPhone(formattedPhone, role)
+      const result = await authenticateWithPhone({
+        phone: formattedPhone,
+        password,
+        role,
+        otp: otp.trim(),
+        otpSent,
+      })
+
+      if (result.notice) {
+        setMessage(result.notice)
+      }
 
       if (result.mode === 'local') {
         applyLocalMockProfile(result.profile)
@@ -135,7 +164,7 @@ export default function LoginPage() {
           <h1 className="mt-6 bg-gradient-to-r from-blue-300 via-cyan-200 to-blue-400 bg-clip-text text-3xl font-bold tracking-wide text-transparent sm:text-4xl">
             华祺云师AI
           </h1>
-          <p className="mt-2 text-sm text-slate-400">智慧教育 SaaS 平台 · 手机号快捷登录</p>
+          <p className="mt-2 text-sm text-slate-400">手机号 + 密码登录 · Supabase 认证</p>
           <Link to="/" className="mt-3 inline-block text-xs text-blue-400 hover:underline">
             ← 返回首页
           </Link>
@@ -169,6 +198,21 @@ export default function LoginPage() {
                 <option value="teacher">教师</option>
               </select>
             </div>
+            <div>
+              <label htmlFor="password" className="mb-1.5 block text-sm font-medium text-slate-300">
+                密码
+              </label>
+              <input
+                id="password"
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="至少 6 位，请自行设置"
+                minLength={6}
+                autoComplete="new-password"
+                className="w-full rounded-xl border border-slate-700 bg-slate-800/80 px-4 py-3 text-white placeholder-slate-500 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30"
+              />
+            </div>
             {otpSent && (
               <div>
                 <label htmlFor="otp" className="mb-1.5 block text-sm font-medium text-slate-300">
@@ -181,7 +225,7 @@ export default function LoginPage() {
                   maxLength={6}
                   value={otp}
                   onChange={(e) => setOtp(e.target.value.replace(/\D/g, ''))}
-                  placeholder="请输入 6 位验证码"
+                  placeholder="Supabase 测试验证码（如 123456）"
                   className="w-full rounded-xl border border-slate-700 bg-slate-800/80 px-4 py-3 text-white placeholder-slate-500 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30"
                 />
               </div>
@@ -200,22 +244,23 @@ export default function LoginPage() {
               <button
                 type="button"
                 onClick={handleSendOtp}
-                disabled={loading || countdown > 0}
+                disabled={loading || countdown > 0 || password.length < 6}
                 className="flex-1 rounded-xl border border-blue-500/40 bg-blue-500/10 px-4 py-3 text-sm font-medium text-blue-200 transition hover:bg-blue-500/20 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {countdown > 0 ? `${countdown}s 后重发` : '发送验证码'}
               </button>
-              {otpSent && (
-                <button
-                  type="button"
-                  onClick={handleVerifyOtp}
-                  disabled={loading}
-                  className="flex-1 rounded-xl bg-gradient-to-r from-blue-600 to-cyan-500 px-4 py-3 text-sm font-medium text-white shadow-lg shadow-blue-600/30 transition hover:from-blue-500 hover:to-cyan-400 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {loading ? '登录中...' : '确认登录'}
-                </button>
-              )}
+              <button
+                type="button"
+                onClick={handleConfirmLogin}
+                disabled={loading}
+                className="flex-1 rounded-xl bg-gradient-to-r from-blue-600 to-cyan-500 px-4 py-3 text-sm font-medium text-white shadow-lg shadow-blue-600/30 transition hover:from-blue-500 hover:to-cyan-400 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {loading ? '登录中...' : '确认登录'}
+              </button>
             </div>
+            <p className="text-center text-xs text-slate-500">
+              新用户：发送验证码 → 输入测试 OTP → 确认登录即完成注册
+            </p>
           </div>
         </div>
       </div>

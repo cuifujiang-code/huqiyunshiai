@@ -79,6 +79,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       const existing = await fetchProfile(id)
       if (existing) {
+        if (existing.phone !== phone || existing.role !== role) {
+          const { data: updated, error: updateError } = await supabase
+            .from('profiles')
+            .update({ phone, role })
+            .eq('id', id)
+            .select()
+            .single()
+          if (!updateError && updated) {
+            setProfile(updated as Profile)
+            return updated as Profile
+          }
+        }
         setProfile(existing)
         return existing
       }
