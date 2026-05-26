@@ -1,8 +1,8 @@
-import { buildMockPressureExam } from './mockExamData.js'
+import { generateExam } from './examGenerator.js'
 
 /**
  * POST /api/generate-exam
- * 接收学科、年级、难度，返回完整模拟试卷（暂不调用七牛云 AI）
+ * 优先调用七牛云 AI 生成试卷，失败时降级为模拟数据
  */
 export function registerGenerateExamRoute(app) {
   app.post('/api/generate-exam', async (req, res) => {
@@ -15,20 +15,28 @@ export function registerGenerateExamRoute(app) {
       })
     }
 
-    // 模拟 AI 生成耗时，便于前端展示加载状态
-    await new Promise((resolve) => setTimeout(resolve, 600))
+    try {
+      const result = await generateExam({
+        prompt: prompt?.trim() || '',
+        subject,
+        grade,
+        difficulty,
+      })
 
-    const exam = buildMockPressureExam({ subject, grade, difficulty })
-
-    return res.json({
-      success: true,
-      message: '试卷生成成功',
-      exam,
-      meta: {
-        prompt: prompt?.trim() || null,
-        generatedAt: new Date().toISOString(),
-        mode: 'mock',
-      },
-    })
+      return res.json({
+        success: true,
+        message: result.message,
+        exam: result.exam,
+        isMockFallback: result.isMockFallback,
+        meta: {
+          prompt: prompt?.trim() || null,
+          generatedAt: new Date().toISOString(),
+          mode: result.exam.source ?? (result.isMockFallback ? 'mock' : 'ai'),
+        },
+      })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '试卷生成失败'
+      return res.status(500).json({ success: false, message })
+    }
   })
 }

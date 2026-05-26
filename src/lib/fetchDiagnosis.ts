@@ -1,9 +1,11 @@
 import type { DiagnosisFormData, DiagnosisResponse } from '../types/diagnosis'
 import { buildLocalDiagnosisReport } from '../data/mockDiagnosisReport'
 
+const MOCK_FALLBACK_MESSAGE = 'AI服务暂不可用，已展示示例诊断报告'
+
 /**
- * 获取诊断报告：优先请求后端 /api/diagnosis/generate，
- * 失败时自动降级为前端本地模拟数据，保证始终可用。
+ * 获取诊断报告：优先请求后端 /api/diagnosis/generate（七牛云 AI），
+ * 失败时自动降级为前端本地模拟数据。
  */
 export async function fetchDiagnosisReport(form: DiagnosisFormData): Promise<DiagnosisResponse> {
   try {
@@ -18,7 +20,11 @@ export async function fetchDiagnosisReport(form: DiagnosisFormData): Promise<Dia
       try {
         const data = JSON.parse(text) as DiagnosisResponse
         if (data.success && data.report) {
-          return { ...data, message: data.message ?? '诊断报告生成成功' }
+          return {
+            ...data,
+            isMockFallback: data.isMockFallback ?? false,
+            message: data.isMockFallback ? MOCK_FALLBACK_MESSAGE : (data.message ?? '诊断报告生成成功'),
+          }
         }
       } catch {
         // 解析失败，降级本地数据
@@ -30,12 +36,13 @@ export async function fetchDiagnosisReport(form: DiagnosisFormData): Promise<Dia
 
   return {
     success: true,
-    message: '已使用本地模拟数据生成诊断报告',
+    message: MOCK_FALLBACK_MESSAGE,
+    isMockFallback: true,
     report: buildLocalDiagnosisReport(form),
   }
 }
 
-/** 直接使用本地模拟数据，不发起网络请求 */
+/** @deprecated 请使用 fetchDiagnosisReport */
 export function getLocalDiagnosisReport(form?: DiagnosisFormData): DiagnosisResponse {
   return {
     success: true,

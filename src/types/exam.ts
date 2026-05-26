@@ -47,6 +47,7 @@ export interface GenerateExamResponse {
   success: boolean
   message?: string
   exam?: ExamPaper
+  isMockFallback?: boolean
 }
 
 export const SUBJECTS: Subject[] = [

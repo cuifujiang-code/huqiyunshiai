@@ -25,6 +25,7 @@ export default function TeacherDashboard() {
   const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
   const [isError, setIsError] = useState(false)
+  const [isWarning, setIsWarning] = useState(false)
   const [exporting, setExporting] = useState(false)
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
@@ -42,6 +43,7 @@ export default function TeacherDashboard() {
     setLoading(true)
     setMessage(null)
     setIsError(false)
+    setIsWarning(false)
     setSaved(false)
 
     try {
@@ -49,6 +51,7 @@ export default function TeacherDashboard() {
       setExam(data.exam!)
       deductExamCredit()
       const left = permission.remaining != null ? permission.remaining - 1 : null
+      setIsWarning(!!data.isMockFallback)
       setMessage(
         left != null
           ? `${data.message ?? '试卷生成成功'}（本月剩余 ${left} 次出题额度）`
@@ -127,6 +130,7 @@ export default function TeacherDashboard() {
               loading={loading}
               message={message}
               isError={isError}
+              isWarning={isWarning}
               paperRef={paperRef}
               onExportPdf={handleExportPdf}
               onSave={handleSave}

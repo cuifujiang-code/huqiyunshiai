@@ -1,6 +1,8 @@
 import { buildMockPressureExam } from '../data/mockExamData'
 import type { GenerateExamResponse } from '../types/exam'
 
+const MOCK_FALLBACK_MESSAGE = 'AI服务暂不可用，已展示示例试卷'
+
 export async function fetchGenerateExam(body: {
   prompt: string
   subject: string
@@ -21,21 +23,26 @@ export async function fetchGenerateExam(body: {
       try {
         const data = JSON.parse(text) as GenerateExamResponse
         if (response.ok && data.success && data.exam) {
-          return data
+          return {
+            ...data,
+            isMockFallback: data.isMockFallback ?? data.exam.source === 'mock',
+            message: data.isMockFallback ? MOCK_FALLBACK_MESSAGE : data.message,
+          }
         }
       } catch {
         // 降级本地模拟
       }
     }
   } catch {
-    // 网络错误或 Vercel 静态部署无后端，降级本地模拟
+    // 网络错误，降级本地模拟
   }
 
   await new Promise((r) => setTimeout(r, 600))
 
   return {
     success: true,
-    message: '试卷生成成功（演示模拟数据）',
+    message: MOCK_FALLBACK_MESSAGE,
+    isMockFallback: true,
     exam: buildMockPressureExam({
       subject: body.subject,
       grade: body.grade,

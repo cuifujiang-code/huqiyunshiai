@@ -5,9 +5,9 @@ import DiagnosisInputStep from '../components/diagnosis/DiagnosisInputStep'
 import DiagnosisReportView from '../components/diagnosis/DiagnosisReportView'
 import DashboardHeader from '../components/layout/DashboardHeader'
 import { useMembership } from '../context/MembershipContext'
-import { getLocalDiagnosisReport } from '../lib/fetchDiagnosis'
+import { fetchDiagnosisReport } from '../lib/fetchDiagnosis'
 import { exportToPdf } from '../lib/exportPdf'
-import type { DiagnosisFormData, DiagnosisReport } from '../types/diagnosis'
+import type { DiagnosisFormData, DiagnosisReport, DiagnosisResponse } from '../types/diagnosis'
 
 type Step = 'input' | 'analyzing' | 'report'
 
@@ -26,6 +26,7 @@ export default function StudentDiagnosisPage() {
   const navigate = useNavigate()
   const { checkDiagnosis, deductDiagnosisCredit } = useMembership()
   const reportRef = useRef<HTMLDivElement>(null)
+  const fetchPromiseRef = useRef<Promise<DiagnosisResponse> | null>(null)
 
   const [step, setStep] = useState<Step>('input')
   const [form, setForm] = useState<DiagnosisFormData>(defaultForm)
@@ -34,6 +35,7 @@ export default function StudentDiagnosisPage() {
   const [exporting, setExporting] = useState(false)
   const [planTasks, setPlanTasks] = useState<Record<string, boolean>>({})
   const [notice, setNotice] = useState<string | null>(null)
+  const [noticeWarning, setNoticeWarning] = useState(false)
   const [quotaError, setQuotaError] = useState<string | null>(null)
 
   const handleSubmit = () => {
@@ -47,16 +49,27 @@ export default function StudentDiagnosisPage() {
     setQuotaError(null)
     setSubmitting(true)
     setNotice(null)
+    setNoticeWarning(false)
+    fetchPromiseRef.current = fetchDiagnosisReport(form)
     setStep('analyzing')
   }
 
-  const handleAnalyzingComplete = useCallback(() => {
+  const handleAnalyzingComplete = useCallback(async () => {
     deductDiagnosisCredit()
-    const data = getLocalDiagnosisReport(form)
-    setReport(data.report!)
-    setNotice(data.message ?? null)
-    setStep('report')
-    setSubmitting(false)
+    try {
+      const data = await (fetchPromiseRef.current ?? fetchDiagnosisReport(form))
+      setReport(data.report!)
+      setNotice(data.message ?? null)
+      setNoticeWarning(!!data.isMockFallback)
+      setStep('report')
+    } catch {
+      setNotice('诊断报告生成失败，请稍后重试')
+      setNoticeWarning(true)
+      setStep('input')
+    } finally {
+      setSubmitting(false)
+      fetchPromiseRef.current = null
+    }
   }, [form, deductDiagnosisCredit])
 
   const handleToggleTask = (taskId: string) => {
@@ -98,7 +111,13 @@ export default function StudentDiagnosisPage() {
           </div>
         )}
         {notice && step === 'report' && (
-          <p className="mb-4 rounded-lg border border-blue-500/30 bg-blue-500/10 px-3 py-2 text-sm text-blue-200">
+          <p
+            className={`mb-4 rounded-lg border px-3 py-2 text-sm ${
+              noticeWarning
+                ? 'border-amber-500/40 bg-amber-500/15 text-amber-200'
+                : 'border-blue-500/30 bg-blue-500/10 text-blue-200'
+            }`}
+          >
             {notice}
           </p>
         )}

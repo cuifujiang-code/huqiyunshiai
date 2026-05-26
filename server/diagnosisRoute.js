@@ -1,4 +1,4 @@
-import { buildMockDiagnosisReport } from './mockDiagnosisData.js'
+import { generateDiagnosis } from './diagnosisGenerator.js'
 
 export function registerDiagnosisRoute(app) {
   app.post('/api/diagnosis/generate', async (req, res) => {
@@ -11,21 +11,27 @@ export function registerDiagnosisRoute(app) {
       })
     }
 
-    await new Promise((r) => setTimeout(r, 500))
+    try {
+      const form = {
+        examType,
+        subject,
+        score: Number(score),
+        fullScore: Number(fullScore) || 100,
+        gradeRank: gradeRank != null ? Number(gradeRank) : undefined,
+        confusion: confusion?.trim() || '',
+      }
 
-    const report = buildMockDiagnosisReport({
-      score: Number(score),
-      fullScore: Number(fullScore) || 100,
-      gradeRank: gradeRank ? Number(gradeRank) : undefined,
-      examType,
-      subject,
-      confusion,
-    })
+      const result = await generateDiagnosis(form)
 
-    return res.json({
-      success: true,
-      message: '诊断报告生成成功',
-      report,
-    })
+      return res.json({
+        success: true,
+        message: result.message,
+        report: result.report,
+        isMockFallback: result.isMockFallback,
+      })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '诊断报告生成失败'
+      return res.status(500).json({ success: false, message })
+    }
   })
 }

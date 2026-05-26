@@ -6,6 +6,7 @@ interface ExamPreviewPanelProps {
   loading: boolean
   message: string | null
   isError?: boolean
+  isWarning?: boolean
   paperRef: React.RefObject<HTMLDivElement | null>
   onExportPdf: () => void
   onSave: () => void
@@ -47,6 +48,7 @@ export default function ExamPreviewPanel({
   loading,
   message,
   isError = false,
+  isWarning = false,
   paperRef,
   onExportPdf,
   onSave,
@@ -71,7 +73,9 @@ export default function ExamPreviewPanel({
           className={`mb-4 rounded-lg border px-3 py-2 text-sm ${
             isError
               ? 'border-red-500/30 bg-red-500/10 text-red-300'
-              : 'border-blue-500/30 bg-blue-500/10 text-blue-200'
+              : isWarning
+                ? 'border-amber-500/40 bg-amber-500/15 text-amber-200'
+                : 'border-blue-500/30 bg-blue-500/10 text-blue-200'
           }`}
         >
           {message}
