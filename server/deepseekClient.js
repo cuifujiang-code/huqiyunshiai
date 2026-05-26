@@ -30,14 +30,15 @@ export function getDeepSeekConfig() {
   const apiKey = process.env.DEEPSEEK_API_KEY
   const apiBase = (process.env.DEEPSEEK_API_BASE_URL || 'https://api.deepseek.com').replace(/\/$/, '')
   const model = process.env.DEEPSEEK_MODEL || 'deepseek-chat'
-  const visionModel = process.env.DEEPSEEK_VISION_MODEL || model
+  const visionModelEnv = process.env.DEEPSEEK_VISION_MODEL?.trim() || ''
   const url = apiBase.includes('/chat/completions') ? apiBase : `${apiBase}/chat/completions`
 
   return {
     apiKey,
     apiBase,
     model,
-    visionModel,
+    visionModel: visionModelEnv,
+    visionEnabled: Boolean(visionModelEnv),
     url,
     hasApiKey: Boolean(apiKey),
   }
@@ -49,7 +50,8 @@ export function getDeepSeekConfigSummary() {
     hasApiKey: cfg.hasApiKey,
     apiBase: cfg.apiBase,
     model: cfg.model,
-    visionModel: cfg.visionModel,
+    visionModel: cfg.visionModel || cfg.model,
+    visionEnabled: cfg.visionEnabled,
     url: cfg.url,
   }
 }
@@ -204,7 +206,7 @@ export async function callDeepSeekVisionAI(systemPrompt, userPrompt, imageBase64
 
   return executeDeepSeekRequest(
     {
-      model: cfg.visionModel,
+      model: cfg.visionModel || cfg.model,
       messages: [
         { role: 'system', content: systemPrompt },
         {
@@ -222,7 +224,7 @@ export async function callDeepSeekVisionAI(systemPrompt, userPrompt, imageBase64
       max_tokens: 8192,
       stream: false,
     },
-    { label: 'DeepSeek Vision', model: cfg.visionModel },
+    { label: 'DeepSeek Vision', model: cfg.visionModel || cfg.model },
   )
 }
 

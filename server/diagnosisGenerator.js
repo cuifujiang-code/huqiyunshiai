@@ -1,5 +1,5 @@
 import { buildMockDiagnosisReport } from './mockDiagnosisData.js'
-import { callDeepSeekAI, callDeepSeekVisionAI, extractJson, serializeError } from './deepseekClient.js'
+import { callDeepSeekAI, callDeepSeekVisionAI, extractJson, getDeepSeekConfig, serializeError } from './deepseekClient.js'
 import { normalizeDiagnosisReport } from './diagnosisNormalizer.js'
 
 const MOCK_FALLBACK_MESSAGE = 'AI服务暂不可用，已展示示例诊断报告'
@@ -10,11 +10,9 @@ const SYSTEM_PROMPT =
 function buildDiagnosisPrompt(form, hasImage) {
   const imageSection = hasImage
     ? `
-【试卷图片分析要求】（已附试卷照片）
-1. 仔细识别图片中的：学生姓名/班级（如有）、每道题得分或扣分、错题题号
-2. 归纳知识点对错分布（正确/错误/部分正确）
-3. 对每道错题给出：题目摘要、学生答案、正确答案、思维断点分析
-4. 在 JSON 根节点增加 imageAnalysisSummary 字段，200字以内概括试卷整体情况
+【试卷图片说明】
+用户已上传试卷照片。请结合下方考试信息与常见试卷结构，推断可能的失分点与薄弱知识点。
+若无法从图片直接读取，请依据用户填写的分数与困惑生成尽可能具体的诊断内容，字段不得留空。
 `
     : ''
 
@@ -30,34 +28,64 @@ ${imageSection}
 【输出要求】
 1. 只返回 JSON，不要 markdown 代码块
 2. 必须包含字段：title, generatedAt(ISO时间), scoreOverview, lossAnalysis(4项百分比之和100), weakPoints(至少3项), wrongQuestions(至少2项), improvementPlan(14天每天1-2任务), recommendedExercises(至少5项)
-3. lossAnalysis 的 type 只能是 knowledge/ability/skill/psychology，每项必须有 label/percentage/color/explanation
+3. lossAnalysis 的 type 只能是 knowledge/ability/skill/psychology
 4. scoreOverview 包含 score, fullScore, gradeRank, trend(up/down/stable), trendDelta, percentile
 5. weakPoints 每项必须有 name/weight(1-5)/typicalWrong/correctSolution
 6. wrongQuestions 每项必须有 content/studentAnswer/correctAnswer/thinkingBlock
-7. improvementPlan 格式：[{ "day": "Day 1", "tasks": [{ "id": "d1", "text": "任务", "completed": false }] }]
-8. recommendedExercises 每项必须有 content/type/difficulty
-9. 任何字段不得为空，若图片无法识别某信息，填写"暂无数据"并说明原因`
+7. improvementPlan 至少14天，每天1-2个任务
+8. recommendedExercises 至少5项
+9. 任何字段不得为空，无法确定时填写"暂无数据"`
+}
+
+/**
+ * 与教育规划 generatePlanning 对齐：优先 callDeepSeekAI 文本接口。
+ * 仅当配置了 DEEPSEEK_VISION_MODEL 且含图片时，才尝试视觉接口，失败则回退文本接口。
+ */
+async function invokeDiagnosisAI(form) {
+  const hasImage = Boolean(form.examImageBase64)
+  const userPrompt = buildDiagnosisPrompt(form, hasImage)
+  const cfg = getDeepSeekConfig()
+  const tryVision = hasImage && cfg.visionEnabled
+
+  console.log('[诊断生成] 调用 DeepSeek', {
+    hasImage,
+    tryVision,
+    model: cfg.model,
+    visionModel: cfg.visionModel || '(未配置，使用文本API)',
+    promptLength: userPrompt.length,
+    imageBase64KB: hasImage ? (Buffer.byteLength(form.examImageBase64, 'utf8') / 1024).toFixed(1) : 0,
+  })
+
+  if (tryVision) {
+    try {
+      const content = await callDeepSeekVisionAI(
+        SYSTEM_PROMPT,
+        userPrompt,
+        form.examImageBase64,
+        form.examImageMimeType || 'image/jpeg',
+      )
+      return { content, mode: 'vision' }
+    } catch (visionError) {
+      console.warn('[诊断生成] 视觉 API 失败，回退文本 API（与教育规划相同）', serializeError(visionError))
+    }
+  }
+
+  const content = await callDeepSeekAI(SYSTEM_PROMPT, userPrompt)
+  return { content, mode: 'text' }
 }
 
 export async function generateDiagnosis(form) {
-  const hasImage = Boolean(form.examImageBase64)
-  const userPrompt = buildDiagnosisPrompt(form, hasImage)
-
   try {
-    const aiContent = hasImage
-      ? await callDeepSeekVisionAI(
-          SYSTEM_PROMPT,
-          userPrompt,
-          form.examImageBase64,
-          form.examImageMimeType || 'image/jpeg',
-        )
-      : await callDeepSeekAI(SYSTEM_PROMPT, userPrompt)
-
-    const parsed = JSON.parse(extractJson(aiContent))
+    const { content, mode } = await invokeDiagnosisAI(form)
+    const parsed = JSON.parse(extractJson(content))
     const report = normalizeDiagnosisReport(parsed, form)
+
     return {
       report,
-      message: hasImage ? '诊断报告生成成功（DeepSeek 试卷图片分析）' : '诊断报告生成成功（DeepSeek AI）',
+      message:
+        mode === 'vision'
+          ? '诊断报告生成成功（DeepSeek 试卷图片分析）'
+          : '诊断报告生成成功（DeepSeek AI）',
       isMockFallback: false,
     }
   } catch (error) {
