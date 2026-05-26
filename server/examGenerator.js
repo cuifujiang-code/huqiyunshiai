@@ -1,5 +1,5 @@
 import { buildMockPressureExam } from './mockExamData.js'
-import { callDeepSeekAI, extractJson } from './deepseekClient.js'
+import { callDeepSeekAI, extractJson, serializeError } from './deepseekClient.js'
 
 const EXAM_JSON_SCHEMA = `{
   "title": "试卷标题",
@@ -95,7 +95,8 @@ export async function generateExam(params) {
       isMockFallback: false,
     }
   } catch (error) {
-    console.warn('DeepSeek AI 不可用，使用演示数据:', error instanceof Error ? error.message : error)
+    const errorDetail = serializeError(error)
+    console.error('[试卷生成] DeepSeek AI 不可用，使用演示数据:', errorDetail)
     const exam = buildMockPressureExam({
       subject: params.subject,
       grade: params.grade,
@@ -105,6 +106,7 @@ export async function generateExam(params) {
       exam,
       message: MOCK_FALLBACK_MESSAGE,
       isMockFallback: true,
+      errorDetail,
     }
   }
 }

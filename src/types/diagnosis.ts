@@ -90,6 +90,10 @@ export interface DiagnosisResponse {
   message?: string
   report?: DiagnosisReport
   isMockFallback?: boolean
+  /** 调试：client-mock | server-mock | server-ai */
+  debugSource?: string
+  errorDetail?: unknown
+  deepseekConfig?: { hasApiKey: boolean; apiBase: string; model: string; url: string }
 }
 
 export const EXAM_TYPES: ExamType[] = ['单元测试', '月考', '期中考试', '期末考试', '模拟考']

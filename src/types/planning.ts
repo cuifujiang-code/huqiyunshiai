@@ -125,6 +125,10 @@ export interface PlanningResponse {
   message?: string
   report?: PlanningReport
   isMockFallback?: boolean
+  /** 调试：client-mock | server-mock | server-ai */
+  debugSource?: string
+  errorDetail?: unknown
+  deepseekConfig?: { hasApiKey: boolean; apiBase: string; model: string; url: string }
 }
 
 export interface SavedPlanningRecord {

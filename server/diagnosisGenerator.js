@@ -1,5 +1,5 @@
 import { buildMockDiagnosisReport } from './mockDiagnosisData.js'
-import { callDeepSeekAI, extractJson } from './deepseekClient.js'
+import { callDeepSeekAI, extractJson, serializeError } from './deepseekClient.js'
 
 const MOCK_FALLBACK_MESSAGE = 'AI服务暂不可用，已展示示例诊断报告'
 
@@ -69,12 +69,14 @@ export async function generateDiagnosis(form) {
       isMockFallback: false,
     }
   } catch (error) {
-    console.warn('DeepSeek AI 诊断不可用，使用演示数据:', error instanceof Error ? error.message : error)
+    const errorDetail = serializeError(error)
+    console.error('[诊断生成] DeepSeek AI 不可用，使用演示数据:', errorDetail)
     const report = { ...buildMockDiagnosisReport(form), source: 'mock' }
     return {
       report,
       message: MOCK_FALLBACK_MESSAGE,
       isMockFallback: true,
+      errorDetail,
     }
   }
 }

@@ -49,7 +49,12 @@ export default function StudentPlanningPage() {
 
     try {
       const payload = { ...form, studentName: form.studentName || displayName, createdByRole: 'student' as const }
+      console.log('[教育规划页面-学生] 提交表单，即将请求 API', {
+        url: '/api/planning/generate',
+        payload,
+      })
       const data = await fetchPlanningReport(payload)
+      console.log('[教育规划页面-学生] API 完整响应', data)
       setReport(data.report!)
       setIsWarning(!!data.isMockFallback)
       setMessage(data.message ?? '教育规划方案生成成功')

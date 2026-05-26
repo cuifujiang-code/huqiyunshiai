@@ -9,9 +9,15 @@ let cachedRules = null
 
 export function loadPlanningKnowledgeBase() {
   if (cachedRules) return cachedRules
-  const raw = readFileSync(RULES_PATH, 'utf-8')
-  cachedRules = JSON.parse(raw)
-  return cachedRules
+  try {
+    const raw = readFileSync(RULES_PATH, 'utf-8')
+    cachedRules = JSON.parse(raw)
+    return cachedRules
+  } catch (error) {
+    console.warn('无法加载教育规划知识库，使用内置默认规则:', error instanceof Error ? error.message : error)
+    cachedRules = { version: 'fallback', description: '内置默认规则（知识库文件未找到）' }
+    return cachedRules
+  }
 }
 
 export function buildKnowledgeSystemPrompt() {

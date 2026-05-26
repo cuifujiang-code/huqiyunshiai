@@ -1,5 +1,5 @@
 import { buildMockPlanningReport } from './mockPlanningData.js'
-import { callDeepSeekAI, extractJson } from './deepseekClient.js'
+import { callDeepSeekAI, extractJson, serializeError } from './deepseekClient.js'
 import { buildKnowledgeSystemPrompt } from './knowledgeBase.js'
 
 const MOCK_FALLBACK_MESSAGE = 'AI服务暂不可用，已展示示例教育规划方案'
@@ -127,12 +127,14 @@ export async function generatePlanning(form) {
       isMockFallback: false,
     }
   } catch (error) {
-    console.warn('DeepSeek AI 规划不可用，使用演示数据:', error instanceof Error ? error.message : error)
+    const errorDetail = serializeError(error)
+    console.error('[规划生成] DeepSeek AI 不可用，使用演示数据:', errorDetail)
     const report = buildMockPlanningReport(form)
     return {
       report,
       message: MOCK_FALLBACK_MESSAGE,
       isMockFallback: true,
+      errorDetail,
     }
   }
 }

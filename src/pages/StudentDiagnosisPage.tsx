@@ -50,6 +50,10 @@ export default function StudentDiagnosisPage() {
     setSubmitting(true)
     setNotice(null)
     setNoticeWarning(false)
+    console.log('[诊断页面] 提交表单，即将请求 API', {
+      url: '/api/diagnosis/generate',
+      form,
+    })
     fetchPromiseRef.current = fetchDiagnosisReport(form)
     setStep('analyzing')
   }
@@ -58,6 +62,7 @@ export default function StudentDiagnosisPage() {
     deductDiagnosisCredit()
     try {
       const data = await (fetchPromiseRef.current ?? fetchDiagnosisReport(form))
+      console.log('[诊断页面] API 完整响应', data)
       setReport(data.report!)
       setNotice(data.message ?? null)
       setNoticeWarning(!!data.isMockFallback)

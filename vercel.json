@@ -1,16 +1,20 @@
 {
   "functions": {
     "api/generate-exam.js": {
-      "maxDuration": 60
+      "maxDuration": 60,
+      "includeFiles": "server/**"
     },
     "api/diagnosis/generate.js": {
-      "maxDuration": 60
+      "maxDuration": 60,
+      "includeFiles": "server/**"
     },
     "api/planning/generate.js": {
-      "maxDuration": 60
+      "maxDuration": 60,
+      "includeFiles": "{server/**,knowledge-base/**}"
     }
   },
   "rewrites": [
+    { "source": "/api/(.*)", "destination": "/api/$1" },
     { "source": "/((?!api/).*)", "destination": "/index.html" }
   ]
 }

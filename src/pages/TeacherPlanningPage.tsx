@@ -45,7 +45,13 @@ export default function TeacherPlanningPage() {
     setSaved(false)
 
     try {
-      const data = await fetchPlanningReport({ ...form, createdByRole: 'teacher' })
+      const payload = { ...form, createdByRole: 'teacher' as const }
+      console.log('[教育规划页面-教师] 提交表单，即将请求 API', {
+        url: '/api/planning/generate',
+        payload,
+      })
+      const data = await fetchPlanningReport(payload)
+      console.log('[教育规划页面-教师] API 完整响应', data)
       setReport(data.report!)
       setIsWarning(!!data.isMockFallback)
       setMessage(data.message ?? '教育规划方案生成成功')
