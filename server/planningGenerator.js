@@ -1,0 +1,140 @@
+import { buildMockPlanningReport } from './mockPlanningData.js'
+import { callDeepSeekAI, extractJson } from './deepseekClient.js'
+import { buildKnowledgeSystemPrompt } from './knowledgeBase.js'
+
+const MOCK_FALLBACK_MESSAGE = 'AI服务暂不可用，已展示示例教育规划方案'
+
+const PLANNING_JSON_SCHEMA = `{
+  "title": "规划方案标题",
+  "generatedAt": "ISO8601时间",
+  "studentProfile": {
+    "name": "姓名",
+    "grade": "年级",
+    "scoreLevel": "成绩水平",
+    "goalDirections": ["目标方向"],
+    "interests": ["兴趣标签"],
+    "parentExpectations": "家长期望",
+    "specialNotes": "特殊需求"
+  },
+  "abilityDimensions": [
+    { "label": "逻辑思维|语言表达|数理能力|创新能力|应试技巧|自主学习", "score": 0-100 }
+  ],
+  "stageGoals": [
+    {
+      "period": "时间段",
+      "phase": "阶段名称",
+      "coreTasks": ["核心任务"],
+      "expectedOutcomes": ["预期成果"]
+    }
+  ],
+  "subjectPaths": [
+    {
+      "subject": "学科",
+      "importance": 1-5,
+      "timePercent": 百分比数字,
+      "keyKnowledgePoints": ["知识点"],
+      "resourceTypes": ["资源类型"]
+    }
+  ],
+  "phaseTasks": [
+    {
+      "phase": "学期/阶段",
+      "tasks": [
+        {
+          "name": "任务名称",
+          "criteria": "完成标准",
+          "duration": "建议时长",
+          "knowledgePoints": ["关联知识点"],
+          "relatedExercises": ["关联试卷/练习"]
+        }
+      ]
+    }
+  ],
+  "milestones": [
+    { "date": "时间", "event": "节点事件", "preparationAdvice": "准备建议" }
+  ],
+  "risks": [
+    { "risk": "风险描述", "impact": "高|中|低", "mitigation": "备选方案或补救措施" }
+  ]
+}`
+
+function buildUserPrompt(form) {
+  return `请为以下学生生成完整的教育规划方案 JSON。
+
+【学生信息】
+- 姓名：${form.studentName}
+- 年级：${form.grade}
+- 目标方向：${(form.goalDirections ?? []).join('、') || '未指定'}
+- 当前成绩水平：${form.scoreLevel}
+- 兴趣标签：${(form.interests ?? []).join('、') || '未填写'}
+- 家长期望：${form.parentExpectations || '未填写'}
+- 特殊需求：${form.specialNotes || '无'}
+- 规划发起角色：${form.createdByRole === 'teacher' ? '教师' : '学生本人'}
+
+【输出要求】
+1. 只返回 JSON，不要 markdown 代码块
+2. 严格遵循以下结构（6大模块全部包含）：
+${PLANNING_JSON_SCHEMA}
+3. abilityDimensions 必须包含6个维度且 score 为 0-100 整数
+4. stageGoals 至少3个节点，形成时间轴
+5. subjectPaths 至少4个学科
+6. phaseTasks 至少2个阶段，每阶段至少2个任务
+7. milestones 至少4个关键节点
+8. risks 至少2条，需结合该生实际情况`
+}
+
+function normalizeReport(raw, form) {
+  if (!raw?.title || !raw?.studentProfile || !Array.isArray(raw.stageGoals)) {
+    throw new Error('AI 返回的规划方案格式不完整')
+  }
+
+  const fallback = buildMockPlanningReport(form)
+
+  return {
+    title: raw.title || fallback.title,
+    generatedAt: raw.generatedAt || new Date().toISOString(),
+    studentProfile: {
+      ...fallback.studentProfile,
+      ...raw.studentProfile,
+      name: raw.studentProfile?.name || form.studentName,
+      grade: raw.studentProfile?.grade || form.grade,
+    },
+    abilityDimensions:
+      Array.isArray(raw.abilityDimensions) && raw.abilityDimensions.length >= 5
+        ? raw.abilityDimensions.map((d) => ({
+            label: d.label,
+            score: Math.min(100, Math.max(0, Number(d.score) || 0)),
+          }))
+        : fallback.abilityDimensions,
+    stageGoals: raw.stageGoals?.length >= 2 ? raw.stageGoals : fallback.stageGoals,
+    subjectPaths: raw.subjectPaths?.length >= 3 ? raw.subjectPaths : fallback.subjectPaths,
+    phaseTasks: raw.phaseTasks?.length >= 1 ? raw.phaseTasks : fallback.phaseTasks,
+    milestones: raw.milestones?.length >= 2 ? raw.milestones : fallback.milestones,
+    risks: raw.risks?.length >= 1 ? raw.risks : fallback.risks,
+    source: 'ai',
+  }
+}
+
+export async function generatePlanning(form) {
+  try {
+    const systemPrompt = buildKnowledgeSystemPrompt()
+    const aiContent = await callDeepSeekAI(systemPrompt, buildUserPrompt(form))
+    const parsed = JSON.parse(extractJson(aiContent))
+    const report = normalizeReport(parsed, form)
+    return {
+      report,
+      message: '教育规划方案生成成功（DeepSeek AI）',
+      isMockFallback: false,
+    }
+  } catch (error) {
+    console.warn('DeepSeek AI 规划不可用，使用演示数据:', error instanceof Error ? error.message : error)
+    const report = buildMockPlanningReport(form)
+    return {
+      report,
+      message: MOCK_FALLBACK_MESSAGE,
+      isMockFallback: true,
+    }
+  }
+}
+
+export { MOCK_FALLBACK_MESSAGE }

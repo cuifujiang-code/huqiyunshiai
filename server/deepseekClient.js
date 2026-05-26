@@ -1,13 +1,13 @@
 /**
- * 七牛云 AI 统一调用客户端
+ * DeepSeek API 统一调用客户端（OpenAI 兼容格式）
  */
-export async function callQiniuAI(systemPrompt, userPrompt) {
-  const apiKey = process.env.QINIUAI_API_KEY
-  const apiBase = (process.env.QINIUAI_API_URL || 'https://api.qnaigc.com/v1').replace(/\/$/, '')
-  const model = process.env.QINIUAI_MODEL || 'deepseek-v3'
+export async function callDeepSeekAI(systemPrompt, userPrompt) {
+  const apiKey = process.env.DEEPSEEK_API_KEY
+  const apiBase = (process.env.DEEPSEEK_API_BASE_URL || 'https://api.deepseek.com').replace(/\/$/, '')
+  const model = process.env.DEEPSEEK_MODEL || 'deepseek-chat'
 
   if (!apiKey) {
-    throw new Error('QINIUAI_API_KEY 未配置')
+    throw new Error('DEEPSEEK_API_KEY 未配置')
   }
 
   const url = apiBase.includes('/chat/completions') ? apiBase : `${apiBase}/chat/completions`
@@ -33,12 +33,12 @@ export async function callQiniuAI(systemPrompt, userPrompt) {
 
   if (!response.ok) {
     const errText = await response.text()
-    throw new Error(`七牛云 AI 请求失败 (${response.status}): ${errText.slice(0, 200)}`)
+    throw new Error(`DeepSeek API 请求失败 (${response.status}): ${errText.slice(0, 200)}`)
   }
 
   const data = await response.json()
   const content = data?.choices?.[0]?.message?.content
-  if (!content) throw new Error('七牛云 AI 未返回有效内容')
+  if (!content) throw new Error('DeepSeek API 未返回有效内容')
   return content
 }
 

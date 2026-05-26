@@ -94,9 +94,36 @@ export default function TeacherDashboard() {
 
   return (
     <div className="min-h-screen bg-slate-950 text-white">
-      <DashboardHeader title="AI智能出题 · 教师工作台" />
+      <DashboardHeader title="AI智能出题 · 教师工作台" featureNavRole="teacher" />
 
       <main className="mx-auto max-w-[1600px] px-4 py-6 sm:px-6 sm:py-8">
+        <section className="mb-6 grid gap-4 sm:grid-cols-2">
+          <div className="rounded-2xl border-2 border-cyan-400/40 bg-cyan-500/10 p-5 shadow-lg shadow-cyan-900/20">
+            <div className="flex items-center gap-3">
+              <span className="text-3xl">📝</span>
+              <div>
+                <h3 className="font-semibold text-cyan-200">AI智能出题</h3>
+                <p className="mt-1 text-xs text-slate-400">当前功能 · 生成试卷与导出 PDF</p>
+              </div>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => navigate('/teacher/planning')}
+            className="group rounded-2xl border border-blue-500/30 bg-slate-900/60 p-5 text-left transition hover:-translate-y-0.5 hover:border-cyan-400/50 hover:bg-blue-500/10 hover:shadow-lg hover:shadow-blue-900/20"
+          >
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <span className="text-3xl">🎯</span>
+                <div>
+                  <h3 className="font-semibold text-blue-100 group-hover:text-cyan-200">AI教育规划</h3>
+                  <p className="mt-1 text-xs text-slate-400">为学生生成个性化培养路径与阶段任务</p>
+                </div>
+              </div>
+              <span className="shrink-0 text-cyan-400 transition group-hover:translate-x-1">→</span>
+            </div>
+          </button>
+        </section>
         {message && isError && message.includes('会员') && (
           <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
             <span>{message}</span>

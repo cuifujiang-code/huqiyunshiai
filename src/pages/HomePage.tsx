@@ -16,9 +16,15 @@ const FEATURES = [
     tag: '学生核心功能',
   },
   {
+    icon: '🎯',
+    title: 'AI教育规划',
+    desc: '基于学生画像生成个性化培养路径，拆解阶段性目标与任务，覆盖中考、高考、竞赛等多元升学方向。',
+    tag: '教师 & 学生',
+  },
+  {
     icon: '📁',
     title: '教学资产管理',
-    desc: '试卷自动保存至个人题库，诊断报告可存档分享，会员方案灵活订阅，助力教学全流程数字化。',
+    desc: '试卷自动保存至个人题库，规划与诊断报告可存档分享，会员方案灵活订阅，助力教学全流程数字化。',
     tag: '教师 & 学生',
   },
 ]
@@ -71,7 +77,7 @@ export default function HomePage() {
             </span>
           </h1>
           <p className="mx-auto mt-6 max-w-2xl text-base leading-relaxed text-slate-400 sm:text-lg">
-            AI助教 + 学情诊断 + 志愿规划，为每位教师打造的专属 AI 教学助手
+            AI助教 + 学情诊断 + 教育规划，为每位师生打造的专属 AI 教学助手
           </p>
           <div className="mt-10 flex flex-col items-center justify-center gap-4 sm:flex-row">
             <Link
@@ -81,10 +87,10 @@ export default function HomePage() {
               我是教师，开始使用
             </Link>
             <Link
-              to={loginHref('student', '/student/diagnosis')}
+              to={loginHref('student', '/student/dashboard')}
               className="w-full rounded-xl border border-blue-400/50 bg-blue-500/10 px-8 py-4 text-base font-semibold text-blue-100 transition hover:border-cyan-400/60 hover:bg-blue-500/20 sm:w-auto"
             >
-              我是学生，查看诊断
+              我是学生，进入学习中心
             </Link>
           </div>
         </div>
@@ -92,9 +98,9 @@ export default function HomePage() {
 
       <section id="features" className="border-t border-blue-500/10 bg-slate-900/30 px-4 py-16 sm:px-6 sm:py-20">
         <div className="mx-auto max-w-6xl">
-          <h2 className="text-center text-2xl font-bold text-blue-100 sm:text-3xl">三大核心功能</h2>
-          <p className="mt-2 text-center text-slate-400">覆盖出题、诊断、资产管理的完整教学闭环</p>
-          <div className="mt-10 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+          <h2 className="text-center text-2xl font-bold text-blue-100 sm:text-3xl">四大核心功能</h2>
+          <p className="mt-2 text-center text-slate-400">覆盖出题、诊断、规划、资产管理的完整教学闭环</p>
+          <div className="mt-10 grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
             {FEATURES.map((f) => (
               <div
                 key={f.title}

@@ -4,7 +4,7 @@ import { buildLocalDiagnosisReport } from '../data/mockDiagnosisReport'
 const MOCK_FALLBACK_MESSAGE = 'AI服务暂不可用，已展示示例诊断报告'
 
 /**
- * 获取诊断报告：优先请求后端 /api/diagnosis/generate（七牛云 AI），
+ * 获取诊断报告：优先请求后端 /api/diagnosis/generate（DeepSeek AI），
  * 失败时自动降级为前端本地模拟数据。
  */
 export async function fetchDiagnosisReport(form: DiagnosisFormData): Promise<DiagnosisResponse> {

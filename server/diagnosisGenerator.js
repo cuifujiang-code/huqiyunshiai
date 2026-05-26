@@ -1,5 +1,5 @@
 import { buildMockDiagnosisReport } from './mockDiagnosisData.js'
-import { callQiniuAI, extractJson } from './qiniuClient.js'
+import { callDeepSeekAI, extractJson } from './deepseekClient.js'
 
 const MOCK_FALLBACK_MESSAGE = 'AI服务暂不可用，已展示示例诊断报告'
 
@@ -57,7 +57,7 @@ function normalizeReport(raw, form) {
 
 export async function generateDiagnosis(form) {
   try {
-    const aiContent = await callQiniuAI(
+    const aiContent = await callDeepSeekAI(
       '你是专业的 K12 学情诊断专家，只输出合法 JSON，不使用 markdown 格式。',
       buildDiagnosisPrompt(form),
     )
@@ -65,11 +65,11 @@ export async function generateDiagnosis(form) {
     const report = normalizeReport(parsed, form)
     return {
       report,
-      message: '诊断报告生成成功（七牛云 AI）',
+      message: '诊断报告生成成功（DeepSeek AI）',
       isMockFallback: false,
     }
   } catch (error) {
-    console.warn('七牛云 AI 诊断不可用，使用演示数据:', error instanceof Error ? error.message : error)
+    console.warn('DeepSeek AI 诊断不可用，使用演示数据:', error instanceof Error ? error.message : error)
     const report = { ...buildMockDiagnosisReport(form), source: 'mock' }
     return {
       report,

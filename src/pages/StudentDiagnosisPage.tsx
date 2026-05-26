@@ -95,7 +95,7 @@ export default function StudentDiagnosisPage() {
 
   return (
     <div className="min-h-screen bg-slate-950 text-white">
-      <DashboardHeader title="AI学习诊断" backTo="/student/dashboard" backLabel="返回学习中心" />
+      <DashboardHeader title="AI学习诊断" backTo="/student/dashboard" backLabel="返回学习中心" featureNavRole="student" />
 
       <main className="mx-auto max-w-4xl px-4 py-6 sm:py-8">
         {quotaError && step === 'input' && (

@@ -4,6 +4,7 @@ import cors from 'cors'
 import { ensureMockUser } from './mockAuth.js'
 import { registerGenerateExamRoute } from './generateExamRoute.js'
 import { registerDiagnosisRoute } from './diagnosisRoute.js'
+import { registerPlanningRoute } from './planningRoute.js'
 
 const app = express()
 const PORT = process.env.PORT || 3001
@@ -17,6 +18,7 @@ app.get('/api/health', (_req, res) => {
 
 registerGenerateExamRoute(app)
 registerDiagnosisRoute(app)
+registerPlanningRoute(app)
 
 app.post('/api/auth/ensure-mock-user', async (req, res) => {
   const { phone, role } = req.body ?? {}
@@ -42,25 +44,34 @@ app.post('/api/auth/ensure-mock-user', async (req, res) => {
   }
 })
 
-app.get('/api/qiniu/test', async (_req, res) => {
-  const apiKey = process.env.QINIUAI_API_KEY
-  const apiUrl = process.env.QINIUAI_API_URL || 'https://api.qiniu.com'
+app.get('/api/deepseek/test', async (_req, res) => {
+  const apiKey = process.env.DEEPSEEK_API_KEY
+  const apiBase = (process.env.DEEPSEEK_API_BASE_URL || 'https://api.deepseek.com').replace(/\/$/, '')
+  const model = process.env.DEEPSEEK_MODEL || 'deepseek-chat'
 
   if (!apiKey) {
     return res.status(400).json({
       success: false,
-      message: 'QINIUAI_API_KEY 未配置，请在 .env 文件中设置',
+      message: 'DEEPSEEK_API_KEY 未配置，请在 .env 或 Vercel 环境变量中设置',
     })
   }
 
+  const url = apiBase.includes('/chat/completions') ? apiBase : `${apiBase}/chat/completions`
+
   try {
-    const response = await fetch(apiUrl, {
-      method: 'GET',
+    const response = await fetch(url, {
+      method: 'POST',
       headers: {
         Authorization: `Bearer ${apiKey}`,
         'Content-Type': 'application/json',
       },
-      signal: AbortSignal.timeout(10000),
+      body: JSON.stringify({
+        model,
+        messages: [{ role: 'user', content: '回复：ok' }],
+        max_tokens: 8,
+        stream: false,
+      }),
+      signal: AbortSignal.timeout(15000),
     })
 
     const bodyText = await response.text()
@@ -75,16 +86,17 @@ app.get('/api/qiniu/test', async (_req, res) => {
       success: response.ok,
       status: response.status,
       statusText: response.statusText,
+      model,
       message: response.ok
-        ? '七牛云 API 联通成功'
-        : `七牛云 API 返回 ${response.status}，请检查密钥与接口地址`,
+        ? 'DeepSeek API 联通成功'
+        : `DeepSeek API 返回 ${response.status}，请检查密钥、Base URL 与模型名称`,
       data: body,
     })
   } catch (error) {
     const message = error instanceof Error ? error.message : '未知错误'
     return res.status(502).json({
       success: false,
-      message: `请求七牛云失败：${message}`,
+      message: `请求 DeepSeek 失败：${message}`,
     })
   }
 })

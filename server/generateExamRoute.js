@@ -2,7 +2,7 @@ import { generateExam } from './examGenerator.js'
 
 /**
  * POST /api/generate-exam
- * 优先调用七牛云 AI 生成试卷，失败时降级为模拟数据
+ * 优先调用 DeepSeek AI 生成试卷，失败时降级为模拟数据
  */
 export function registerGenerateExamRoute(app) {
   app.post('/api/generate-exam', async (req, res) => {

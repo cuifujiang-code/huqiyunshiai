@@ -8,7 +8,9 @@ import HomePage from './pages/HomePage'
 import MemberCenterPage from './pages/MemberCenterPage'
 import StudentDashboard from './pages/StudentDashboard'
 import StudentDiagnosisPage from './pages/StudentDiagnosisPage'
+import StudentPlanningPage from './pages/StudentPlanningPage'
 import TeacherDashboard from './pages/TeacherDashboard'
+import TeacherPlanningPage from './pages/TeacherPlanningPage'
 
 export default function App() {
   return (
@@ -26,32 +28,48 @@ export default function App() {
                 </ProtectedRouteAuth>
               }
             />
-          <Route
-            path="/teacher/dashboard"
-            element={
-              <ProtectedRoute requiredRole="teacher">
-                <TeacherDashboard />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/student/diagnosis"
-            element={
-              <ProtectedRoute requiredRole="student">
-                <StudentDiagnosisPage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/student/dashboard"
-            element={
-              <ProtectedRoute requiredRole="student">
-                <StudentDashboard />
-              </ProtectedRoute>
-            }
-          />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
+            <Route
+              path="/teacher/dashboard"
+              element={
+                <ProtectedRoute requiredRole="teacher">
+                  <TeacherDashboard />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/teacher/planning"
+              element={
+                <ProtectedRoute requiredRole="teacher">
+                  <TeacherPlanningPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/student/dashboard"
+              element={
+                <ProtectedRoute requiredRole="student">
+                  <StudentDashboard />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/student/diagnosis"
+              element={
+                <ProtectedRoute requiredRole="student">
+                  <StudentDiagnosisPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/student/planning"
+              element={
+                <ProtectedRoute requiredRole="student">
+                  <StudentPlanningPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
         </MembershipProvider>
       </AuthProvider>
     </BrowserRouter>

@@ -1,5 +1,5 @@
 import { buildMockPressureExam } from './mockExamData.js'
-import { callQiniuAI, extractJson } from './qiniuClient.js'
+import { callDeepSeekAI, extractJson } from './deepseekClient.js'
 
 const EXAM_JSON_SCHEMA = `{
   "title": "试卷标题",
@@ -83,7 +83,7 @@ export async function generateExam(params) {
 
   try {
     const aiPrompt = buildPrompt(params)
-    const aiContent = await callQiniuAI(
+    const aiContent = await callDeepSeekAI(
       '你是专业的 K12 试卷出题专家，只输出合法 JSON，不使用 markdown 格式。',
       aiPrompt,
     )
@@ -91,11 +91,11 @@ export async function generateExam(params) {
     const exam = normalizeExam(parsed, meta)
     return {
       exam,
-      message: '试卷生成成功（七牛云 AI）',
+      message: '试卷生成成功（DeepSeek AI）',
       isMockFallback: false,
     }
   } catch (error) {
-    console.warn('七牛云 AI 不可用，使用演示数据:', error instanceof Error ? error.message : error)
+    console.warn('DeepSeek AI 不可用，使用演示数据:', error instanceof Error ? error.message : error)
     const exam = buildMockPressureExam({
       subject: params.subject,
       grade: params.grade,

@@ -5,6 +5,9 @@
     },
     "api/diagnosis/generate.js": {
       "maxDuration": 60
+    },
+    "api/planning/generate.js": {
+      "maxDuration": 60
     }
   },
   "rewrites": [
