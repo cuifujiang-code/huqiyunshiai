@@ -4,6 +4,10 @@ export type ApiPostResult<T> =
   | { kind: 'success'; data: T; status: number; url: string }
   | { kind: 'fallback'; reason: string; status?: number; bodyPreview?: string; url: string }
 
+export interface ApiRequestOptions {
+  method?: 'GET' | 'POST'
+}
+
 function isHtmlResponse(contentType: string, text: string) {
   const trimmed = text.trimStart().toLowerCase()
   return (
@@ -19,26 +23,28 @@ function looksLikeJson(text: string) {
 }
 
 /**
- * 统一 POST JSON 请求：校验 Content-Type，避免将 index.html 误判为 API 成功。
+ * 统一 JSON API 请求：校验 Content-Type，避免将 index.html 误判为 API 成功。
  */
 export async function postApiJson<T>(
   path: string,
   body: unknown,
   label: string,
+  options: ApiRequestOptions = {},
 ): Promise<ApiPostResult<T>> {
+  const method = options.method ?? 'POST'
   const url = `${typeof window !== 'undefined' ? window.location.origin : ''}${path}`
 
-  console.log(`${LOG_PREFIX} [${label}] 发起请求`, { url, method: 'POST', body })
+  console.log(`${LOG_PREFIX} [${label}] 发起请求`, { url, method, body: method === 'GET' ? undefined : body })
 
   let response: Response
   try {
     response = await fetch(path, {
-      method: 'POST',
+      method,
       headers: {
-        'Content-Type': 'application/json',
         Accept: 'application/json',
+        ...(method === 'POST' ? { 'Content-Type': 'application/json' } : {}),
       },
-      body: JSON.stringify(body),
+      body: method === 'POST' && body != null ? JSON.stringify(body) : undefined,
     })
   } catch (err) {
     const reason = `网络错误: ${err instanceof Error ? err.message : String(err)}`

@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import DiagnosisAnalyzingStep from '../components/diagnosis/DiagnosisAnalyzingStep'
 import DiagnosisInputStep from '../components/diagnosis/DiagnosisInputStep'
@@ -7,11 +7,9 @@ import DashboardHeader from '../components/layout/DashboardHeader'
 import { useMembership } from '../context/MembershipContext'
 import { fetchDiagnosisReport } from '../lib/fetchDiagnosis'
 import { exportToPdf } from '../lib/exportPdf'
-import type { DiagnosisFormData, DiagnosisReport, DiagnosisResponse } from '../types/diagnosis'
+import type { DiagnosisFormData, DiagnosisReport } from '../types/diagnosis'
 
 type Step = 'input' | 'analyzing' | 'report'
-
-const LOADING_MS = 2000
 
 const defaultForm: DiagnosisFormData = {
   examType: '期中考试',
@@ -26,23 +24,22 @@ export default function StudentDiagnosisPage() {
   const navigate = useNavigate()
   const { checkDiagnosis, deductDiagnosisCredit } = useMembership()
   const reportRef = useRef<HTMLDivElement>(null)
-  const fetchPromiseRef = useRef<Promise<DiagnosisResponse> | null>(null)
 
   const [step, setStep] = useState<Step>('input')
   const [form, setForm] = useState<DiagnosisFormData>(defaultForm)
   const [report, setReport] = useState<DiagnosisReport | null>(null)
   const [submitting, setSubmitting] = useState(false)
+  const [analyzingMessage, setAnalyzingMessage] = useState('AI正在分析你的学习数据...')
   const [exporting, setExporting] = useState(false)
   const [planTasks, setPlanTasks] = useState<Record<string, boolean>>({})
   const [notice, setNotice] = useState<string | null>(null)
   const [noticeWarning, setNoticeWarning] = useState(false)
   const [quotaError, setQuotaError] = useState<string | null>(null)
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     const permission = checkDiagnosis()
     if (!permission.allowed) {
       setQuotaError(permission.reason ?? '诊断次数不足，请前往会员中心购买')
-      setSubmitting(false)
       return
     }
 
@@ -50,32 +47,35 @@ export default function StudentDiagnosisPage() {
     setSubmitting(true)
     setNotice(null)
     setNoticeWarning(false)
-    console.log('[诊断页面] 提交表单，即将请求 API', {
-      url: '/api/diagnosis/generate',
-      form,
-    })
-    fetchPromiseRef.current = fetchDiagnosisReport(form)
+    setAnalyzingMessage(form.examImageBase64 ? '正在上传并分析试卷...' : 'AI正在分析你的学习数据...')
     setStep('analyzing')
-  }
 
-  const handleAnalyzingComplete = useCallback(async () => {
-    deductDiagnosisCredit()
+    console.log('[诊断页面] 提交表单', {
+      url: '/api/diagnosis/generate',
+      hasImage: Boolean(form.examImageBase64),
+      imageSize: form.photoSizeBytes,
+    })
+
     try {
-      const data = await (fetchPromiseRef.current ?? fetchDiagnosisReport(form))
+      const data = await fetchDiagnosisReport(form, {
+        onProgress: (msg) => setAnalyzingMessage(msg),
+      })
       console.log('[诊断页面] API 完整响应', data)
+
+      deductDiagnosisCredit()
       setReport(data.report!)
       setNotice(data.message ?? null)
       setNoticeWarning(!!data.isMockFallback)
       setStep('report')
-    } catch {
-      setNotice('诊断报告生成失败，请稍后重试')
+    } catch (err) {
+      console.error('[诊断页面] 失败', err)
+      setNotice(err instanceof Error ? err.message : '诊断报告生成失败，请稍后重试')
       setNoticeWarning(true)
       setStep('input')
     } finally {
       setSubmitting(false)
-      fetchPromiseRef.current = null
     }
-  }, [form, deductDiagnosisCredit])
+  }
 
   const handleToggleTask = (taskId: string) => {
     setPlanTasks((prev) => ({ ...prev, [taskId]: !prev[taskId] }))
@@ -130,7 +130,7 @@ export default function StudentDiagnosisPage() {
           <DiagnosisInputStep form={form} onChange={setForm} onSubmit={handleSubmit} loading={submitting} />
         )}
         {step === 'analyzing' && (
-          <DiagnosisAnalyzingStep onComplete={handleAnalyzingComplete} durationMs={LOADING_MS} />
+          <DiagnosisAnalyzingStep message={analyzingMessage} hasImage={Boolean(form.examImageBase64)} />
         )}
         {step === 'report' && report && (
           <DiagnosisReportView

@@ -18,6 +18,11 @@ export interface DiagnosisFormData {
   gradeRank?: number
   confusion: string
   photoName?: string
+  /** 压缩后的试卷图片 Base64（不含 data: 前缀） */
+  examImageBase64?: string
+  examImageMimeType?: string
+  photoPreviewUrl?: string
+  photoSizeBytes?: number
 }
 
 export interface LossReasonItem {
@@ -83,6 +88,8 @@ export interface DiagnosisReport {
   wrongQuestions: WrongQuestionAnalysis[]
   improvementPlan: PlanDay[]
   recommendedExercises: RecommendedExercise[]
+  imageAnalysisSummary?: string
+  source?: 'ai' | 'mock'
 }
 
 export interface DiagnosisResponse {
@@ -93,7 +100,10 @@ export interface DiagnosisResponse {
   /** 调试：client-mock | server-mock | server-ai */
   debugSource?: string
   errorDetail?: unknown
-  deepseekConfig?: { hasApiKey: boolean; apiBase: string; model: string; url: string }
+  deepseekConfig?: { hasApiKey: boolean; apiBase: string; model: string; visionModel?: string; url: string }
+  async?: boolean
+  jobId?: string
+  status?: 'processing' | 'done' | 'failed' | 'not_found'
 }
 
 export const EXAM_TYPES: ExamType[] = ['单元测试', '月考', '期中考试', '期末考试', '模拟考']

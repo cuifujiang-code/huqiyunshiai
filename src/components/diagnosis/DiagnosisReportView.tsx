@@ -28,6 +28,12 @@ export default function DiagnosisReportView({
       <div className="rounded-2xl border border-blue-500/20 bg-slate-900/60 p-4 text-center sm:p-5">
         <h2 className="text-xl font-bold text-blue-100 sm:text-2xl">{report.title}</h2>
         <p className="mt-1 text-xs text-slate-500">生成时间：{new Date(report.generatedAt).toLocaleString('zh-CN')}</p>
+        {report.imageAnalysisSummary && report.imageAnalysisSummary !== '暂无数据' && (
+          <p className="mt-3 rounded-lg bg-blue-500/10 px-3 py-2 text-left text-sm leading-relaxed text-slate-300">
+            <span className="font-medium text-cyan-300">试卷图片分析：</span>
+            {report.imageAnalysisSummary}
+          </p>
+        )}
       </div>
       <ScoreOverviewCard overview={report.scoreOverview} />
       <LossAnalysisCard items={report.lossAnalysis} />

@@ -8,6 +8,10 @@
       "maxDuration": 60,
       "includeFiles": "server/**"
     },
+    "api/diagnosis/job.js": {
+      "maxDuration": 10,
+      "includeFiles": "server/**"
+    },
     "api/planning/generate.js": {
       "maxDuration": 60,
       "includeFiles": "{server/**,knowledge-base/**}"
