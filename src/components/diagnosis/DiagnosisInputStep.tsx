@@ -1,19 +1,22 @@
-import { useState } from 'react'
-import type { DiagnosisFormData, DiagnosisSubject, ExamImageItem, ExamType } from '../../types/diagnosis'
+import { useCallback, useState } from 'react'
+import type {
+  AnswerSheetImage,
+  DiagnosisFormData,
+  DiagnosisSubject,
+  ExamFileItem,
+  ExamType,
+} from '../../types/diagnosis'
 import { DIAGNOSIS_SUBJECTS, EXAM_TYPES } from '../../types/diagnosis'
 import {
-  MAX_EXAM_IMAGES,
-  MAX_TOTAL_IMAGES_BYTES,
-  compressExamImage,
+  MAX_ANSWER_SHEET_COUNT,
+  compressAnswerSheetIfNeeded,
+  fileToBase64,
   formatFileSize,
-  getTotalImageBytes,
-  revokeExamImageUrls,
-} from '../../lib/imageCompress'
+} from '../../lib/answerSheetCompress'
 
 interface Props {
   form: DiagnosisFormData
   onChange: (form: DiagnosisFormData) => void
-  /** 无图片时直接诊断；有图片时先 OCR */
   onProceed: () => void
   loading: boolean
 }
@@ -21,101 +24,167 @@ interface Props {
 const inputClass =
   'w-full rounded-xl border border-slate-700 bg-slate-800/80 px-4 py-3 text-white outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30'
 
+const MAX_EXAM_FILE_BYTES = 6 * 1024 * 1024
+
 function createImageId() {
-  return `img-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+  return `as-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+}
+
+function getExamFileType(name: string): 'docx' | 'pdf' | null {
+  const lower = name.toLowerCase()
+  if (lower.endsWith('.docx')) return 'docx'
+  if (lower.endsWith('.pdf')) return 'pdf'
+  return null
 }
 
 export default function DiagnosisInputStep({ form, onChange, onProceed, loading }: Props) {
   const [uploading, setUploading] = useState(false)
   const [uploadError, setUploadError] = useState<string | null>(null)
+  const [examDragOver, setExamDragOver] = useState(false)
+  const [sheetDragOver, setSheetDragOver] = useState(false)
+  const [examPreviewOpen, setExamPreviewOpen] = useState(false)
 
-  const images = form.examImages ?? []
-  const hasImages = images.length > 0
-  const totalBytes = getTotalImageBytes(images)
+  const answerImages = form.answerSheetImages ?? []
+  const hasExam = Boolean(form.examFile)
+  const hasSheets = answerImages.length > 0
+  const canProceed = hasExam && hasSheets
 
   const update = <K extends keyof DiagnosisFormData>(key: K, value: DiagnosisFormData[K]) => {
     onChange({ ...form, [key]: value })
   }
 
-  const handlePhotos = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files ?? [])
-    if (files.length === 0) return
-
-    setUploadError(null)
-
-    const remaining = MAX_EXAM_IMAGES - images.length
-    if (remaining <= 0) {
-      setUploadError(`最多上传 ${MAX_EXAM_IMAGES} 张图片`)
-      e.target.value = ''
-      return
+  const processExamFile = async (file: File) => {
+    const type = getExamFileType(file.name)
+    if (!type) throw new Error('标准试卷仅支持 .docx 和 .pdf 格式')
+    if (file.size > MAX_EXAM_FILE_BYTES) {
+      throw new Error(`试卷文件不能超过 ${formatFileSize(MAX_EXAM_FILE_BYTES)}`)
     }
+    const base64 = await fileToBase64(file)
+    const item: ExamFileItem = {
+      name: file.name,
+      type,
+      sizeBytes: file.size,
+      base64,
+    }
+    onChange({
+      ...form,
+      examFile: item,
+      examPaperText: undefined,
+      answerSheetOcrText: undefined,
+      ocrIncomplete: undefined,
+    })
+  }
+
+  const processAnswerFiles = async (files: File[]) => {
+    const remaining = MAX_ANSWER_SHEET_COUNT - answerImages.length
+    if (remaining <= 0) throw new Error(`答题卡最多上传 ${MAX_ANSWER_SHEET_COUNT} 张`)
 
     const toAdd = files.slice(0, remaining)
-    if (files.length > remaining) {
-      setUploadError(`最多 ${MAX_EXAM_IMAGES} 张，已忽略多余的 ${files.length - remaining} 张`)
+    const newItems: AnswerSheetImage[] = []
+
+    for (const raw of toAdd) {
+      if (!raw.type.startsWith('image/')) {
+        throw new Error(`「${raw.name}」不是图片文件`)
+      }
+      const file = await compressAnswerSheetIfNeeded(raw)
+      const base64 = await fileToBase64(file)
+      newItems.push({
+        id: createImageId(),
+        name: raw.name,
+        base64,
+        mimeType: file.type || 'image/jpeg',
+        previewUrl: URL.createObjectURL(file),
+        sizeBytes: file.size,
+      })
     }
 
+    onChange({
+      ...form,
+      answerSheetImages: [...answerImages, ...newItems],
+      answerSheetOcrText: undefined,
+      ocrIncomplete: undefined,
+    })
+  }
+
+  const handleExamInput = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setUploadError(null)
     setUploading(true)
-    const newItems: ExamImageItem[] = []
-
     try {
-      let runningTotal = totalBytes
-
-      for (const file of toAdd) {
-        const compressed = await compressExamImage(file)
-        if (runningTotal + compressed.compressedSize > MAX_TOTAL_IMAGES_BYTES) {
-          URL.revokeObjectURL(compressed.previewUrl)
-          throw new Error(
-            `总大小将超过 ${formatFileSize(MAX_TOTAL_IMAGES_BYTES)}，请删除部分图片或上传更小的照片`,
-          )
-        }
-        runningTotal += compressed.compressedSize
-        newItems.push({
-          id: createImageId(),
-          name: file.name,
-          base64: compressed.base64,
-          mimeType: compressed.mimeType,
-          previewUrl: compressed.previewUrl,
-          sizeBytes: compressed.compressedSize,
-        })
-      }
-
-      onChange({
-        ...form,
-        examImages: [...images, ...newItems],
-        ocrText: undefined,
-        ocrIncomplete: undefined,
-      })
+      await processExamFile(file)
     } catch (err) {
-      revokeExamImageUrls(newItems)
-      setUploadError(err instanceof Error ? err.message : '图片处理失败')
+      setUploadError(err instanceof Error ? err.message : '试卷上传失败')
     } finally {
       setUploading(false)
       e.target.value = ''
     }
   }
 
-  const removeImage = (id: string) => {
-    const target = images.find((img) => img.id === id)
+  const handleAnswerInput = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files ?? [])
+    if (!files.length) return
+    setUploadError(null)
+    setUploading(true)
+    try {
+      await processAnswerFiles(files)
+    } catch (err) {
+      setUploadError(err instanceof Error ? err.message : '答题卡上传失败')
+    } finally {
+      setUploading(false)
+      e.target.value = ''
+    }
+  }
+
+  const onExamDrop = useCallback(
+    async (e: React.DragEvent) => {
+      e.preventDefault()
+      setExamDragOver(false)
+      const file = e.dataTransfer.files?.[0]
+      if (!file) return
+      setUploadError(null)
+      setUploading(true)
+      try {
+        await processExamFile(file)
+      } catch (err) {
+        setUploadError(err instanceof Error ? err.message : '试卷上传失败')
+      } finally {
+        setUploading(false)
+      }
+    },
+    [form],
+  )
+
+  const onSheetDrop = useCallback(
+    async (e: React.DragEvent) => {
+      e.preventDefault()
+      setSheetDragOver(false)
+      const files = Array.from(e.dataTransfer.files ?? []).filter((f) => f.type.startsWith('image/'))
+      if (!files.length) return
+      setUploadError(null)
+      setUploading(true)
+      try {
+        await processAnswerFiles(files)
+      } catch (err) {
+        setUploadError(err instanceof Error ? err.message : '答题卡上传失败')
+      } finally {
+        setUploading(false)
+      }
+    },
+    [form, answerImages],
+  )
+
+  const removeAnswerImage = (id: string) => {
+    const target = answerImages.find((img) => img.id === id)
     if (target) URL.revokeObjectURL(target.previewUrl)
     onChange({
       ...form,
-      examImages: images.filter((img) => img.id !== id),
-      ocrText: undefined,
-      ocrIncomplete: undefined,
+      answerSheetImages: answerImages.filter((img) => img.id !== id),
     })
-    setUploadError(null)
   }
 
-  const clearAllPhotos = () => {
-    revokeExamImageUrls(images)
-    onChange({
-      ...form,
-      examImages: [],
-      ocrText: undefined,
-      ocrIncomplete: undefined,
-    })
-    setUploadError(null)
+  const clearExam = () => {
+    onChange({ ...form, examFile: null, examPaperText: undefined })
   }
 
   const isBusy = loading || uploading
@@ -123,9 +192,9 @@ export default function DiagnosisInputStep({ form, onChange, onProceed, loading 
   return (
     <div className="mx-auto max-w-2xl opacity-0 animate-[fadeIn_0.5s_ease_forwards]">
       <div className="mb-8 text-center">
-        <h1 className="text-2xl font-bold text-blue-100 sm:text-3xl">AI学习诊断</h1>
+        <h1 className="text-2xl font-bold text-blue-100 sm:text-3xl">AI 精准对比诊断</h1>
         <p className="mt-2 text-sm text-slate-400">
-          输入考试信息并上传试卷照片（最多 {MAX_EXAM_IMAGES} 张），系统将 OCR 识别后生成精准诊断
+          上传标准试卷（Word/PDF）+ 学生手写答题卡，AI 将逐题对比分析
         </p>
       </div>
 
@@ -162,96 +231,99 @@ export default function DiagnosisInputStep({ form, onChange, onProceed, loading 
 
         <div>
           <label className="mb-1.5 block text-sm text-slate-300">考试困惑（选填）</label>
-          <textarea value={form.confusion} onChange={(e) => update('confusion', e.target.value)} placeholder="请描述你在本次考试中遇到的困惑..." rows={4} className={`${inputClass} resize-y placeholder-slate-500`} />
+          <textarea value={form.confusion} onChange={(e) => update('confusion', e.target.value)} rows={3} className={`${inputClass} resize-y placeholder-slate-500`} placeholder="描述本次考试的困惑..." />
         </div>
 
+        {/* 标准试卷 */}
         <div>
-          <div className="mb-1.5 flex items-center justify-between">
-            <label className="text-sm text-slate-300">
-              上传试卷照片（选填，最多 {MAX_EXAM_IMAGES} 张）
+          <label className="mb-1.5 block text-sm font-medium text-blue-200">① 标准试卷（Word / PDF）</label>
+          <div
+            onDragOver={(e) => { e.preventDefault(); setExamDragOver(true) }}
+            onDragLeave={() => setExamDragOver(false)}
+            onDrop={onExamDrop}
+            className={`rounded-xl border border-dashed px-4 py-6 text-center text-sm transition ${
+              examDragOver ? 'border-blue-400 bg-blue-500/10 text-blue-200' : 'border-slate-600 bg-slate-800/50 text-slate-400'
+            }`}
+          >
+            <input type="file" accept=".docx,.pdf,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" className="hidden" id="exam-file-input" disabled={isBusy} onChange={handleExamInput} />
+            <label htmlFor="exam-file-input" className="cursor-pointer">
+              {form.examFile ? (
+                <span className="text-slate-200">
+                  已选择：{form.examFile.name}（{formatFileSize(form.examFile.sizeBytes)}）
+                </span>
+              ) : (
+                <span>拖拽或点击上传 .docx / .pdf 标准试卷</span>
+              )}
             </label>
-            {hasImages && (
-              <span className="text-xs text-slate-500">
-                {images.length} 张 · {formatFileSize(totalBytes)}
-              </span>
-            )}
           </div>
+          {form.examFile && (
+            <div className="mt-2 flex items-center justify-between">
+              <button type="button" onClick={() => setExamPreviewOpen(!examPreviewOpen)} className="text-xs text-blue-300 hover:text-blue-200">
+                {examPreviewOpen ? '收起' : '展开'}本地预览说明
+              </button>
+              <button type="button" onClick={clearExam} className="text-xs text-slate-400 hover:text-red-300">移除试卷</button>
+            </div>
+          )}
+          {examPreviewOpen && form.examFile && (
+            <p className="mt-2 rounded-lg border border-slate-700 bg-slate-950/80 px-3 py-2 text-xs text-slate-500">
+              上传后将由服务端解析为纯文本，作为「参考答案」与答题卡 OCR 结果对比。
+            </p>
+          )}
+        </div>
 
-          <label className={`flex cursor-pointer flex-col items-center justify-center rounded-xl border border-dashed px-4 py-6 text-sm transition ${
-            uploading ? 'border-blue-400/50 bg-blue-500/10 text-blue-200' : 'border-slate-600 bg-slate-800/50 text-slate-400 hover:border-blue-500/50 hover:text-blue-300'
-          } ${images.length >= MAX_EXAM_IMAGES ? 'pointer-events-none opacity-50' : ''}`}>
+        {/* 答题卡 */}
+        <div>
+          <label className="mb-1.5 block text-sm font-medium text-cyan-200">
+            ② 学生手写答题卡（图片，最多 {MAX_ANSWER_SHEET_COUNT} 张）
+          </label>
+          <div
+            onDragOver={(e) => { e.preventDefault(); setSheetDragOver(true) }}
+            onDragLeave={() => setSheetDragOver(false)}
+            onDrop={onSheetDrop}
+            className={`rounded-xl border border-dashed px-4 py-6 text-center text-sm transition ${
+              sheetDragOver ? 'border-cyan-400 bg-cyan-500/10 text-cyan-200' : 'border-slate-600 bg-slate-800/50 text-slate-400'
+            } ${answerImages.length >= MAX_ANSWER_SHEET_COUNT ? 'opacity-50' : ''}`}
+          >
             <input
               type="file"
-              accept="image/jpeg,image/png,image/jpg,image/webp"
-              className="hidden"
-              disabled={isBusy || images.length >= MAX_EXAM_IMAGES}
+              accept="image/*"
               multiple
-              onChange={handlePhotos}
+              className="hidden"
+              id="answer-sheet-input"
+              disabled={isBusy || answerImages.length >= MAX_ANSWER_SHEET_COUNT}
+              onChange={handleAnswerInput}
             />
-            {uploading ? (
-              <span className="flex items-center gap-2">
-                <span className="h-4 w-4 animate-spin rounded-full border-2 border-blue-400/30 border-t-blue-400" />
-                正在压缩图片...
-              </span>
-            ) : images.length >= MAX_EXAM_IMAGES ? (
-              <span>已达 {MAX_EXAM_IMAGES} 张上限</span>
-            ) : (
-              <span>点击选择试卷图片（可多选，单张超过 2MB 自动压缩）</span>
-            )}
-          </label>
+            <label htmlFor="answer-sheet-input" className={`cursor-pointer ${answerImages.length >= MAX_ANSWER_SHEET_COUNT ? 'pointer-events-none' : ''}`}>
+              {uploading ? '处理中...' : answerImages.length >= MAX_ANSWER_SHEET_COUNT ? '已达上传上限' : '拖拽或点击上传答题卡照片（超过 4MB 自动压缩）'}
+            </label>
+          </div>
 
-          {hasImages && (
+          {hasSheets && (
             <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3">
-              {images.map((img, index) => (
-                <div key={img.id} className="group relative overflow-hidden rounded-xl border border-slate-700 bg-slate-950">
-                  <img
-                    src={img.previewUrl}
-                    alt={`试卷第 ${index + 1} 页`}
-                    className="h-28 w-full object-cover"
-                  />
-                  <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 to-transparent px-2 py-1.5">
-                    <p className="truncate text-[10px] text-slate-300">第 {index + 1} 页</p>
-                    <p className="truncate text-[10px] text-slate-500">{formatFileSize(img.sizeBytes)}</p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => removeImage(img.id)}
-                    className="absolute right-1 top-1 rounded bg-black/60 px-1.5 py-0.5 text-[10px] text-red-300 opacity-0 transition group-hover:opacity-100"
-                  >
-                    删除
-                  </button>
+              {answerImages.map((img, i) => (
+                <div key={img.id} className="group relative overflow-hidden rounded-xl border border-slate-700">
+                  <img src={img.previewUrl} alt={`答题卡${i + 1}`} className="h-28 w-full object-cover" />
+                  <button type="button" onClick={() => removeAnswerImage(img.id)} className="absolute right-1 top-1 rounded bg-black/70 px-1.5 py-0.5 text-[10px] text-red-300 opacity-0 group-hover:opacity-100">删除</button>
+                  <p className="truncate px-2 py-1 text-[10px] text-slate-500">第{i + 1}张 · {formatFileSize(img.sizeBytes)}</p>
                 </div>
               ))}
             </div>
           )}
-
-          {hasImages && (
-            <div className="mt-2 flex justify-end">
-              <button type="button" onClick={clearAllPhotos} className="text-xs text-slate-400 hover:text-red-300">
-                清空全部图片
-              </button>
-            </div>
-          )}
-
-          {uploadError && (
-            <p className="mt-2 text-sm text-red-300">{uploadError}</p>
-          )}
         </div>
+
+        {uploadError && <p className="text-sm text-red-300">{uploadError}</p>}
 
         <button
           type="button"
           onClick={onProceed}
-          disabled={isBusy}
-          className="w-full rounded-xl bg-gradient-to-r from-blue-600 to-cyan-500 py-3.5 text-sm font-semibold text-white shadow-lg shadow-blue-600/30 transition hover:from-blue-500 hover:to-cyan-400 disabled:cursor-not-allowed disabled:opacity-60"
+          disabled={isBusy || !canProceed}
+          className="w-full rounded-xl bg-gradient-to-r from-blue-600 to-cyan-500 py-3.5 text-sm font-semibold text-white shadow-lg shadow-blue-600/30 hover:from-blue-500 hover:to-cyan-400 disabled:cursor-not-allowed disabled:opacity-60"
         >
-          {loading
-            ? '处理中...'
-            : uploading
-              ? '图片处理中...'
-              : hasImages
-                ? '识别试卷文字'
-                : '开始智能诊断'}
+          {loading ? '处理中...' : uploading ? '上传处理中...' : '开始对比诊断'}
         </button>
+        {!canProceed && !isBusy && (
+          <p className="text-center text-xs text-slate-500">请同时上传标准试卷和至少一张答题卡</p>
+        )}
       </div>
     </div>
   )

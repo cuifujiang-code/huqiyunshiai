@@ -3,19 +3,19 @@ import { ANALYSIS_STEPS } from '../../types/diagnosis'
 interface Props {
   message?: string
   hasImage?: boolean
-  mode?: 'ocr' | 'diagnosis'
+  mode?: 'prepare' | 'ocr' | 'diagnosis'
 }
 
 export default function DiagnosisAnalyzingStep({ message, hasImage, mode = 'diagnosis' }: Props) {
-  const ocrSteps = [
-    '正在加载 OCR 识别引擎...',
-    '正在逐页识别试卷文字...',
-    '识别完成后将展示文字供您确认',
+  const prepareSteps = [
+    '正在解析试卷...',
+    '正在识别答题卡（阿里云手写 OCR）...',
+    '即将展示识别结果供您确认',
   ]
   const diagnosisSteps = hasImage
-    ? ['正在分析 OCR 识别文本...', ...ANALYSIS_STEPS]
+    ? ['正在AI对比分析试卷与答题卡...', ...ANALYSIS_STEPS]
     : ANALYSIS_STEPS
-  const steps = mode === 'ocr' ? ocrSteps : diagnosisSteps
+  const steps = mode === 'prepare' ? prepareSteps : diagnosisSteps
 
   return (
     <div className="flex min-h-[60vh] flex-col items-center justify-center px-4 opacity-0 animate-[fadeIn_0.5s_ease_forwards]">

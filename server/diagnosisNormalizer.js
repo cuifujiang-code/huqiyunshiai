@@ -130,7 +130,7 @@ export function normalizeDiagnosisReport(raw, form) {
     wrongQuestions: fillWrongQuestions(raw.wrongQuestions, fallback.wrongQuestions),
     improvementPlan: fillImprovementPlan(raw.improvementPlan, fallback.improvementPlan),
     recommendedExercises: fillRecommendedExercises(raw.recommendedExercises, fallback.recommendedExercises),
-    imageAnalysisSummary: form.ocrText
+    imageAnalysisSummary: form.examPaperText || form.answerSheetOcrText || form.ocrText
       ? str(raw.imageAnalysisSummary)
       : raw.imageAnalysisSummary
         ? str(raw.imageAnalysisSummary)

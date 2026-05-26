@@ -10,7 +10,15 @@ export type DiagnosisSubject =
   | '历史'
   | '地理'
 
-export interface ExamImageItem {
+export interface ExamFileItem {
+  name: string
+  type: 'docx' | 'pdf'
+  sizeBytes: number
+  /** 仅 prepare 阶段上传用，确认后不再发送 */
+  base64?: string
+}
+
+export interface AnswerSheetImage {
   id: string
   name: string
   base64: string
@@ -26,11 +34,16 @@ export interface DiagnosisFormData {
   fullScore: number
   gradeRank?: number
   confusion: string
-  /** 多张试卷图片（前端 OCR 用，不上传 Base64 至 API） */
-  examImages?: ExamImageItem[]
-  /** OCR 合并文本，用户确认后随诊断请求发送 */
+  /** 标准试卷 Word/PDF */
+  examFile?: ExamFileItem | null
+  /** 学生手写答题卡（最多 5 张） */
+  answerSheetImages?: AnswerSheetImage[]
+  /** 解析后的试卷原文 */
+  examPaperText?: string
+  /** 答题卡 OCR 合并文本 */
+  answerSheetOcrText?: string
+  /** @deprecated 兼容旧字段 */
   ocrText?: string
-  /** OCR 识别质量较低或不完整 */
   ocrIncomplete?: boolean
 }
 
@@ -106,13 +119,16 @@ export interface DiagnosisResponse {
   message?: string
   report?: DiagnosisReport
   isMockFallback?: boolean
-  /** 调试：client-mock | server-mock | server-ai */
   debugSource?: string
   errorDetail?: unknown
   deepseekConfig?: { hasApiKey: boolean; apiBase: string; model: string; visionModel?: string; url: string }
-  async?: boolean
-  jobId?: string
-  status?: 'processing' | 'done' | 'failed' | 'not_found'
+  action?: 'prepare' | 'analyze'
+  examPaperText?: string
+  examFileName?: string
+  answerSheetOcrText?: string
+  ocrIncomplete?: boolean
+  answerSheetPageCount?: number
+  examPaperType?: string
 }
 
 export const EXAM_TYPES: ExamType[] = ['单元测试', '月考', '期中考试', '期末考试', '模拟考']

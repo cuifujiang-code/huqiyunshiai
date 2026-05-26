@@ -6,27 +6,17 @@ export const DIAGNOSIS_API_PATH = '/api/diagnosis/generate'
 
 const MOCK_FALLBACK_MESSAGE = 'AI服务暂不可用，已展示示例诊断报告'
 
-function buildRequestBody(form: DiagnosisFormData) {
-  return {
-    examType: form.examType,
-    subject: form.subject,
-    score: form.score,
-    fullScore: form.fullScore,
-    gradeRank: form.gradeRank,
-    confusion: form.confusion,
-    ocrText: form.ocrText,
-    ocrIncomplete: form.ocrIncomplete,
-    examImageCount: form.examImages?.length ?? 0,
-  }
-}
-
 function formatErrorDetail(errorDetail: unknown): string {
   if (!errorDetail) return ''
   if (typeof errorDetail === 'string') return errorDetail
   if (typeof errorDetail === 'object' && errorDetail !== null) {
-    const obj = errorDetail as { message?: string; statusCode?: number; responseBody?: string }
-    const parts = [obj.message, obj.statusCode ? `HTTP ${obj.statusCode}` : '', obj.responseBody?.slice(0, 120)]
-      .filter(Boolean)
+    const obj = errorDetail as { message?: string; statusCode?: number; responseBody?: string; code?: string }
+    const parts = [
+      obj.message,
+      obj.code ? `code=${obj.code}` : '',
+      obj.statusCode ? `HTTP ${obj.statusCode}` : '',
+      obj.responseBody?.slice(0, 120),
+    ].filter(Boolean)
     return parts.join(' | ')
   }
   return String(errorDetail).slice(0, 200)
@@ -45,11 +35,15 @@ function mapSuccessResponse(data: DiagnosisResponse): DiagnosisResponse {
           : MOCK_FALLBACK_MESSAGE
         : (data.message ?? '诊断报告生成成功'),
       debugSource: isMock ? 'server-mock' : 'server-ai',
-      errorDetail: data.errorDetail,
-      deepseekConfig: data.deepseekConfig,
     }
   }
   return data
+}
+
+export interface PrepareDiagnosisPayload {
+  examFileBase64: string
+  examFileName: string
+  answerImages: { name: string; base64: string; mimeType: string }[]
 }
 
 export interface FetchDiagnosisOptions {
@@ -57,42 +51,89 @@ export interface FetchDiagnosisOptions {
 }
 
 /**
- * 获取诊断报告：与教育规划相同，同步 POST /api/diagnosis/generate。
+ * 阶段一：解析标准试卷 + 阿里云手写 OCR
+ */
+export async function prepareDiagnosisComparison(
+  payload: PrepareDiagnosisPayload,
+  options?: FetchDiagnosisOptions,
+): Promise<DiagnosisResponse> {
+  options?.onProgress?.('正在解析试卷...')
+
+  const body = {
+    action: 'prepare',
+    examFileBase64: payload.examFileBase64,
+    examFileName: payload.examFileName,
+    answerImages: payload.answerImages,
+  }
+
+  console.log('[诊断] prepare 请求', {
+    examFileName: payload.examFileName,
+    answerImageCount: payload.answerImages.length,
+  })
+
+  const result = await postApiJson<DiagnosisResponse>(DIAGNOSIS_API_PATH, body, '诊断准备')
+
+  if (result.kind === 'success') {
+    const data = result.data
+    console.log('[诊断] prepare 响应', data)
+
+    if (!data.success) {
+      return {
+        ...data,
+        isMockFallback: data.isMockFallback ?? true,
+        message: data.message || '试卷解析或 OCR 识别失败',
+        errorDetail: data.errorDetail,
+      }
+    }
+    return data
+  }
+
+  return {
+    success: false,
+    message: `准备失败（${result.reason}）`,
+    isMockFallback: true,
+    errorDetail: { reason: result.reason, status: result.status, bodyPreview: result.bodyPreview },
+  }
+}
+
+/**
+ * 阶段二：DeepSeek 对比分析
  */
 export async function fetchDiagnosisReport(
   form: DiagnosisFormData,
   options?: FetchDiagnosisOptions,
 ): Promise<DiagnosisResponse> {
-  const hasOcr = Boolean(form.ocrText?.trim())
-  options?.onProgress?.(hasOcr ? '正在基于 OCR 文本生成诊断报告...' : '正在生成诊断报告...')
+  options?.onProgress?.('正在AI对比分析...')
 
-  const body = buildRequestBody(form)
-  console.log('[诊断] 发起 POST 请求', {
-    url: DIAGNOSIS_API_PATH,
-    method: 'POST',
-    examImageCount: form.examImages?.length ?? 0,
-    ocrLength: form.ocrText?.length ?? 0,
-    ocrIncomplete: form.ocrIncomplete,
+  const body = {
+    action: 'analyze',
     examType: form.examType,
     subject: form.subject,
+    score: form.score,
+    fullScore: form.fullScore,
+    gradeRank: form.gradeRank,
+    confusion: form.confusion,
+    examPaperText: form.examPaperText,
+    answerSheetOcrText: form.answerSheetOcrText ?? form.ocrText,
+    ocrIncomplete: form.ocrIncomplete,
+    answerSheetPageCount: form.answerSheetImages?.length ?? 0,
+  }
+
+  console.log('[诊断] analyze 请求', {
+    examPaperLength: form.examPaperText?.length ?? 0,
+    answerOcrLength: form.answerSheetOcrText?.length ?? 0,
   })
 
-  const result = await postApiJson<DiagnosisResponse>(DIAGNOSIS_API_PATH, body, '诊断')
+  const result = await postApiJson<DiagnosisResponse>(DIAGNOSIS_API_PATH, body, '诊断分析')
 
   if (result.kind === 'success') {
     const data = result.data
-    console.log('[诊断] API 完整响应', data)
 
     if (data.success && data.report) {
-      const response = mapSuccessResponse(data)
-      if (data.isMockFallback && data.errorDetail) {
-        console.warn('[诊断] 服务端 AI 失败，已降级 mock', data.errorDetail, data.deepseekConfig)
-      }
-      return response
+      return mapSuccessResponse(data)
     }
 
     if (!data.success && data.errorDetail) {
-      console.error('[诊断] API 返回错误', data.errorDetail)
       return {
         success: true,
         message: `${MOCK_FALLBACK_MESSAGE}（原因：${formatErrorDetail(data.errorDetail)}）`,
@@ -102,15 +143,8 @@ export async function fetchDiagnosisReport(
         report: buildLocalDiagnosisReport(form),
       }
     }
-
-    console.warn('[诊断] 服务端 JSON 缺少 success/report', data)
   } else {
-    console.warn('[诊断] API 不可用，降级为本地 mock', {
-      reason: result.reason,
-      url: result.url,
-      status: result.status,
-      bodyPreview: result.bodyPreview,
-    })
+    console.warn('[诊断] analyze 失败', result)
   }
 
   return {
@@ -118,16 +152,7 @@ export async function fetchDiagnosisReport(
     message: result.kind === 'fallback' ? `${MOCK_FALLBACK_MESSAGE}（原因：${result.reason}）` : MOCK_FALLBACK_MESSAGE,
     isMockFallback: true,
     debugSource: 'client-mock',
-    errorDetail: result.kind === 'fallback' ? { reason: result.reason, status: result.status, bodyPreview: result.bodyPreview } : undefined,
-    report: buildLocalDiagnosisReport(form),
-  }
-}
-
-/** @deprecated 请使用 fetchDiagnosisReport */
-export function getLocalDiagnosisReport(form?: DiagnosisFormData): DiagnosisResponse {
-  return {
-    success: true,
-    message: '诊断报告生成成功',
+    errorDetail: result.kind === 'fallback' ? { reason: result.reason, status: result.status } : undefined,
     report: buildLocalDiagnosisReport(form),
   }
 }
