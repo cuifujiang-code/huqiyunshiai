@@ -2,6 +2,7 @@ import { generateDiagnosis } from './diagnosisGenerator.js'
 import { prepareDiagnosisComparison } from './diagnosisPrepare.js'
 import { buildApiErrorPayload, buildMockFallbackPayload } from './apiResponse.js'
 import { getDeepSeekConfigSummary } from './deepseekClient.js'
+import { logStepError, serializeApiError } from './apiErrorUtil.js'
 
 function buildAnalyzeForm(body) {
   return {
@@ -25,7 +26,7 @@ export function registerDiagnosisRoute(app) {
     const body = req.body ?? {}
     const action = body.action || 'analyze'
 
-    console.log('[diagnosis/generate] 收到请求', { action, deepseekConfig: getDeepSeekConfigSummary() })
+    console.log('[diagnosis/generate] 收到请求', { action })
 
     try {
       if (action === 'prepare') {
@@ -41,6 +42,8 @@ export function registerDiagnosisRoute(app) {
             isMockFallback: true,
             message: result.message,
             errorDetail: result.errorDetail,
+            step: result.step,
+            examPaperText: result.examPaperText,
           })
         }
 
@@ -72,7 +75,13 @@ export function registerDiagnosisRoute(app) {
         deepseekConfig: getDeepSeekConfigSummary(),
       })
     } catch (error) {
-      return res.status(500).json(buildApiErrorPayload(error, '诊断处理失败'))
+      logStepError(action, error)
+      return res.status(200).json({
+        success: false,
+        isMockFallback: true,
+        message: error instanceof Error ? error.message : '诊断处理失败',
+        errorDetail: serializeApiError(error),
+      })
     }
   })
 }

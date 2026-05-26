@@ -1,10 +1,10 @@
 import { Readable } from 'node:stream'
-import OcrApi20210707, * as $OcrApi from '@alicloud/ocr-api20210707'
-import * as $OpenApi from '@alicloud/openapi-core'
+import { $OpenApiUtil } from '@alicloud/openapi-core'
+import { logStepError } from './apiErrorUtil.js'
 
 /**
- * 通用手写体识别（RecognizeHandwriting）
- * 使用 @alicloud/ocr-api20210707（ocr20191230 不包含该 API）
+ * 通用手写体识别 RecognizeHandwriting（@alicloud/ocr-api20210707）
+ * 注：@alicloud/ocr20191230 不包含此 API
  */
 export class AlibabaOcrError extends Error {
   constructor(message, { code, requestId, detail } = {}) {
@@ -26,21 +26,49 @@ export class AlibabaOcrError extends Error {
   }
 }
 
-function getOcrClient() {
-  const accessKeyId = process.env.ALIBABA_ACCESS_KEY_ID
-  const accessKeySecret = process.env.ALIBABA_ACCESS_KEY_SECRET
+let ocrSdk = null
+
+async function loadOcrSdk() {
+  if (!ocrSdk) {
+    ocrSdk = await import('@alicloud/ocr-api20210707')
+  }
+  return ocrSdk
+}
+
+function getAlibabaCredentials() {
+  const accessKeyId = process.env.ALIBABA_ACCESS_KEY_ID?.trim()
+  const accessKeySecret = process.env.ALIBABA_ACCESS_KEY_SECRET?.trim()
 
   if (!accessKeyId || !accessKeySecret) {
-    throw new AlibabaOcrError('ALIBABA_ACCESS_KEY_ID 或 ALIBABA_ACCESS_KEY_SECRET 未配置')
+    throw new AlibabaOcrError('阿里云OCR未配置：请在 Vercel 设置 ALIBABA_ACCESS_KEY_ID 和 ALIBABA_ACCESS_KEY_SECRET')
   }
 
-  const config = new $OpenApi.Config({
+  return { accessKeyId, accessKeySecret }
+}
+
+async function createOcrClient() {
+  const { accessKeyId, accessKeySecret } = getAlibabaCredentials()
+  const sdk = await loadOcrSdk()
+  const ClientClass = sdk.default ?? sdk
+
+  const endpoint = (process.env.ALIBABA_OCR_ENDPOINT || 'ocr-api.cn-hangzhou.aliyuncs.com').replace(
+    /^https?:\/\//,
+    '',
+  )
+
+  const config = new $OpenApiUtil.Config({
     accessKeyId,
     accessKeySecret,
-    endpoint: process.env.ALIBABA_OCR_ENDPOINT || 'ocr-api.cn-hangzhou.aliyuncs.com',
+    endpoint,
   })
 
-  return new OcrApi20210707.default(config)
+  console.log('[阿里云OCR] 客户端初始化', {
+    endpoint,
+    hasAccessKeyId: Boolean(accessKeyId),
+    hasAccessKeySecret: Boolean(accessKeySecret),
+  })
+
+  return new ClientClass(config)
 }
 
 function extractTextFromHandwritingData(dataStr) {
@@ -78,14 +106,16 @@ function extractTextFromHandwritingData(dataStr) {
  * 单张答题卡图片 Base64 → 手写文字
  */
 export async function recognizeHandwritingBase64(base64, { fileName = 'image' } = {}) {
-  const client = getOcrClient()
+  const client = await createOcrClient()
+  const sdk = await loadOcrSdk()
   const buffer = Buffer.from(base64, 'base64')
 
   if (!buffer.length) {
     throw new AlibabaOcrError(`图片 ${fileName} 数据为空`)
   }
 
-  const request = new $OcrApi.RecognizeHandwritingRequest({
+  const RecognizeHandwritingRequest = sdk.RecognizeHandwritingRequest
+  const request = new RecognizeHandwritingRequest({
     needRotate: true,
     paragraph: true,
     body: Readable.from(buffer),
@@ -96,10 +126,21 @@ export async function recognizeHandwritingBase64(base64, { fileName = 'image' } 
     imageBytes: buffer.length,
   })
 
-  const response = await client.recognizeHandwriting(request)
-  const body = response.body
+  let response
+  try {
+    response = await client.recognizeHandwriting(request)
+  } catch (error) {
+    logStepError('alibaba-ocr-request', error)
+    const msg = error?.message || '阿里云 OCR 请求异常'
+    throw new AlibabaOcrError(msg, {
+      code: error?.code,
+      detail: error?.data ?? error?.message,
+    })
+  }
 
+  const body = response?.body
   const code = body?.code
+
   if (code && String(code) !== '200') {
     throw new AlibabaOcrError(body?.message || `阿里云 OCR 返回错误码 ${code}`, {
       code,
@@ -144,4 +185,10 @@ export async function recognizeHandwritingImages(images, onProgress) {
     parts.some((p) => p.text.length < MIN_PAGE_CHARS)
 
   return { combinedText, incomplete, pageCount: parts.length }
+}
+
+export function isAlibabaOcrConfigured() {
+  return Boolean(
+    process.env.ALIBABA_ACCESS_KEY_ID?.trim() && process.env.ALIBABA_ACCESS_KEY_SECRET?.trim(),
+  )
 }

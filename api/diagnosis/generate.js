@@ -2,6 +2,7 @@ import { generateDiagnosis } from '../../server/diagnosisGenerator.js'
 import { prepareDiagnosisComparison } from '../../server/diagnosisPrepare.js'
 import { buildApiErrorPayload, buildMockFallbackPayload } from '../../server/apiResponse.js'
 import { getDeepSeekConfigSummary, serializeError } from '../../server/deepseekClient.js'
+import { logStepError, serializeApiError } from '../../server/apiErrorUtil.js'
 
 function buildAnalyzeForm(body) {
   return {
@@ -19,6 +20,19 @@ function buildAnalyzeForm(body) {
   }
 }
 
+/** 业务错误统一返回 200 + JSON，避免前端只能看到 HTTP 500 */
+function sendPrepareError(res, { message, errorDetail, step, examPaperText }) {
+  return res.status(200).json({
+    success: false,
+    action: 'prepare',
+    isMockFallback: true,
+    message: message || '试卷解析或 OCR 识别失败',
+    errorDetail,
+    step: step || 'prepare',
+    examPaperText,
+  })
+}
+
 async function handlePrepare(body, res) {
   const examBytes = body.examFileBase64 ? Buffer.byteLength(body.examFileBase64, 'utf8') : 0
   const imageCount = Array.isArray(body.answerImages) ? body.answerImages.length : 0
@@ -27,6 +41,9 @@ async function handlePrepare(body, res) {
     examFileName: body.examFileName,
     examFileKB: examBytes ? (examBytes / 1024).toFixed(1) : 0,
     answerImageCount: imageCount,
+    alibabaOcrConfigured: Boolean(
+      process.env.ALIBABA_ACCESS_KEY_ID?.trim() && process.env.ALIBABA_ACCESS_KEY_SECRET?.trim(),
+    ),
   })
 
   if (!body.examFileBase64 || !body.examFileName) {
@@ -36,36 +53,43 @@ async function handlePrepare(body, res) {
     return res.status(400).json({ success: false, message: '请至少上传一张学生答题卡图片' })
   }
 
-  const result = await prepareDiagnosisComparison(
-    {
-      examFileBase64: body.examFileBase64,
-      examFileName: body.examFileName,
-      answerImages: body.answerImages,
-    },
-    (msg) => console.log('[api/diagnosis/generate] prepare 进度:', msg),
-  )
+  try {
+    const result = await prepareDiagnosisComparison(
+      {
+        examFileBase64: body.examFileBase64,
+        examFileName: body.examFileName,
+        answerImages: body.answerImages,
+      },
+      (msg) => console.log('[api/diagnosis/generate] prepare 进度:', msg),
+    )
 
-  if (!result.success) {
+    if (!result.success) {
+      return sendPrepareError(res, {
+        message: result.message,
+        errorDetail: result.errorDetail,
+        step: result.step,
+        examPaperText: result.examPaperText,
+      })
+    }
+
     return res.status(200).json({
-      success: false,
+      success: true,
       action: 'prepare',
-      isMockFallback: true,
-      message: result.message,
-      errorDetail: result.errorDetail,
       examPaperText: result.examPaperText,
+      examFileName: result.examFileName,
+      answerSheetOcrText: result.answerSheetOcrText,
+      ocrIncomplete: result.ocrIncomplete,
+      answerSheetPageCount: result.answerSheetPageCount,
+      examPaperType: result.examPaperType,
+    })
+  } catch (error) {
+    const errorDetail = logStepError('prepare-unhandled', error)
+    return sendPrepareError(res, {
+      message: error instanceof Error ? error.message : '诊断准备失败',
+      errorDetail,
+      step: 'prepare-unhandled',
     })
   }
-
-  return res.status(200).json({
-    success: true,
-    action: 'prepare',
-    examPaperText: result.examPaperText,
-    examFileName: result.examFileName,
-    answerSheetOcrText: result.answerSheetOcrText,
-    ocrIncomplete: result.ocrIncomplete,
-    answerSheetPageCount: result.answerSheetPageCount,
-    examPaperType: result.examPaperType,
-  })
 }
 
 async function handleAnalyze(body, res, started) {
@@ -87,27 +111,38 @@ async function handleAnalyze(body, res, started) {
     ocrIncomplete: form.ocrIncomplete,
   })
 
-  const result = await generateDiagnosis(form)
+  try {
+    const result = await generateDiagnosis(form)
 
-  console.log('[api/diagnosis/generate] analyze 完成', {
-    elapsedMs: Date.now() - started,
-    isMockFallback: result.isMockFallback,
-    errorDetail: result.errorDetail ?? null,
-  })
+    console.log('[api/diagnosis/generate] analyze 完成', {
+      elapsedMs: Date.now() - started,
+      isMockFallback: result.isMockFallback,
+      errorDetail: result.errorDetail ?? null,
+    })
 
-  if (result.isMockFallback) {
-    return res.status(200).json(buildMockFallbackPayload(result))
+    if (result.isMockFallback) {
+      return res.status(200).json(buildMockFallbackPayload(result))
+    }
+
+    return res.status(200).json({
+      success: true,
+      action: 'analyze',
+      message: result.message,
+      report: result.report,
+      isMockFallback: false,
+      errorDetail: null,
+      deepseekConfig: getDeepSeekConfigSummary(),
+    })
+  } catch (error) {
+    const errorDetail = logStepError('analyze-unhandled', error)
+    return res.status(200).json({
+      success: false,
+      action: 'analyze',
+      isMockFallback: true,
+      message: error instanceof Error ? error.message : 'AI 分析失败',
+      errorDetail,
+    })
   }
-
-  return res.status(200).json({
-    success: true,
-    action: 'analyze',
-    message: result.message,
-    report: result.report,
-    isMockFallback: false,
-    errorDetail: null,
-    deepseekConfig: getDeepSeekConfigSummary(),
-  })
 }
 
 export default async function handler(req, res) {
@@ -132,9 +167,17 @@ export default async function handler(req, res) {
     }
     return await handleAnalyze(body, res, started)
   } catch (error) {
-    console.error('[api/diagnosis/generate] 未捕获异常', serializeError(error))
-    const payload = buildApiErrorPayload(error, action === 'prepare' ? '试卷解析或 OCR 失败' : '诊断报告生成失败')
-    return res.status(500).json({ ...payload, errorDetail: serializeError(error) })
+    const errorDetail = serializeApiError(error)
+    logStepError('handler-fatal', error)
+
+    return res.status(200).json({
+      success: false,
+      action,
+      isMockFallback: true,
+      message: error instanceof Error ? error.message : '服务器处理失败',
+      errorDetail,
+      ...buildApiErrorPayload(error, '诊断服务异常'),
+    })
   }
 }
 

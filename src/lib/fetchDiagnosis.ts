@@ -88,6 +88,23 @@ export async function prepareDiagnosisComparison(
     return data
   }
 
+  // HTTP 500 等仍尝试解析 JSON 错误体
+  if (result.bodyPreview) {
+    try {
+      const parsed = JSON.parse(result.bodyPreview) as DiagnosisResponse
+      if (parsed.message || parsed.errorDetail) {
+        return {
+          success: false,
+          isMockFallback: true,
+          message: parsed.message || `准备失败（HTTP ${result.status}）`,
+          errorDetail: parsed.errorDetail ?? parsed,
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+
   return {
     success: false,
     message: `准备失败（${result.reason}）`,
