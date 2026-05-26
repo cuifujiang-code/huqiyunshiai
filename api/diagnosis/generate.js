@@ -10,8 +10,9 @@ function buildForm(body) {
     fullScore: Number(body.fullScore) || 100,
     gradeRank: body.gradeRank != null ? Number(body.gradeRank) : undefined,
     confusion: body.confusion?.trim() || '',
-    examImageBase64: body.examImageBase64 || undefined,
-    examImageMimeType: body.examImageMimeType || undefined,
+    ocrText: body.ocrText?.trim() || undefined,
+    ocrIncomplete: Boolean(body.ocrIncomplete),
+    examImageCount: Number(body.examImageCount) || 0,
   }
 }
 
@@ -28,7 +29,6 @@ export default async function handler(req, res) {
   }
 
   const body = req.body ?? {}
-  const imageBytes = body.examImageBase64 ? Buffer.byteLength(body.examImageBase64, 'utf8') : 0
 
   console.log('[api/diagnosis/generate] 请求参数', {
     examType: body.examType,
@@ -36,9 +36,10 @@ export default async function handler(req, res) {
     score: body.score,
     fullScore: body.fullScore,
     gradeRank: body.gradeRank,
-    hasImage: Boolean(body.examImageBase64),
-    imageBase64Bytes: imageBytes,
-    imageBase64KB: imageBytes ? (imageBytes / 1024).toFixed(1) : 0,
+    examImageCount: body.examImageCount ?? 0,
+    ocrLength: body.ocrText?.length ?? 0,
+    ocrIncomplete: Boolean(body.ocrIncomplete),
+    ocrPreview: body.ocrText ? body.ocrText.slice(0, 200) : null,
     confusionLength: body.confusion?.length ?? 0,
   })
 
@@ -55,7 +56,7 @@ export default async function handler(req, res) {
   try {
     const form = buildForm(body)
 
-    console.log('[api/diagnosis/generate] 开始调用 generateDiagnosis（同步模式，与教育规划一致）')
+    console.log('[api/diagnosis/generate] 开始调用 generateDiagnosis（OCR 文本 + DeepSeek）')
     const result = await generateDiagnosis(form)
 
     console.log('[api/diagnosis/generate] 处理完成', {

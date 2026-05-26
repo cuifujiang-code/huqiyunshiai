@@ -10,6 +10,15 @@ export type DiagnosisSubject =
   | '历史'
   | '地理'
 
+export interface ExamImageItem {
+  id: string
+  name: string
+  base64: string
+  mimeType: string
+  previewUrl: string
+  sizeBytes: number
+}
+
 export interface DiagnosisFormData {
   examType: ExamType
   subject: DiagnosisSubject
@@ -17,12 +26,12 @@ export interface DiagnosisFormData {
   fullScore: number
   gradeRank?: number
   confusion: string
-  photoName?: string
-  /** 压缩后的试卷图片 Base64（不含 data: 前缀） */
-  examImageBase64?: string
-  examImageMimeType?: string
-  photoPreviewUrl?: string
-  photoSizeBytes?: number
+  /** 多张试卷图片（前端 OCR 用，不上传 Base64 至 API） */
+  examImages?: ExamImageItem[]
+  /** OCR 合并文本，用户确认后随诊断请求发送 */
+  ocrText?: string
+  /** OCR 识别质量较低或不完整 */
+  ocrIncomplete?: boolean
 }
 
 export interface LossReasonItem {

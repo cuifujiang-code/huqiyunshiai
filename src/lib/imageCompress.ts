@@ -1,6 +1,11 @@
-/** Vercel 请求体上限约 4.5MB，JSON 中 base64 需预留余量 */
+/** Vercel 请求体上限约 4.5MB */
 export const MAX_UPLOAD_BYTES = 4 * 1024 * 1024
-export const TARGET_BASE64_BYTES = 3 * 1024 * 1024
+/** 单张图片压缩目标（2MB） */
+export const MAX_SINGLE_IMAGE_BYTES = 2 * 1024 * 1024
+/** 多张图片总大小上限（留余量给 JSON 字段） */
+export const MAX_TOTAL_IMAGES_BYTES = 4 * 1024 * 1024
+/** 最多上传张数 */
+export const MAX_EXAM_IMAGES = 5
 
 const ACCEPTED_TYPES = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'] as const
 
@@ -66,9 +71,12 @@ async function blobToBase64(blob: Blob): Promise<string> {
 }
 
 /**
- * 压缩图片至适合 API 传输的大小（目标 < 3MB base64）
+ * 压缩单张图片至指定大小（默认 2MB）
  */
-export async function compressExamImage(file: File): Promise<CompressedImage> {
+export async function compressExamImage(
+  file: File,
+  targetBytes: number = MAX_SINGLE_IMAGE_BYTES,
+): Promise<CompressedImage> {
   if (!isAcceptedImageType(file.type)) {
     throw new Error('仅支持 JPG、PNG、WebP 格式')
   }
@@ -86,7 +94,7 @@ export async function compressExamImage(file: File): Promise<CompressedImage> {
   let base64 = ''
   let blob: Blob | null = null
 
-  for (let attempt = 0; attempt < 8; attempt++) {
+  for (let attempt = 0; attempt < 10; attempt++) {
     const canvas = document.createElement('canvas')
     const w = Math.max(1, Math.round(img.width * scale))
     const h = Math.max(1, Math.round(img.height * scale))
@@ -99,20 +107,20 @@ export async function compressExamImage(file: File): Promise<CompressedImage> {
     blob = await canvasToBlob(canvas, outputMime, quality)
     base64 = await blobToBase64(blob)
 
-    if (estimateBase64Bytes(base64) <= TARGET_BASE64_BYTES) break
+    if (blob.size <= targetBytes && estimateBase64Bytes(base64) <= targetBytes) break
 
-    if (quality > 0.5) {
-      quality -= 0.12
+    if (quality > 0.45) {
+      quality -= 0.1
     } else {
-      scale *= 0.82
-      quality = 0.82
+      scale *= 0.8
+      quality = 0.75
     }
   }
 
   if (!blob || !base64) throw new Error('图片压缩失败')
 
-  if (estimateBase64Bytes(base64) > MAX_UPLOAD_BYTES) {
-    throw new Error('图片压缩后仍超过 4MB，请裁剪或更换更小的照片')
+  if (blob.size > MAX_SINGLE_IMAGE_BYTES) {
+    throw new Error(`「${file.name}」压缩后仍超过 2MB，请裁剪或更换更小的照片`)
   }
 
   const previewUrl = URL.createObjectURL(blob)
@@ -132,4 +140,14 @@ export function formatFileSize(bytes: number) {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
   return `${(bytes / (1024 * 1024)).toFixed(2)} MB`
+}
+
+export function getTotalImageBytes(images: { sizeBytes: number }[]) {
+  return images.reduce((sum, img) => sum + img.sizeBytes, 0)
+}
+
+export function revokeExamImageUrls(images: { previewUrl: string }[]) {
+  for (const img of images) {
+    URL.revokeObjectURL(img.previewUrl)
+  }
 }

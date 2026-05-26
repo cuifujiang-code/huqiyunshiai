@@ -14,8 +14,9 @@ function buildRequestBody(form: DiagnosisFormData) {
     fullScore: form.fullScore,
     gradeRank: form.gradeRank,
     confusion: form.confusion,
-    examImageBase64: form.examImageBase64,
-    examImageMimeType: form.examImageMimeType,
+    ocrText: form.ocrText,
+    ocrIncomplete: form.ocrIncomplete,
+    examImageCount: form.examImages?.length ?? 0,
   }
 }
 
@@ -62,15 +63,16 @@ export async function fetchDiagnosisReport(
   form: DiagnosisFormData,
   options?: FetchDiagnosisOptions,
 ): Promise<DiagnosisResponse> {
-  const hasImage = Boolean(form.examImageBase64)
-  options?.onProgress?.(hasImage ? '正在上传并分析试卷...' : '正在生成诊断报告...')
+  const hasOcr = Boolean(form.ocrText?.trim())
+  options?.onProgress?.(hasOcr ? '正在基于 OCR 文本生成诊断报告...' : '正在生成诊断报告...')
 
   const body = buildRequestBody(form)
   console.log('[诊断] 发起 POST 请求', {
     url: DIAGNOSIS_API_PATH,
     method: 'POST',
-    hasImage,
-    imageBase64Length: form.examImageBase64?.length ?? 0,
+    examImageCount: form.examImages?.length ?? 0,
+    ocrLength: form.ocrText?.length ?? 0,
+    ocrIncomplete: form.ocrIncomplete,
     examType: form.examType,
     subject: form.subject,
   })

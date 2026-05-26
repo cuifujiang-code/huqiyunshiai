@@ -3,12 +3,19 @@ import { ANALYSIS_STEPS } from '../../types/diagnosis'
 interface Props {
   message?: string
   hasImage?: boolean
+  mode?: 'ocr' | 'diagnosis'
 }
 
-export default function DiagnosisAnalyzingStep({ message, hasImage }: Props) {
-  const steps = hasImage
-    ? ['正在上传试卷图片...', '正在识别题目与得分...', ...ANALYSIS_STEPS]
+export default function DiagnosisAnalyzingStep({ message, hasImage, mode = 'diagnosis' }: Props) {
+  const ocrSteps = [
+    '正在加载 OCR 识别引擎...',
+    '正在逐页识别试卷文字...',
+    '识别完成后将展示文字供您确认',
+  ]
+  const diagnosisSteps = hasImage
+    ? ['正在分析 OCR 识别文本...', ...ANALYSIS_STEPS]
     : ANALYSIS_STEPS
+  const steps = mode === 'ocr' ? ocrSteps : diagnosisSteps
 
   return (
     <div className="flex min-h-[60vh] flex-col items-center justify-center px-4 opacity-0 animate-[fadeIn_0.5s_ease_forwards]">

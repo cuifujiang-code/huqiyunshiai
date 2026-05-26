@@ -10,8 +10,9 @@ function buildForm(body) {
     fullScore: Number(body.fullScore) || 100,
     gradeRank: body.gradeRank != null ? Number(body.gradeRank) : undefined,
     confusion: body.confusion?.trim() || '',
-    examImageBase64: body.examImageBase64 || undefined,
-    examImageMimeType: body.examImageMimeType || undefined,
+    ocrText: body.ocrText?.trim() || undefined,
+    ocrIncomplete: Boolean(body.ocrIncomplete),
+    examImageCount: Number(body.examImageCount) || 0,
   }
 }
 
@@ -19,13 +20,13 @@ export function registerDiagnosisRoute(app) {
   app.post('/api/diagnosis/generate', async (req, res) => {
     const started = Date.now()
     const body = req.body ?? {}
-    const imageBytes = body.examImageBase64 ? Buffer.byteLength(body.examImageBase64, 'utf8') : 0
 
     console.log('[diagnosis/generate] 收到请求', {
       examType: body.examType,
       subject: body.subject,
-      hasImage: Boolean(body.examImageBase64),
-      imageBase64KB: imageBytes ? (imageBytes / 1024).toFixed(1) : 0,
+      examImageCount: body.examImageCount ?? 0,
+      ocrLength: body.ocrText?.length ?? 0,
+      ocrIncomplete: Boolean(body.ocrIncomplete),
       deepseekConfig: getDeepSeekConfigSummary(),
     })
 
