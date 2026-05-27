@@ -6,9 +6,9 @@ import {
   batchImportQuestions,
   batchUpdateTags,
   createQuestion,
+  decomposeExamPaperAsync,
   deleteQuestions,
   fetchQuestions,
-  splitExamPaper,
   updateQuestion,
 } from '../lib/teacherApi'
 import type { BankQuestion } from '../types/teacher'
@@ -51,6 +51,7 @@ export default function TeacherQuestionBankPage() {
   const [editing, setEditing] = useState<BankQuestion | null>(null)
   const [splitPreview, setSplitPreview] = useState<Partial<BankQuestion>[] | null>(null)
   const [importing, setImporting] = useState(false)
+  const [importProgress, setImportProgress] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     if (!teacherId) return
@@ -84,16 +85,27 @@ export default function TeacherQuestionBankPage() {
   }
 
   const handleImportFile = async (file: File) => {
+    if (!teacherId) return
     setImporting(true)
+    setImportProgress('拆题中...')
+    setMessage(null)
     try {
       const base64 = await fileToBase64(file)
-      const questions = await splitExamPaper(base64, file.name, filters.subject || '物理', filters.grade || '八年级')
+      const questions = await decomposeExamPaperAsync(
+        teacherId,
+        base64,
+        file.name,
+        filters.subject || '物理',
+        filters.grade || '八年级',
+        (msg) => setImportProgress(msg),
+      )
       setSplitPreview(questions)
       setMessage(`AI 已拆分 ${questions.length} 道题目，请确认后入库`)
     } catch (e) {
       setMessage(e instanceof Error ? e.message : '拆题失败')
     } finally {
       setImporting(false)
+      setImportProgress(null)
     }
   }
 
@@ -141,8 +153,8 @@ export default function TeacherQuestionBankPage() {
           <input className={`${inputClass} min-w-[160px] flex-1`} placeholder="搜索题目内容" value={filters.keyword} onChange={(e) => setFilters({ ...filters, keyword: e.target.value })} />
           <button type="button" className={btnSecondary} onClick={() => { setPage(1); load() }}>筛选</button>
           <button type="button" className={btnPrimary} onClick={() => setEditing(emptyQuestion())}>+ 单题添加</button>
-          <label className={`${btnSecondary} cursor-pointer`}>
-            {importing ? '拆题中...' : '上传试卷拆题'}
+          <label className={`${btnSecondary} cursor-pointer ${importing ? 'opacity-60 pointer-events-none' : ''}`}>
+            {importProgress || (importing ? '拆题中...' : '上传试卷拆题')}
             <input type="file" accept=".docx,.pdf" className="hidden" onChange={(e) => e.target.files?.[0] && handleImportFile(e.target.files[0])} />
           </label>
         </div>

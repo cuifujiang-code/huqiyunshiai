@@ -19,16 +19,8 @@ question_type 只能是：选择题/填空题/计算题/证明题/实验题/应�
 difficulty 只能是：基础/中等/拔高`
 }
 
-export async function splitExamToQuestions(examBuffer, fileName, meta) {
-  const parsed = await parseExamFile(examBuffer, fileName)
-  if (!parsed.text?.trim()) {
-    throw new Error('试卷解析结果为空')
-  }
-
-  const content = await callDeepSeekAI(SYSTEM, buildSplitPrompt(parsed.text, meta))
-  const raw = JSON.parse(extractJson(content))
+function normalizeQuestions(raw, meta) {
   const list = Array.isArray(raw) ? raw : raw.questions ?? []
-
   return list.map((q, i) => ({
     subject: q.subject || meta.subject || '物理',
     grade: q.grade || meta.grade || '八年级',
@@ -42,4 +34,23 @@ export async function splitExamToQuestions(examBuffer, fileName, meta) {
     source: '试卷导入',
     tags: Array.isArray(q.tags) ? q.tags : [],
   }))
+}
+
+export async function parseExamText(examBuffer, fileName) {
+  const parsed = await parseExamFile(examBuffer, fileName)
+  if (!parsed.text?.trim()) {
+    throw new Error('试卷解析结果为空')
+  }
+  return parsed.text
+}
+
+export async function aiSplitExamText(text, meta) {
+  const content = await callDeepSeekAI(SYSTEM, buildSplitPrompt(text, meta))
+  const raw = JSON.parse(extractJson(content))
+  return normalizeQuestions(raw, meta)
+}
+
+export async function splitExamToQuestions(examBuffer, fileName, meta) {
+  const text = await parseExamText(examBuffer, fileName)
+  return aiSplitExamText(text, meta)
 }

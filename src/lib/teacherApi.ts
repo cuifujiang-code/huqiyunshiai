@@ -81,6 +81,103 @@ export async function batchImportQuestions(teacherId: string, questions: Partial
   throw new Error(r.kind === 'fallback' ? r.reason : '入库失败')
 }
 
+const DECOMPOSE_POLL_INTERVAL_MS = 3000
+const DECOMPOSE_POLL_MAX = 20
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+export interface DecomposeSubmitResponse {
+  success: boolean
+  taskId?: string
+  status?: string
+  message?: string
+}
+
+export interface DecomposeStatusResponse {
+  success: boolean
+  taskId?: string
+  status: 'processing' | 'parsed' | 'completed' | 'failed' | 'not_found'
+  message?: string
+  questions?: Partial<BankQuestion>[]
+  error_message?: string
+}
+
+/** 提交异步拆题任务 */
+export async function submitDecomposeTask(
+  teacherId: string,
+  examFileBase64: string,
+  examFileName: string,
+  subject: string,
+  grade: string,
+): Promise<DecomposeSubmitResponse> {
+  const r = await postApiJson<DecomposeSubmitResponse>(
+    '/api/teacher/decompose-submit',
+    { teacherId, examFileBase64, examFileName, subject, grade },
+    '拆题提交',
+    { timeoutMs: 10000 },
+  )
+  if (r.kind === 'success') return r.data
+  return { success: false, message: r.reason }
+}
+
+/** 查询拆题任务状态 */
+export async function fetchDecomposeStatus(taskId: string): Promise<DecomposeStatusResponse> {
+  const url = `/api/teacher/decompose-status?taskId=${encodeURIComponent(taskId)}`
+  const r = await postApiJson<DecomposeStatusResponse>(url, null, '拆题状态', {
+    method: 'GET',
+    timeoutMs: 10000,
+  })
+  if (r.kind === 'success') return r.data
+  return { success: false, status: 'failed', message: r.reason }
+}
+
+/** 提交并轮询直至拆题完成 */
+export async function decomposeExamPaperAsync(
+  teacherId: string,
+  examFileBase64: string,
+  examFileName: string,
+  subject: string,
+  grade: string,
+  onProgress?: (msg: string) => void,
+): Promise<Partial<BankQuestion>[]> {
+  onProgress?.('拆题中...')
+
+  const submit = await submitDecomposeTask(teacherId, examFileBase64, examFileName, subject, grade)
+  if (!submit.success || !submit.taskId) {
+    throw new Error(submit.message || '提交拆题任务失败')
+  }
+
+  const taskId = submit.taskId
+
+  for (let i = 0; i < DECOMPOSE_POLL_MAX; i++) {
+    if (i > 0) await sleep(DECOMPOSE_POLL_INTERVAL_MS)
+
+    const status = await fetchDecomposeStatus(taskId)
+
+    if (status.status === 'processing' || status.status === 'parsed') {
+      onProgress?.(status.message || '拆题中...')
+      continue
+    }
+
+    if (status.status === 'failed') {
+      throw new Error(status.message || status.error_message || '拆题失败')
+    }
+
+    if (status.status === 'completed' && status.questions) {
+      return status.questions
+    }
+
+    if (status.status === 'not_found') {
+      throw new Error('拆题任务不存在')
+    }
+  }
+
+  throw new Error('拆题处理超时，请稍后重试')
+}
+
+/** @deprecated 同步拆题，易超时 */
 export async function splitExamPaper(
   examFileBase64: string,
   examFileName: string,
