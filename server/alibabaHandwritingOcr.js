@@ -2,7 +2,7 @@ import { recognizeHandwritingHttp } from './alibabaOcrHttp.js'
 import { logStepError } from './apiErrorUtil.js'
 
 /**
- * 阿里云手写 OCR（axios HTTP，无 SDK）
+ * 阿里云手写 OCR（@alicloud/pop-core 官方 SDK）
  */
 export class AlibabaOcrError extends Error {
   constructor(message, { code, requestId, detail, httpStatus, responseBody } = {}) {
@@ -41,7 +41,7 @@ export async function recognizeHandwritingBase64(base64, { fileName = 'image' } 
     console.log('[阿里云OCR] 识别完成', { fileName, textLength: text.length })
     return text
   } catch (error) {
-    logStepError('alibaba-ocr-http', error)
+    logStepError('alibaba-ocr-pop-core', error)
 
     if (error instanceof AlibabaOcrError) throw error
 

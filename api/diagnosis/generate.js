@@ -5,7 +5,7 @@ import { getDeepSeekConfigSummary, serializeError } from '../../server/deepseekC
 import { logStepError, serializeApiError } from '../../server/apiErrorUtil.js'
 import { isAlibabaOcrConfigured } from '../../server/alibabaHandwritingOcr.js'
 
-/** OCR 通过 axios 调用阿里云 HTTP API（server/alibabaOcrHttp.js），不使用阿里云 SDK */
+/** OCR 使用 @alicloud/pop-core 官方 SDK（server/alibabaOcrHttp.js，apiVersion 2021-07-07） */
 
 function buildAnalyzeForm(body) {
   return {
@@ -44,7 +44,7 @@ async function handlePrepare(body, res) {
     examFileName: body.examFileName,
     examFileKB: examBytes ? (examBytes / 1024).toFixed(1) : 0,
     answerImageCount: imageCount,
-    ocrMode: 'axios-http',
+    ocrMode: 'pop-core',
     alibabaOcrConfigured: isAlibabaOcrConfigured(),
   })
 
