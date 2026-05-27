@@ -9,7 +9,8 @@ import type {
 import { DIAGNOSIS_SUBJECTS, EXAM_TYPES } from '../../types/diagnosis'
 import {
   MAX_ANSWER_SHEET_COUNT,
-  compressAnswerSheetIfNeeded,
+  TARGET_ANSWER_SHEET_BYTES,
+  compressAnswerSheetForUpload,
   fileToBase64,
   formatFileSize,
 } from '../../lib/answerSheetCompress'
@@ -39,6 +40,7 @@ function getExamFileType(name: string): 'docx' | 'pdf' | null {
 
 export default function DiagnosisInputStep({ form, onChange, onProceed, loading }: Props) {
   const [uploading, setUploading] = useState(false)
+  const [compressHint, setCompressHint] = useState<string | null>(null)
   const [uploadError, setUploadError] = useState<string | null>(null)
   const [examDragOver, setExamDragOver] = useState(false)
   const [sheetDragOver, setSheetDragOver] = useState(false)
@@ -86,7 +88,9 @@ export default function DiagnosisInputStep({ form, onChange, onProceed, loading 
       if (!raw.type.startsWith('image/')) {
         throw new Error(`「${raw.name}」不是图片文件`)
       }
-      const file = await compressAnswerSheetIfNeeded(raw)
+      setCompressHint('正在优化图片以加快识别速度...')
+      const file = await compressAnswerSheetForUpload(raw)
+      setCompressHint(null)
       const base64 = await fileToBase64(file)
       newItems.push({
         id: createImageId(),
@@ -131,6 +135,7 @@ export default function DiagnosisInputStep({ form, onChange, onProceed, loading 
     } catch (err) {
       setUploadError(err instanceof Error ? err.message : '答题卡上传失败')
     } finally {
+      setCompressHint(null)
       setUploading(false)
       e.target.value = ''
     }
@@ -294,7 +299,13 @@ export default function DiagnosisInputStep({ form, onChange, onProceed, loading 
               onChange={handleAnswerInput}
             />
             <label htmlFor="answer-sheet-input" className={`cursor-pointer ${answerImages.length >= MAX_ANSWER_SHEET_COUNT ? 'pointer-events-none' : ''}`}>
-              {uploading ? '处理中...' : answerImages.length >= MAX_ANSWER_SHEET_COUNT ? '已达上传上限' : '拖拽或点击上传答题卡照片（超过 4MB 自动压缩）'}
+              {compressHint
+                ? compressHint
+                : uploading
+                  ? '处理中...'
+                  : answerImages.length >= MAX_ANSWER_SHEET_COUNT
+                    ? '已达上传上限'
+                    : `拖拽或点击上传答题卡（自动压缩至 ${formatFileSize(TARGET_ANSWER_SHEET_BYTES)} 以内）`}
             </label>
           </div>
 

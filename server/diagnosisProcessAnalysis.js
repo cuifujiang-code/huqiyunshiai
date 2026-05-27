@@ -6,7 +6,7 @@ import {
 } from './diagnosisTaskStore.js'
 import { buildMockFallbackPayload } from './apiResponse.js'
 
-const ANALYSIS_TIMEOUT_MS = 58_000
+const ANALYSIS_TIMEOUT_MS = 9_000
 
 function withTimeout(promise, ms, message) {
   return new Promise((resolve, reject) => {
@@ -48,6 +48,9 @@ export async function runDiagnosisAnalysisStep(taskId) {
   }
   if (task.status !== 'ocr_done') {
     console.log('[diagnosisProcessAnalysis] 跳过', { taskId, status: task.status })
+    if (task.status === 'completed') {
+      return { skipped: true, success: true, status: 'completed', result: task.result }
+    }
     return { skipped: true, status: task.status }
   }
 
@@ -87,7 +90,7 @@ export async function runDiagnosisAnalysisStep(taskId) {
   }
 
   try {
-    return await withTimeout(work(), ANALYSIS_TIMEOUT_MS, 'AI 分析超时，请稍后重试')
+    return await withTimeout(work(), ANALYSIS_TIMEOUT_MS, 'AI 分析超时（超过10秒），请稍后重试')
   } catch (error) {
     const message = error instanceof Error ? error.message : 'AI 分析失败'
     console.error('[diagnosisProcessAnalysis] 失败', { taskId, message })

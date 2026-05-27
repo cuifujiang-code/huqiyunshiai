@@ -6,7 +6,7 @@ import DiagnosisReportView from '../components/diagnosis/DiagnosisReportView'
 import DashboardHeader from '../components/layout/DashboardHeader'
 import { useAuth } from '../context/AuthContext'
 import { useMembership } from '../context/MembershipContext'
-import { runAsyncDiagnosis } from '../lib/fetchDiagnosis'
+import { runSequentialDiagnosis } from '../lib/fetchDiagnosis'
 import { exportToPdf } from '../lib/exportPdf'
 import { revokePreviewUrls } from '../lib/answerSheetCompress'
 import type { DiagnosisFormData, DiagnosisReport } from '../types/diagnosis'
@@ -67,7 +67,7 @@ export default function StudentDiagnosisPage() {
     setAnalyzingMessage('正在提交诊断任务...')
 
     try {
-      const data = await runAsyncDiagnosis(
+      const data = await runSequentialDiagnosis(
         {
           userId: user?.id,
           examType: form.examType,

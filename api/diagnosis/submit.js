@@ -1,6 +1,5 @@
 import { randomUUID } from 'crypto'
 import { createDiagnosisTask, isDiagnosisTaskStoreConfigured } from '../../server/diagnosisTaskStore.js'
-import { triggerDiagnosisProcessOcr } from '../../server/diagnosisTrigger.js'
 
 function buildTaskInput(body) {
   return {
@@ -58,13 +57,11 @@ export default async function handler(req, res) {
       result: buildTaskInput(body),
     })
 
-    triggerDiagnosisProcessOcr(taskId)
-
     return res.status(200).json({
       success: true,
       taskId,
       status: 'processing',
-      message: '您的诊断正在处理中，预计需要20-40秒...',
+      message: '任务已创建，请等待识别与分析',
     })
   } catch (error) {
     console.error('[api/diagnosis/submit] 失败', error)

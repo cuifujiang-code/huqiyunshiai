@@ -4,9 +4,8 @@ import {
   markDiagnosisTaskFailed,
   markDiagnosisTaskOcrDone,
 } from './diagnosisTaskStore.js'
-import { triggerDiagnosisProcessAnalysis } from './diagnosisTrigger.js'
 
-const OCR_TIMEOUT_MS = 58_000
+const OCR_TIMEOUT_MS = 9_000
 
 function withTimeout(promise, ms, message) {
   return new Promise((resolve, reject) => {
@@ -33,6 +32,9 @@ export async function runDiagnosisOcrStep(taskId) {
   }
   if (task.status !== 'processing') {
     console.log('[diagnosisProcessOcr] 跳过', { taskId, status: task.status })
+    if (task.status === 'ocr_done' || task.status === 'completed') {
+      return { skipped: true, success: true, status: task.status }
+    }
     return { skipped: true, status: task.status }
   }
 
@@ -67,14 +69,13 @@ export async function runDiagnosisOcrStep(taskId) {
 
     await markDiagnosisTaskOcrDone(taskId, ocrResult)
 
-    console.log('[diagnosisProcessOcr] 完成，触发 AI 分析', { taskId })
-    triggerDiagnosisProcessAnalysis(taskId)
+    console.log('[diagnosisProcessOcr] 完成', { taskId })
 
     return { success: true, status: 'ocr_done', ocrResult }
   }
 
   try {
-    return await withTimeout(work(), OCR_TIMEOUT_MS, 'OCR 识别超时，请压缩图片后重试')
+    return await withTimeout(work(), OCR_TIMEOUT_MS, 'OCR 识别超时（超过10秒），请压缩图片后重试')
   } catch (error) {
     const message = error instanceof Error ? error.message : 'OCR 处理失败'
     console.error('[diagnosisProcessOcr] 失败', { taskId, message })

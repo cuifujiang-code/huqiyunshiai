@@ -3,18 +3,14 @@ import { buildLocalDiagnosisReport } from '../data/mockDiagnosisReport'
 import { postApiJson } from './postApiJson'
 
 export const DIAGNOSIS_SUBMIT_PATH = '/api/diagnosis/submit'
-export const DIAGNOSIS_STATUS_PATH = '/api/diagnosis/status'
+export const DIAGNOSIS_RUN_OCR_PATH = '/api/diagnosis/run-ocr'
+export const DIAGNOSIS_RUN_ANALYSIS_PATH = '/api/diagnosis/run-analysis'
 
-/** @deprecated 同步诊断 API，已由异步 submit/status 替代 */
+/** @deprecated 同步诊断 API */
 export const DIAGNOSIS_API_PATH = '/api/diagnosis/generate'
 
 const MOCK_FALLBACK_MESSAGE = 'AI服务暂不可用，已展示示例诊断报告'
-const POLL_INTERVAL_MS = 3000
-const POLL_MAX_ATTEMPTS = 20
-
-function sleep(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms))
-}
+const API_TIMEOUT_MS = 10_000
 
 function formatErrorDetail(errorDetail: unknown): string {
   if (!errorDetail) return ''
@@ -32,22 +28,29 @@ function formatErrorDetail(errorDetail: unknown): string {
   return String(errorDetail).slice(0, 200)
 }
 
-function mapSuccessResponse(data: DiagnosisResponse): DiagnosisResponse {
-  if (data.success && data.report) {
+function mapSuccessResponse(data: {
+  message?: string
+  report?: DiagnosisReport
+  isMockFallback?: boolean
+  errorDetail?: unknown
+}): DiagnosisResponse {
+  if (data.report) {
     const isMock = data.isMockFallback ?? (data.report as { source?: string }).source === 'mock'
     const errorHint = isMock ? formatErrorDetail(data.errorDetail) : ''
     return {
-      ...data,
-      isMockFallback: isMock,
+      success: true,
       message: isMock
         ? errorHint
           ? `${MOCK_FALLBACK_MESSAGE}（原因：${errorHint}）`
           : MOCK_FALLBACK_MESSAGE
         : (data.message ?? '诊断报告生成成功'),
+      report: data.report,
+      isMockFallback: isMock,
+      errorDetail: data.errorDetail,
       debugSource: isMock ? 'server-mock' : 'server-ai',
     }
   }
-  return data
+  return { success: false, message: data.message || '未返回诊断报告' }
 }
 
 export interface SubmitDiagnosisInput {
@@ -63,7 +66,6 @@ export interface SubmitDiagnosisInput {
   answerImages: { name: string; base64: string; mimeType: string }[]
 }
 
-/** @deprecated 使用 SubmitDiagnosisInput */
 export type SubmitDiagnosisPayload = SubmitDiagnosisInput
 
 export interface DiagnosisTaskSubmitResponse {
@@ -73,41 +75,35 @@ export interface DiagnosisTaskSubmitResponse {
   message?: string
 }
 
-export interface DiagnosisTaskStatusResponse {
+export interface DiagnosisRunOcrResponse {
   success: boolean
   taskId?: string
-  status: 'processing' | 'ocr_done' | 'completed' | 'failed' | 'not_found'
+  status?: string
+  message?: string
+}
+
+export interface DiagnosisRunAnalysisResponse {
+  success: boolean
+  taskId?: string
+  status?: string
   message?: string
   report?: DiagnosisReport
   isMockFallback?: boolean
-  error_message?: string
   errorDetail?: unknown
-}
-
-const STATUS_PROGRESS_MESSAGES: Record<string, string> = {
-  processing: '正在识别答题卡...',
-  ocr_done: 'AI正在对比分析...',
 }
 
 export interface FetchDiagnosisOptions {
   onProgress?: (message: string) => void
 }
 
-/**
- * 提交异步诊断任务（立即返回 taskId）
- */
 export async function submitDiagnosisTask(
   input: SubmitDiagnosisInput,
 ): Promise<DiagnosisTaskSubmitResponse> {
-  console.log('[诊断] submit 请求', {
-    examFileName: input.examFileName,
-    answerImageCount: input.answerImages.length,
-  })
-
   const result = await postApiJson<DiagnosisTaskSubmitResponse>(
     DIAGNOSIS_SUBMIT_PATH,
     input,
     '诊断提交',
+    { timeoutMs: API_TIMEOUT_MS },
   )
 
   if (result.kind === 'success') {
@@ -116,87 +112,69 @@ export async function submitDiagnosisTask(
 
   return {
     success: false,
-    message: `提交失败（${result.reason}）`,
+    message: result.reason.includes('超时')
+      ? '提交超时（超过10秒），请压缩图片后重试'
+      : `提交失败（${result.reason}）`,
   }
 }
 
-/**
- * 轮询诊断任务状态（每 3 秒，最多 20 次）
- */
-export async function pollDiagnosisTaskUntilDone(
-  taskId: string,
-  options?: FetchDiagnosisOptions,
-): Promise<DiagnosisResponse> {
-  const progressMsg = '正在识别答题卡...'
-  options?.onProgress?.(progressMsg)
+export async function runDiagnosisOcr(taskId: string): Promise<DiagnosisRunOcrResponse> {
+  const url = `${DIAGNOSIS_RUN_OCR_PATH}?taskId=${encodeURIComponent(taskId)}`
+  const result = await postApiJson<DiagnosisRunOcrResponse>(url, null, 'OCR识别', {
+    method: 'GET',
+    timeoutMs: API_TIMEOUT_MS,
+  })
 
-  for (let attempt = 0; attempt < POLL_MAX_ATTEMPTS; attempt++) {
-    if (attempt > 0) {
-      await sleep(POLL_INTERVAL_MS)
-    }
+  if (result.kind === 'success') {
+    return result.data
+  }
 
-    const url = `${DIAGNOSIS_STATUS_PATH}?taskId=${encodeURIComponent(taskId)}`
-    const result = await postApiJson<DiagnosisTaskStatusResponse>(url, null, '诊断状态', {
-      method: 'GET',
-    })
+  return {
+    success: false,
+    message: result.reason.includes('超时')
+      ? 'OCR 识别超时（超过10秒），请压缩图片或减少张数后重试'
+      : `OCR 识别失败（${result.reason}）`,
+  }
+}
 
-    if (result.kind !== 'success') {
-      console.warn('[诊断] status 查询失败', result)
-      continue
-    }
+export async function runDiagnosisAnalysis(taskId: string): Promise<DiagnosisResponse> {
+  const url = `${DIAGNOSIS_RUN_ANALYSIS_PATH}?taskId=${encodeURIComponent(taskId)}`
+  const result = await postApiJson<DiagnosisRunAnalysisResponse>(url, null, 'AI分析', {
+    method: 'GET',
+    timeoutMs: API_TIMEOUT_MS,
+  })
 
+  if (result.kind === 'success') {
     const data = result.data
-    console.log('[诊断] status 响应', { attempt: attempt + 1, status: data.status })
-
-    if (data.status === 'processing' || data.status === 'ocr_done') {
-      options?.onProgress?.(
-        data.message || STATUS_PROGRESS_MESSAGES[data.status] || progressMsg,
-      )
-      continue
+    if (data.success && data.report) {
+      return mapSuccessResponse(data)
     }
-
-    if (data.status === 'failed') {
-      return {
-        success: false,
-        message: data.message || data.error_message || '诊断任务失败',
-        isMockFallback: false,
-        errorDetail: data.error_message,
-      }
-    }
-
-    if (data.status === 'completed' && data.report) {
-      return mapSuccessResponse({
-        success: true,
-        message: data.message,
-        report: data.report,
-        isMockFallback: data.isMockFallback,
-        errorDetail: data.errorDetail,
-      })
-    }
-
-    if (data.status === 'not_found') {
-      return {
-        success: false,
-        message: '任务不存在或已过期',
-        isMockFallback: false,
-      }
+    return {
+      success: false,
+      message: data.message || 'AI 分析失败',
+      isMockFallback: false,
+      errorDetail: data.errorDetail,
     }
   }
 
   return {
     success: false,
-    message: '诊断处理超时，请稍后重新提交',
+    message: result.reason.includes('超时')
+      ? 'AI 分析超时（超过10秒），请稍后重试'
+      : `AI 分析失败（${result.reason}）`,
     isMockFallback: false,
   }
 }
 
 /**
- * 一站式：提交任务并轮询至完成
+ * 前端顺序调用：submit → run-ocr → run-analysis
  */
-export async function runAsyncDiagnosis(
+export async function runSequentialDiagnosis(
   input: SubmitDiagnosisInput,
   options?: FetchDiagnosisOptions,
 ): Promise<DiagnosisResponse> {
+  options?.onProgress?.('正在提交诊断任务...')
+
   const submit = await submitDiagnosisTask(input)
   if (!submit.success || !submit.taskId) {
     return {
@@ -206,11 +184,22 @@ export async function runAsyncDiagnosis(
     }
   }
 
-  options?.onProgress?.(submit.message || '您的诊断正在处理中...')
-  return pollDiagnosisTaskUntilDone(submit.taskId, options)
+  const taskId = submit.taskId
+
+  options?.onProgress?.('正在识别答题卡...')
+  const ocr = await runDiagnosisOcr(taskId)
+  if (!ocr.success) {
+    return {
+      success: false,
+      message: ocr.message || 'OCR 识别失败',
+      isMockFallback: false,
+    }
+  }
+
+  options?.onProgress?.('答题卡识别完成，正在进行AI分析...')
+  return runDiagnosisAnalysis(taskId)
 }
 
-/** 本地降级：异步失败时用表单生成示例报告 */
 export function buildFallbackDiagnosisResponse(form: DiagnosisFormData, reason: string): DiagnosisResponse {
   return {
     success: true,

@@ -6,6 +6,8 @@ export type ApiPostResult<T> =
 
 export interface ApiRequestOptions {
   method?: 'GET' | 'POST'
+  /** 请求超时毫秒数，默认不限制 */
+  timeoutMs?: number
 }
 
 function isHtmlResponse(contentType: string, text: string) {
@@ -45,9 +47,13 @@ export async function postApiJson<T>(
         ...(method === 'POST' ? { 'Content-Type': 'application/json' } : {}),
       },
       body: method === 'POST' && body != null ? JSON.stringify(body) : undefined,
+      signal: options.timeoutMs ? AbortSignal.timeout(options.timeoutMs) : undefined,
     })
   } catch (err) {
-    const reason = `网络错误: ${err instanceof Error ? err.message : String(err)}`
+    const isTimeout = err instanceof Error && err.name === 'TimeoutError'
+    const reason = isTimeout
+      ? `请求超时（${options.timeoutMs}ms）`
+      : `网络错误: ${err instanceof Error ? err.message : String(err)}`
     console.error(`${LOG_PREFIX} [${label}] 请求失败 → 将降级`, { url, reason })
     return { kind: 'fallback', reason, url }
   }
