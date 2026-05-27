@@ -5,8 +5,14 @@ interface Props {
 }
 
 const teacherLinks = [
-  { to: '/teacher/dashboard', label: 'AI智能出题' },
-  { to: '/teacher/planning', label: 'AI教育规划' },
+  { to: '/teacher/dashboard', label: '工作台' },
+  { to: '/teacher/exam', label: 'AI出题' },
+  { to: '/teacher/question-bank', label: '我的题库' },
+  { to: '/teacher/lesson-prep', label: '智能备课' },
+  { to: '/teacher/exam-builder', label: '智能组卷' },
+  { to: '/teacher/handout-builder', label: '讲义制作' },
+  { to: '/teacher/book-builder', label: '辅导书' },
+  { to: '/teacher/planning', label: '教育规划' },
 ]
 
 const studentLinks = [

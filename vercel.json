@@ -27,6 +27,10 @@
     "api/planning/generate.js": {
       "maxDuration": 60,
       "includeFiles": "{server/**,knowledge-base/**}"
+    },
+    "api/teacher/[...path].js": {
+      "maxDuration": 60,
+      "includeFiles": "{server/**,node_modules/mammoth/**,node_modules/pdf-parse/**,node_modules/pdfjs-dist/**}"
     }
   },
   "rewrites": [

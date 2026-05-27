@@ -1,171 +1,43 @@
-import { useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import ExamInputPanel from '../components/exam/ExamInputPanel'
-import ExamPreviewPanel from '../components/exam/ExamPreviewPanel'
 import DashboardHeader from '../components/layout/DashboardHeader'
-import { useMembership } from '../context/MembershipContext'
-import { saveExamToBank } from '../lib/examBank'
-import { exportExamToPdf } from '../lib/exportPdf'
-import { fetchGenerateExam } from '../lib/generateExam'
-import type { Difficulty, ExamPaper, Grade, Subject } from '../types/exam'
+
+const CARDS = [
+  { emoji: '📝', title: 'AI智能出题', desc: '快速生成整卷试题并导出 PDF', path: '/teacher/exam', accent: 'cyan' },
+  { emoji: '📚', title: '我的题库', desc: '管理个人题目库，支持导入拆题与批量操作', path: '/teacher/question-bank', accent: 'blue' },
+  { emoji: '📋', title: '智能备课', desc: '从题库选题或 AI 生成，保存备课方案', path: '/teacher/lesson-prep', accent: 'indigo' },
+  { emoji: '📄', title: '智能组卷', desc: '按题型分布从题库智能组卷，不足 AI 补充', path: '/teacher/exam-builder', accent: 'violet' },
+  { emoji: '📖', title: '讲义制作', desc: '校内/校外/针对性三种讲义模板', path: '/teacher/handout-builder', accent: 'purple' },
+  { emoji: '📕', title: '辅导书制作', desc: '章节目录树管理，全书预览与导出', path: '/teacher/book-builder', accent: 'rose' },
+  { emoji: '🎓', title: 'AI教育规划', desc: '为学生生成个性化培养路径与阶段任务', path: '/teacher/planning', accent: 'emerald' },
+]
 
 export default function TeacherDashboard() {
   const navigate = useNavigate()
-  const { checkExam, deductExamCredit } = useMembership()
-  const paperRef = useRef<HTMLDivElement>(null)
-
-  const [prompt, setPrompt] = useState(
-    '八年级物理压强单元测试卷，选择题4道、填空题2道、计算题2道，整体难度中等偏上。',
-  )
-  const [subject, setSubject] = useState<Subject>('物理')
-  const [grade, setGrade] = useState<Grade>('八年级')
-  const [difficulty, setDifficulty] = useState<Difficulty>('中等')
-
-  const [exam, setExam] = useState<ExamPaper | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [message, setMessage] = useState<string | null>(null)
-  const [isError, setIsError] = useState(false)
-  const [isWarning, setIsWarning] = useState(false)
-  const [exporting, setExporting] = useState(false)
-  const [saving, setSaving] = useState(false)
-  const [saved, setSaved] = useState(false)
-
-  const handleGenerate = async () => {
-    const permission = checkExam()
-    if (!permission.allowed) {
-      setMessage(
-        `${permission.reason ?? '无法出题'}${permission.remaining === 0 ? '，请前往会员中心升级或续费。' : ''}`,
-      )
-      setIsError(true)
-      return
-    }
-
-    setLoading(true)
-    setMessage(null)
-    setIsError(false)
-    setIsWarning(false)
-    setSaved(false)
-
-    try {
-      const data = await fetchGenerateExam({ prompt, subject, grade, difficulty })
-      setExam(data.exam!)
-      deductExamCredit()
-      const left = permission.remaining != null ? permission.remaining - 1 : null
-      setIsWarning(!!data.isMockFallback)
-      setMessage(
-        left != null
-          ? `${data.message ?? '试卷生成成功'}（本月剩余 ${left} 次出题额度）`
-          : (data.message ?? '试卷生成成功'),
-      )
-      setIsError(false)
-    } catch (err) {
-      setMessage(err instanceof Error ? err.message : '试卷生成失败，请稍后重试')
-      setIsError(true)
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const handleExportPdf = async () => {
-    const el = paperRef.current ?? document.getElementById('exam-paper-content')
-    if (!el || !exam) return
-
-    setExporting(true)
-    try {
-      await exportExamToPdf(el as HTMLElement, `${exam.title}.pdf`)
-    } catch {
-      setMessage('PDF 导出失败，请重试')
-    } finally {
-      setExporting(false)
-    }
-  }
-
-  const handleSave = async () => {
-    if (!exam) return
-    setSaving(true)
-    try {
-      saveExamToBank(exam)
-      setSaved(true)
-      setMessage('试卷已保存到我的题库')
-    } finally {
-      setSaving(false)
-    }
-  }
 
   return (
     <div className="min-h-screen bg-slate-950 text-white">
-      <DashboardHeader title="AI智能出题 · 教师工作台" featureNavRole="teacher" />
-
-      <main className="mx-auto max-w-[1600px] px-4 py-6 sm:px-6 sm:py-8">
-        <section className="mb-6 grid gap-4 sm:grid-cols-2">
-          <div className="rounded-2xl border-2 border-cyan-400/40 bg-cyan-500/10 p-5 shadow-lg shadow-cyan-900/20">
-            <div className="flex items-center gap-3">
-              <span className="text-3xl">📝</span>
-              <div>
-                <h3 className="font-semibold text-cyan-200">AI智能出题</h3>
-                <p className="mt-1 text-xs text-slate-400">当前功能 · 生成试卷与导出 PDF</p>
-              </div>
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={() => navigate('/teacher/planning')}
-            className="group rounded-2xl border border-blue-500/30 bg-slate-900/60 p-5 text-left transition hover:-translate-y-0.5 hover:border-cyan-400/50 hover:bg-blue-500/10 hover:shadow-lg hover:shadow-blue-900/20"
-          >
-            <div className="flex items-center justify-between gap-3">
-              <div className="flex items-center gap-3">
-                <span className="text-3xl">🎯</span>
-                <div>
-                  <h3 className="font-semibold text-blue-100 group-hover:text-cyan-200">AI教育规划</h3>
-                  <p className="mt-1 text-xs text-slate-400">为学生生成个性化培养路径与阶段任务</p>
-                </div>
-              </div>
-              <span className="shrink-0 text-cyan-400 transition group-hover:translate-x-1">→</span>
-            </div>
-          </button>
-        </section>
-        {message && isError && message.includes('会员') && (
-          <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
-            <span>{message}</span>
+      <DashboardHeader title="教师工作台" featureNavRole="teacher" />
+      <main className="mx-auto max-w-6xl px-4 py-8">
+        <div className="mb-8 text-center">
+          <h1 className="text-2xl font-bold text-blue-100 sm:text-3xl">华祺云师 · 教师教学工具链</h1>
+          <p className="mt-2 text-sm text-slate-400">题库 → 备课 → 组卷 → 讲义 → 辅导书，一站式教学赋能</p>
+        </div>
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {CARDS.map((c) => (
             <button
+              key={c.path}
               type="button"
-              onClick={() => navigate('/member-center')}
-              className="rounded-lg bg-amber-500/20 px-3 py-1 text-xs font-medium text-amber-200 hover:bg-amber-500/30"
+              onClick={() => navigate(c.path)}
+              className="group rounded-2xl border border-slate-700/80 bg-slate-900/60 p-5 text-left transition hover:-translate-y-0.5 hover:border-blue-500/40 hover:bg-slate-900 hover:shadow-lg hover:shadow-blue-900/20"
             >
-              前往会员中心
+              <div className="flex items-start justify-between gap-3">
+                <span className="text-3xl">{c.emoji}</span>
+                <span className="text-cyan-400 opacity-0 transition group-hover:opacity-100">→</span>
+              </div>
+              <h3 className="mt-3 font-semibold text-blue-100 group-hover:text-cyan-200">{c.title}</h3>
+              <p className="mt-1.5 text-xs leading-relaxed text-slate-400">{c.desc}</p>
             </button>
-          </div>
-        )}
-        <div className="flex flex-col gap-6 lg:flex-row lg:items-stretch">
-          <div className="w-full lg:w-[40%] lg:shrink-0">
-            <ExamInputPanel
-              prompt={prompt}
-              subject={subject}
-              grade={grade}
-              difficulty={difficulty}
-              loading={loading}
-              onPromptChange={setPrompt}
-              onSubjectChange={setSubject}
-              onGradeChange={setGrade}
-              onDifficultyChange={setDifficulty}
-              onGenerate={handleGenerate}
-            />
-          </div>
-          <div className="w-full lg:w-[60%] lg:min-h-[calc(100vh-140px)]">
-            <ExamPreviewPanel
-              exam={exam}
-              loading={loading}
-              message={message}
-              isError={isError}
-              isWarning={isWarning}
-              paperRef={paperRef}
-              onExportPdf={handleExportPdf}
-              onSave={handleSave}
-              exporting={exporting}
-              saving={saving}
-              saved={saved}
-            />
-          </div>
+          ))}
         </div>
       </main>
     </div>

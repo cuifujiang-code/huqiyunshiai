@@ -6,6 +6,7 @@ import { registerGenerateExamRoute } from './generateExamRoute.js'
 import { registerDiagnosisRoute } from './diagnosisRoute.js'
 import { registerDiagnosisAsyncRoutes } from './diagnosisAsyncRoute.js'
 import { registerPlanningRoute } from './planningRoute.js'
+import { registerTeacherRoutes } from './teacherRoute.js'
 
 const app = express()
 const PORT = process.env.PORT || 3001
@@ -21,6 +22,7 @@ registerGenerateExamRoute(app)
 registerDiagnosisRoute(app)
 registerDiagnosisAsyncRoutes(app)
 registerPlanningRoute(app)
+registerTeacherRoutes(app)
 
 app.post('/api/auth/ensure-mock-user', async (req, res) => {
   const { phone, role } = req.body ?? {}

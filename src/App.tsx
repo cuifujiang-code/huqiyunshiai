@@ -9,8 +9,14 @@ import MemberCenterPage from './pages/MemberCenterPage'
 import StudentDashboard from './pages/StudentDashboard'
 import StudentDiagnosisPage from './pages/StudentDiagnosisPage'
 import StudentPlanningPage from './pages/StudentPlanningPage'
+import TeacherBookBuilderPage from './pages/TeacherBookBuilderPage'
 import TeacherDashboard from './pages/TeacherDashboard'
+import TeacherExamBuilderPage from './pages/TeacherExamBuilderPage'
+import TeacherExamPage from './pages/TeacherExamPage'
+import TeacherHandoutBuilderPage from './pages/TeacherHandoutBuilderPage'
+import TeacherLessonPrepPage from './pages/TeacherLessonPrepPage'
 import TeacherPlanningPage from './pages/TeacherPlanningPage'
+import TeacherQuestionBankPage from './pages/TeacherQuestionBankPage'
 
 export default function App() {
   return (
@@ -33,6 +39,54 @@ export default function App() {
               element={
                 <ProtectedRoute requiredRole="teacher">
                   <TeacherDashboard />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/teacher/exam"
+              element={
+                <ProtectedRoute requiredRole="teacher">
+                  <TeacherExamPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/teacher/question-bank"
+              element={
+                <ProtectedRoute requiredRole="teacher">
+                  <TeacherQuestionBankPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/teacher/lesson-prep"
+              element={
+                <ProtectedRoute requiredRole="teacher">
+                  <TeacherLessonPrepPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/teacher/exam-builder"
+              element={
+                <ProtectedRoute requiredRole="teacher">
+                  <TeacherExamBuilderPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/teacher/handout-builder"
+              element={
+                <ProtectedRoute requiredRole="teacher">
+                  <TeacherHandoutBuilderPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/teacher/book-builder"
+              element={
+                <ProtectedRoute requiredRole="teacher">
+                  <TeacherBookBuilderPage />
                 </ProtectedRoute>
               }
             />

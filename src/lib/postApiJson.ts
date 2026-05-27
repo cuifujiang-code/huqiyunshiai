@@ -5,7 +5,7 @@ export type ApiPostResult<T> =
   | { kind: 'fallback'; reason: string; status?: number; bodyPreview?: string; url: string }
 
 export interface ApiRequestOptions {
-  method?: 'GET' | 'POST'
+  method?: 'GET' | 'POST' | 'PUT' | 'DELETE'
   /** 请求超时毫秒数，默认不限制 */
   timeoutMs?: number
 }
@@ -44,9 +44,9 @@ export async function postApiJson<T>(
       method,
       headers: {
         Accept: 'application/json',
-        ...(method === 'POST' ? { 'Content-Type': 'application/json' } : {}),
+        ...(method === 'POST' || method === 'PUT' || method === 'DELETE' ? { 'Content-Type': 'application/json' } : {}),
       },
-      body: method === 'POST' && body != null ? JSON.stringify(body) : undefined,
+      body: method === 'POST' || method === 'PUT' || method === 'DELETE' ? (body != null ? JSON.stringify(body) : undefined) : undefined,
       signal: options.timeoutMs ? AbortSignal.timeout(options.timeoutMs) : undefined,
     })
   } catch (err) {
