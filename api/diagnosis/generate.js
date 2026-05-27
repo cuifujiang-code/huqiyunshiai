@@ -5,10 +5,10 @@ import { getDeepSeekConfigSummary, serializeError } from '../../server/deepseekC
 import { logStepError, serializeApiError } from '../../server/apiErrorUtil.js'
 import { isAlibabaOcrConfigured } from '../../server/alibabaHandwritingOcr.js'
 
-/** OCR 使用 @alicloud/pop-core（server/alibabaOcrHttp.js）：endpoint 上海，apiVersion 2021-07-07 */
+/** OCR 使用 @alicloud/pop-core（server/alibabaOcrHttp.js）：endpoint 杭州，apiVersion 2021-07-07 */
 
 export const ALIBABA_OCR_CONFIG = {
-  endpoint: 'https://ocr-api.cn-shanghai.aliyuncs.com',
+  endpoint: 'https://ocr-api.cn-hangzhou.aliyuncs.com',
   apiVersion: '2021-07-07',
 }
 

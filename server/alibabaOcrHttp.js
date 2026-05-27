@@ -10,7 +10,7 @@ const { RPCClient } = require('@alicloud/pop-core')
 
 /** RecognizeHandwriting 必须使用 2021-07-07，使用 2019-12-30 会报服务未开通等错误 */
 const API_VERSION = '2021-07-07'
-const DEFAULT_ENDPOINT = 'https://ocr-api.cn-shanghai.aliyuncs.com'
+const DEFAULT_ENDPOINT = 'https://ocr-api.cn-hangzhou.aliyuncs.com'
 
 let rpcClient = null
 
