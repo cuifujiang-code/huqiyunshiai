@@ -6,8 +6,8 @@ import { serializeError } from './deepseekClient.js'
 /**
  * 解析标准试卷 + 阿里云手写 OCR，返回预览文本
  */
-export async function prepareDiagnosisComparison(payload, onProgress) {
-  const { examFileBase64, examFileName, answerImages } = payload
+export async function prepareDiagnosisComparison(input, onProgress) {
+  const { examFileBase64, examFileName, answerImages } = input
 
   if (!examFileBase64 || !examFileName) {
     return buildPrepareFailure('validate', new Error('请上传标准试卷（Word 或 PDF）'))

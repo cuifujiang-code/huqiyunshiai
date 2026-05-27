@@ -2,6 +2,11 @@ import { createClient } from '@supabase/supabase-js'
 
 const TABLE = 'diagnosis_tasks'
 
+/** 仅允许写入 Supabase 表中存在的列（统一使用 result，禁止 payload） */
+const TASK_INSERT_COLUMNS = ['task_id', 'user_id', 'status', 'result', 'error_message', 'updated_at']
+const TASK_UPDATE_RESULT_COLUMNS = ['status', 'result', 'error_message', 'updated_at']
+const TASK_UPDATE_FAILED_COLUMNS = ['status', 'error_message', 'updated_at']
+
 function getSupabaseUrl() {
   return process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || ''
 }
@@ -27,22 +32,40 @@ function getAdminClient() {
   })
 }
 
-/** result：processing 时存提交数据，completed 时存诊断报告 JSON */
-export async function createDiagnosisTask({ taskId, userId, result }) {
-  const admin = getAdminClient()
-  const row = {
-    task_id: taskId,
-    user_id: userId || null,
-    status: 'processing',
-    result,
-    error_message: null,
-    updated_at: new Date().toISOString(),
+function pickColumns(source, allowedKeys) {
+  const row = {}
+  for (const key of allowedKeys) {
+    if (key in source) row[key] = source[key]
   }
+  return row
+}
+
+/**
+ * 创建诊断任务。
+ * result：processing 阶段存用户提交的试卷/答题卡数据；完成后由 markDiagnosisTaskCompleted 覆盖为报告 JSON。
+ */
+export async function createDiagnosisTask({ taskId, userId, result }) {
+  if (result == null) {
+    throw new Error('创建诊断任务缺少 result 数据')
+  }
+
+  const admin = getAdminClient()
+  const row = pickColumns(
+    {
+      task_id: taskId,
+      user_id: userId || null,
+      status: 'processing',
+      result,
+      error_message: null,
+      updated_at: new Date().toISOString(),
+    },
+    TASK_INSERT_COLUMNS,
+  )
 
   const { data, error } = await admin.from(TABLE).insert(row).select('id, task_id, status, created_at').single()
 
   if (error) {
-    console.error('[diagnosisTaskStore] create failed', error)
+    console.error('[diagnosisTaskStore] create failed', error, { columns: Object.keys(row) })
     throw new Error(error.message || '创建诊断任务失败')
   }
 
@@ -51,7 +74,11 @@ export async function createDiagnosisTask({ taskId, userId, result }) {
 
 export async function getDiagnosisTaskByTaskId(taskId) {
   const admin = getAdminClient()
-  const { data, error } = await admin.from(TABLE).select('*').eq('task_id', taskId).maybeSingle()
+  const { data, error } = await admin
+    .from(TABLE)
+    .select('id, task_id, user_id, status, result, error_message, created_at, updated_at')
+    .eq('task_id', taskId)
+    .maybeSingle()
 
   if (error) {
     console.error('[diagnosisTaskStore] get failed', error)
@@ -63,35 +90,39 @@ export async function getDiagnosisTaskByTaskId(taskId) {
 
 export async function markDiagnosisTaskCompleted(taskId, result) {
   const admin = getAdminClient()
-  const { error } = await admin
-    .from(TABLE)
-    .update({
+  const row = pickColumns(
+    {
       status: 'completed',
       result,
       error_message: null,
       updated_at: new Date().toISOString(),
-    })
-    .eq('task_id', taskId)
+    },
+    TASK_UPDATE_RESULT_COLUMNS,
+  )
+
+  const { error } = await admin.from(TABLE).update(row).eq('task_id', taskId)
 
   if (error) {
-    console.error('[diagnosisTaskStore] complete failed', error)
+    console.error('[diagnosisTaskStore] complete failed', error, { columns: Object.keys(row) })
     throw new Error(error.message || '更新任务状态失败')
   }
 }
 
 export async function markDiagnosisTaskFailed(taskId, errorMessage) {
   const admin = getAdminClient()
-  const { error } = await admin
-    .from(TABLE)
-    .update({
+  const row = pickColumns(
+    {
       status: 'failed',
       error_message: errorMessage,
       updated_at: new Date().toISOString(),
-    })
-    .eq('task_id', taskId)
+    },
+    TASK_UPDATE_FAILED_COLUMNS,
+  )
+
+  const { error } = await admin.from(TABLE).update(row).eq('task_id', taskId)
 
   if (error) {
-    console.error('[diagnosisTaskStore] fail update failed', error)
+    console.error('[diagnosisTaskStore] fail update failed', error, { columns: Object.keys(row) })
     throw new Error(error.message || '更新任务失败状态失败')
   }
 }

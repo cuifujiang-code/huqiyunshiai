@@ -50,7 +50,7 @@ function mapSuccessResponse(data: DiagnosisResponse): DiagnosisResponse {
   return data
 }
 
-export interface SubmitDiagnosisPayload {
+export interface SubmitDiagnosisInput {
   userId?: string
   examType: string
   subject: string
@@ -62,6 +62,9 @@ export interface SubmitDiagnosisPayload {
   examFileName: string
   answerImages: { name: string; base64: string; mimeType: string }[]
 }
+
+/** @deprecated 使用 SubmitDiagnosisInput */
+export type SubmitDiagnosisPayload = SubmitDiagnosisInput
 
 export interface DiagnosisTaskSubmitResponse {
   success: boolean
@@ -89,16 +92,16 @@ export interface FetchDiagnosisOptions {
  * 提交异步诊断任务（立即返回 taskId）
  */
 export async function submitDiagnosisTask(
-  payload: SubmitDiagnosisPayload,
+  input: SubmitDiagnosisInput,
 ): Promise<DiagnosisTaskSubmitResponse> {
   console.log('[诊断] submit 请求', {
-    examFileName: payload.examFileName,
-    answerImageCount: payload.answerImages.length,
+    examFileName: input.examFileName,
+    answerImageCount: input.answerImages.length,
   })
 
   const result = await postApiJson<DiagnosisTaskSubmitResponse>(
     DIAGNOSIS_SUBMIT_PATH,
-    payload,
+    input,
     '诊断提交',
   )
 
@@ -184,10 +187,10 @@ export async function pollDiagnosisTaskUntilDone(
  * 一站式：提交任务并轮询至完成
  */
 export async function runAsyncDiagnosis(
-  payload: SubmitDiagnosisPayload,
+  input: SubmitDiagnosisInput,
   options?: FetchDiagnosisOptions,
 ): Promise<DiagnosisResponse> {
-  const submit = await submitDiagnosisTask(payload)
+  const submit = await submitDiagnosisTask(input)
   if (!submit.success || !submit.taskId) {
     return {
       success: false,
