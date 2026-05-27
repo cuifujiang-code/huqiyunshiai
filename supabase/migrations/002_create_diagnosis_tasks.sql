@@ -7,8 +7,7 @@ CREATE TABLE IF NOT EXISTS public.diagnosis_tasks (
   user_id TEXT,
   status TEXT NOT NULL DEFAULT 'processing'
     CHECK (status IN ('processing', 'completed', 'failed')),
-  payload JSONB NOT NULL DEFAULT '{}'::jsonb,
-  result JSONB,
+  result JSONB NOT NULL DEFAULT '{}'::jsonb,
   error_message TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()

@@ -27,14 +27,14 @@ function getAdminClient() {
   })
 }
 
-export async function createDiagnosisTask({ taskId, userId, payload }) {
+/** result：processing 时存提交数据，completed 时存诊断报告 JSON */
+export async function createDiagnosisTask({ taskId, userId, result }) {
   const admin = getAdminClient()
   const row = {
     task_id: taskId,
     user_id: userId || null,
     status: 'processing',
-    payload,
-    result: null,
+    result,
     error_message: null,
     updated_at: new Date().toISOString(),
   }

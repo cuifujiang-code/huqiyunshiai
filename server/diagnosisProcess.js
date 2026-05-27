@@ -20,18 +20,18 @@ function withTimeout(promise, ms, message) {
   })
 }
 
-function buildAnalyzeForm(payload, prepareResult) {
+function buildAnalyzeForm(taskInput, prepareResult) {
   return {
-    examType: payload.examType,
-    subject: payload.subject,
-    score: Number(payload.score),
-    fullScore: Number(payload.fullScore) || 100,
-    gradeRank: payload.gradeRank != null ? Number(payload.gradeRank) : undefined,
-    confusion: payload.confusion?.trim() || '',
+    examType: taskInput.examType,
+    subject: taskInput.subject,
+    score: Number(taskInput.score),
+    fullScore: Number(taskInput.fullScore) || 100,
+    gradeRank: taskInput.gradeRank != null ? Number(taskInput.gradeRank) : undefined,
+    confusion: taskInput.confusion?.trim() || '',
     examPaperText: prepareResult.examPaperText,
     answerSheetOcrText: prepareResult.answerSheetOcrText,
     ocrIncomplete: Boolean(prepareResult.ocrIncomplete),
-    examImageCount: prepareResult.answerSheetPageCount || payload.answerImages?.length || 0,
+    examImageCount: prepareResult.answerSheetPageCount || taskInput.answerImages?.length || 0,
   }
 }
 
@@ -48,16 +48,16 @@ export async function runDiagnosisTask(taskId) {
     return { skipped: true, status: task.status }
   }
 
-  const payload = task.payload || {}
+  const taskInput = task.result || {}
 
   const work = async () => {
     console.log('[diagnosisProcess] 开始处理', { taskId })
 
     const prepareResult = await prepareDiagnosisComparison(
       {
-        examFileBase64: payload.examFileBase64,
-        examFileName: payload.examFileName,
-        answerImages: payload.answerImages,
+        examFileBase64: taskInput.examFileBase64,
+        examFileName: taskInput.examFileName,
+        answerImages: taskInput.answerImages,
       },
       (msg) => console.log('[diagnosisProcess] prepare:', msg),
     )
@@ -68,7 +68,7 @@ export async function runDiagnosisTask(taskId) {
       return { success: false, status: 'failed', message: errMsg, errorDetail: prepareResult.errorDetail }
     }
 
-    const form = buildAnalyzeForm(payload, prepareResult)
+    const form = buildAnalyzeForm(taskInput, prepareResult)
     const analyzeResult = await generateDiagnosis(form)
 
     const stored = analyzeResult.isMockFallback

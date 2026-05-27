@@ -3,7 +3,7 @@ import { createDiagnosisTask, getDiagnosisTaskByTaskId, isDiagnosisTaskStoreConf
 import { triggerDiagnosisProcess, verifyDiagnosisProcessSecret } from './diagnosisTrigger.js'
 import { runDiagnosisTask } from './diagnosisProcess.js'
 
-function buildPayload(body) {
+function buildTaskInput(body) {
   return {
     examType: body.examType,
     subject: body.subject,
@@ -45,7 +45,7 @@ export function registerDiagnosisAsyncRoutes(app) {
       await createDiagnosisTask({
         taskId,
         userId: body.userId?.trim() || null,
-        payload: buildPayload(body),
+        result: buildTaskInput(body),
       })
       triggerDiagnosisProcess(taskId)
       return res.json({

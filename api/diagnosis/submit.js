@@ -2,7 +2,7 @@ import { randomUUID } from 'crypto'
 import { createDiagnosisTask, isDiagnosisTaskStoreConfigured } from '../../server/diagnosisTaskStore.js'
 import { triggerDiagnosisProcess } from '../../server/diagnosisTrigger.js'
 
-function buildPayload(body) {
+function buildTaskInput(body) {
   return {
     examType: body.examType,
     subject: body.subject,
@@ -55,7 +55,7 @@ export default async function handler(req, res) {
     await createDiagnosisTask({
       taskId,
       userId,
-      payload: buildPayload(body),
+      result: buildTaskInput(body),
     })
 
     triggerDiagnosisProcess(taskId)
