@@ -3,6 +3,9 @@ import { prepareDiagnosisComparison } from '../../server/diagnosisPrepare.js'
 import { buildApiErrorPayload, buildMockFallbackPayload } from '../../server/apiResponse.js'
 import { getDeepSeekConfigSummary, serializeError } from '../../server/deepseekClient.js'
 import { logStepError, serializeApiError } from '../../server/apiErrorUtil.js'
+import { isAlibabaOcrConfigured } from '../../server/alibabaHandwritingOcr.js'
+
+/** OCR 通过 axios 调用阿里云 HTTP API（server/alibabaOcrHttp.js），不使用阿里云 SDK */
 
 function buildAnalyzeForm(body) {
   return {
@@ -41,9 +44,8 @@ async function handlePrepare(body, res) {
     examFileName: body.examFileName,
     examFileKB: examBytes ? (examBytes / 1024).toFixed(1) : 0,
     answerImageCount: imageCount,
-    alibabaOcrConfigured: Boolean(
-      process.env.ALIBABA_ACCESS_KEY_ID?.trim() && process.env.ALIBABA_ACCESS_KEY_SECRET?.trim(),
-    ),
+    ocrMode: 'axios-http',
+    alibabaOcrConfigured: isAlibabaOcrConfigured(),
   })
 
   if (!body.examFileBase64 || !body.examFileName) {
