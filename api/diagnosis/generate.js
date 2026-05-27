@@ -5,7 +5,12 @@ import { getDeepSeekConfigSummary, serializeError } from '../../server/deepseekC
 import { logStepError, serializeApiError } from '../../server/apiErrorUtil.js'
 import { isAlibabaOcrConfigured } from '../../server/alibabaHandwritingOcr.js'
 
-/** OCR 使用 @alicloud/pop-core 官方 SDK（server/alibabaOcrHttp.js，apiVersion 2021-07-07） */
+/** OCR 使用 @alicloud/pop-core（server/alibabaOcrHttp.js）：endpoint 上海，apiVersion 2021-07-07 */
+
+export const ALIBABA_OCR_CONFIG = {
+  endpoint: 'https://ocr-api.cn-shanghai.aliyuncs.com',
+  apiVersion: '2021-07-07',
+}
 
 function buildAnalyzeForm(body) {
   return {
@@ -45,6 +50,8 @@ async function handlePrepare(body, res) {
     examFileKB: examBytes ? (examBytes / 1024).toFixed(1) : 0,
     answerImageCount: imageCount,
     ocrMode: 'pop-core',
+    ocrEndpoint: ALIBABA_OCR_CONFIG.endpoint,
+    ocrApiVersion: ALIBABA_OCR_CONFIG.apiVersion,
     alibabaOcrConfigured: isAlibabaOcrConfigured(),
   })
 
