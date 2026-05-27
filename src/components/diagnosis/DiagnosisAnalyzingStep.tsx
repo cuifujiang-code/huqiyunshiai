@@ -15,7 +15,7 @@ export default function DiagnosisAnalyzingStep({ message, hasImage, mode = 'diag
   const asyncSteps = [
     '正在解析试卷（Word/PDF）...',
     '正在识别手写答题卡（阿里云 OCR）...',
-    '正在 AI 对比分析并生成诊断报告...',
+    'AI 正在对比分析并生成诊断报告...',
     '预计需要 20-40 秒，请勿关闭页面',
   ]
   const diagnosisSteps = hasImage

@@ -6,8 +6,9 @@ CREATE TABLE IF NOT EXISTS public.diagnosis_tasks (
   task_id TEXT NOT NULL UNIQUE,
   user_id TEXT,
   status TEXT NOT NULL DEFAULT 'processing'
-    CHECK (status IN ('processing', 'completed', 'failed')),
+    CHECK (status IN ('processing', 'ocr_done', 'completed', 'failed')),
   result JSONB NOT NULL DEFAULT '{}'::jsonb,
+  ocr_result JSONB,
   error_message TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()

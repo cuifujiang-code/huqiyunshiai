@@ -1,6 +1,6 @@
 import { randomUUID } from 'crypto'
 import { createDiagnosisTask, isDiagnosisTaskStoreConfigured } from '../../server/diagnosisTaskStore.js'
-import { triggerDiagnosisProcess } from '../../server/diagnosisTrigger.js'
+import { triggerDiagnosisProcessOcr } from '../../server/diagnosisTrigger.js'
 
 function buildTaskInput(body) {
   return {
@@ -58,7 +58,7 @@ export default async function handler(req, res) {
       result: buildTaskInput(body),
     })
 
-    triggerDiagnosisProcess(taskId)
+    triggerDiagnosisProcessOcr(taskId)
 
     return res.status(200).json({
       success: true,

@@ -1,5 +1,10 @@
 import { getDiagnosisTaskByTaskId, isDiagnosisTaskStoreConfigured } from '../../server/diagnosisTaskStore.js'
 
+const STATUS_MESSAGES = {
+  processing: '正在识别答题卡...',
+  ocr_done: 'AI正在对比分析...',
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'GET' && req.method !== 'POST') {
     return res.status(405).json({ success: false, message: 'Method Not Allowed' })
@@ -30,12 +35,12 @@ export default async function handler(req, res) {
       })
     }
 
-    if (task.status === 'processing') {
+    if (task.status === 'processing' || task.status === 'ocr_done') {
       return res.status(200).json({
         success: true,
         taskId,
-        status: 'processing',
-        message: 'AI正在分析您的试卷和答题卡...预计需要20-40秒',
+        status: task.status,
+        message: STATUS_MESSAGES[task.status] || '诊断处理中...',
       })
     }
 

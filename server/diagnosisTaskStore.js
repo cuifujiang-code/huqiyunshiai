@@ -2,10 +2,13 @@ import { createClient } from '@supabase/supabase-js'
 
 const TABLE = 'diagnosis_tasks'
 
-/** 仅允许写入 Supabase 表中存在的列（统一使用 result，禁止 payload） */
 const TASK_INSERT_COLUMNS = ['task_id', 'user_id', 'status', 'result', 'error_message', 'updated_at']
+const TASK_OCR_DONE_COLUMNS = ['status', 'ocr_result', 'error_message', 'updated_at']
 const TASK_UPDATE_RESULT_COLUMNS = ['status', 'result', 'error_message', 'updated_at']
 const TASK_UPDATE_FAILED_COLUMNS = ['status', 'error_message', 'updated_at']
+
+const TASK_SELECT_COLUMNS =
+  'id, task_id, user_id, status, result, ocr_result, error_message, created_at, updated_at'
 
 function getSupabaseUrl() {
   return process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || ''
@@ -40,10 +43,7 @@ function pickColumns(source, allowedKeys) {
   return row
 }
 
-/**
- * 创建诊断任务。
- * result：processing 阶段存用户提交的试卷/答题卡数据；完成后由 markDiagnosisTaskCompleted 覆盖为报告 JSON。
- */
+/** 创建任务：result 暂存用户提交数据，完成后覆盖为诊断报告 */
 export async function createDiagnosisTask({ taskId, userId, result }) {
   if (result == null) {
     throw new Error('创建诊断任务缺少 result 数据')
@@ -76,7 +76,7 @@ export async function getDiagnosisTaskByTaskId(taskId) {
   const admin = getAdminClient()
   const { data, error } = await admin
     .from(TABLE)
-    .select('id, task_id, user_id, status, result, error_message, created_at, updated_at')
+    .select(TASK_SELECT_COLUMNS)
     .eq('task_id', taskId)
     .maybeSingle()
 
@@ -86,6 +86,26 @@ export async function getDiagnosisTaskByTaskId(taskId) {
   }
 
   return data
+}
+
+export async function markDiagnosisTaskOcrDone(taskId, ocrResult) {
+  const admin = getAdminClient()
+  const row = pickColumns(
+    {
+      status: 'ocr_done',
+      ocr_result: ocrResult,
+      error_message: null,
+      updated_at: new Date().toISOString(),
+    },
+    TASK_OCR_DONE_COLUMNS,
+  )
+
+  const { error } = await admin.from(TABLE).update(row).eq('task_id', taskId)
+
+  if (error) {
+    console.error('[diagnosisTaskStore] ocr_done failed', error, { columns: Object.keys(row) })
+    throw new Error(error.message || '更新 OCR 结果失败')
+  }
 }
 
 export async function markDiagnosisTaskCompleted(taskId, result) {

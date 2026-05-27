@@ -1,36 +1,50 @@
-/**
- * 触发后台 process API（fire-and-forget）
- */
-export function getDiagnosisProcessUrl() {
+function getBaseUrl() {
   if (process.env.VERCEL_URL) {
-    return `https://${process.env.VERCEL_URL}/api/diagnosis/process`
+    return `https://${process.env.VERCEL_URL}`
   }
   const port = process.env.PORT || 3001
-  return `http://127.0.0.1:${port}/api/diagnosis/process`
+  return `http://127.0.0.1:${port}`
 }
 
 export function getDiagnosisProcessSecret() {
   return process.env.DIAGNOSIS_PROCESS_SECRET || process.env.SUPABASE_SERVICE_ROLE_KEY || ''
 }
 
-export function triggerDiagnosisProcess(taskId) {
-  const url = getDiagnosisProcessUrl()
-  const secret = getDiagnosisProcessSecret()
-
-  console.log('[diagnosisTrigger] 触发后台处理', { taskId, url: url.replace(/\/\/[^/]+/, '//***') })
-
+function buildProcessHeaders() {
   const headers = { 'Content-Type': 'application/json' }
+  const secret = getDiagnosisProcessSecret()
   if (secret) {
     headers['x-diagnosis-process-secret'] = secret
   }
+  return headers
+}
+
+function fireProcessRequest(path, taskId, label) {
+  const url = `${getBaseUrl()}${path}`
+  console.log(`[diagnosisTrigger] 触发${label}`, { taskId, path })
 
   fetch(url, {
     method: 'POST',
-    headers,
+    headers: buildProcessHeaders(),
     body: JSON.stringify({ taskId }),
   }).catch((err) => {
-    console.error('[diagnosisTrigger] 触发失败', err)
+    console.error(`[diagnosisTrigger] ${label} 触发失败`, err)
   })
+}
+
+/** 步骤一：OCR 识别 */
+export function triggerDiagnosisProcessOcr(taskId) {
+  fireProcessRequest('/api/diagnosis/process-ocr', taskId, 'OCR')
+}
+
+/** 步骤二：AI 对比分析 */
+export function triggerDiagnosisProcessAnalysis(taskId) {
+  fireProcessRequest('/api/diagnosis/process-analysis', taskId, 'AI分析')
+}
+
+/** @deprecated 使用 triggerDiagnosisProcessOcr */
+export function triggerDiagnosisProcess(taskId) {
+  triggerDiagnosisProcessOcr(taskId)
 }
 
 export function verifyDiagnosisProcessSecret(req) {

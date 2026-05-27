@@ -76,12 +76,17 @@ export interface DiagnosisTaskSubmitResponse {
 export interface DiagnosisTaskStatusResponse {
   success: boolean
   taskId?: string
-  status: 'processing' | 'completed' | 'failed' | 'not_found'
+  status: 'processing' | 'ocr_done' | 'completed' | 'failed' | 'not_found'
   message?: string
   report?: DiagnosisReport
   isMockFallback?: boolean
   error_message?: string
   errorDetail?: unknown
+}
+
+const STATUS_PROGRESS_MESSAGES: Record<string, string> = {
+  processing: '正在识别答题卡...',
+  ocr_done: 'AI正在对比分析...',
 }
 
 export interface FetchDiagnosisOptions {
@@ -122,7 +127,7 @@ export async function pollDiagnosisTaskUntilDone(
   taskId: string,
   options?: FetchDiagnosisOptions,
 ): Promise<DiagnosisResponse> {
-  const progressMsg = 'AI正在分析您的试卷和答题卡...预计需要20-40秒'
+  const progressMsg = '正在识别答题卡...'
   options?.onProgress?.(progressMsg)
 
   for (let attempt = 0; attempt < POLL_MAX_ATTEMPTS; attempt++) {
@@ -143,8 +148,10 @@ export async function pollDiagnosisTaskUntilDone(
     const data = result.data
     console.log('[诊断] status 响应', { attempt: attempt + 1, status: data.status })
 
-    if (data.status === 'processing') {
-      options?.onProgress?.(data.message || progressMsg)
+    if (data.status === 'processing' || data.status === 'ocr_done') {
+      options?.onProgress?.(
+        data.message || STATUS_PROGRESS_MESSAGES[data.status] || progressMsg,
+      )
       continue
     }
 

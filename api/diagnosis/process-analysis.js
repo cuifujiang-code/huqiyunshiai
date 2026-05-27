@@ -1,7 +1,6 @@
-import { runDiagnosisOcrStep } from '../../server/diagnosisProcessOcr.js'
+import { runDiagnosisAnalysisStep } from '../../server/diagnosisProcessAnalysis.js'
 import { verifyDiagnosisProcessSecret } from '../../server/diagnosisTrigger.js'
 
-/** @deprecated 请使用 process-ocr + process-analysis 分步处理 */
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ success: false, message: 'Method Not Allowed' })
@@ -16,17 +15,18 @@ export default async function handler(req, res) {
     return res.status(400).json({ success: false, message: '缺少 taskId' })
   }
 
-  console.log('[api/diagnosis/process] 已弃用，转发至 process-ocr', { taskId })
+  console.log('[api/diagnosis/process-analysis] 开始', { taskId })
 
   try {
-    const outcome = await runDiagnosisOcrStep(taskId)
+    const outcome = await runDiagnosisAnalysisStep(taskId)
     return res.status(200).json({ taskId, ...outcome })
   } catch (error) {
+    console.error('[api/diagnosis/process-analysis] 未捕获错误', error)
     return res.status(500).json({
       success: false,
       taskId,
       status: 'failed',
-      message: error instanceof Error ? error.message : '后台处理失败',
+      message: error instanceof Error ? error.message : 'AI 分析失败',
     })
   }
 }

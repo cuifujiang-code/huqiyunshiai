@@ -1,7 +1,8 @@
 import { randomUUID } from 'crypto'
 import { createDiagnosisTask, getDiagnosisTaskByTaskId, isDiagnosisTaskStoreConfigured } from './diagnosisTaskStore.js'
-import { triggerDiagnosisProcess, verifyDiagnosisProcessSecret } from './diagnosisTrigger.js'
-import { runDiagnosisTask } from './diagnosisProcess.js'
+import { triggerDiagnosisProcessOcr, verifyDiagnosisProcessSecret } from './diagnosisTrigger.js'
+import { runDiagnosisOcrStep } from './diagnosisProcessOcr.js'
+import { runDiagnosisAnalysisStep } from './diagnosisProcessAnalysis.js'
 
 function buildTaskInput(body) {
   return {
@@ -15,6 +16,11 @@ function buildTaskInput(body) {
     examFileName: body.examFileName,
     answerImages: body.answerImages,
   }
+}
+
+const STATUS_MESSAGES = {
+  processing: '正在识别答题卡...',
+  ocr_done: 'AI正在对比分析...',
 }
 
 /** 本地 Express 异步诊断路由（与 Vercel api/diagnosis/* 对齐） */
@@ -47,7 +53,7 @@ export function registerDiagnosisAsyncRoutes(app) {
         userId: body.userId?.trim() || null,
         result: buildTaskInput(body),
       })
-      triggerDiagnosisProcess(taskId)
+      triggerDiagnosisProcessOcr(taskId)
       return res.json({
         success: true,
         taskId,
@@ -73,12 +79,12 @@ export function registerDiagnosisAsyncRoutes(app) {
       if (!task) {
         return res.status(404).json({ success: false, status: 'not_found', message: '任务不存在' })
       }
-      if (task.status === 'processing') {
+      if (task.status === 'processing' || task.status === 'ocr_done') {
         return res.json({
           success: true,
           taskId,
-          status: 'processing',
-          message: 'AI正在分析您的试卷和答题卡...预计需要20-40秒',
+          status: task.status,
+          message: STATUS_MESSAGES[task.status] || '诊断处理中...',
         })
       }
       if (task.status === 'failed') {
@@ -108,6 +114,44 @@ export function registerDiagnosisAsyncRoutes(app) {
     }
   })
 
+  app.post('/api/diagnosis/process-ocr', async (req, res) => {
+    if (!verifyDiagnosisProcessSecret(req)) {
+      return res.status(401).json({ success: false, message: 'Unauthorized' })
+    }
+    const taskId = req.body?.taskId
+    if (!taskId) {
+      return res.status(400).json({ success: false, message: '缺少 taskId' })
+    }
+    try {
+      const outcome = await runDiagnosisOcrStep(taskId)
+      return res.json({ taskId, ...outcome })
+    } catch (error) {
+      return res.status(500).json({
+        success: false,
+        message: error instanceof Error ? error.message : 'OCR 处理失败',
+      })
+    }
+  })
+
+  app.post('/api/diagnosis/process-analysis', async (req, res) => {
+    if (!verifyDiagnosisProcessSecret(req)) {
+      return res.status(401).json({ success: false, message: 'Unauthorized' })
+    }
+    const taskId = req.body?.taskId
+    if (!taskId) {
+      return res.status(400).json({ success: false, message: '缺少 taskId' })
+    }
+    try {
+      const outcome = await runDiagnosisAnalysisStep(taskId)
+      return res.json({ taskId, ...outcome })
+    } catch (error) {
+      return res.status(500).json({
+        success: false,
+        message: error instanceof Error ? error.message : 'AI 分析失败',
+      })
+    }
+  })
+
   app.post('/api/diagnosis/process', async (req, res) => {
     if (!verifyDiagnosisProcessSecret(req)) {
       return res.status(401).json({ success: false, message: 'Unauthorized' })
@@ -117,8 +161,8 @@ export function registerDiagnosisAsyncRoutes(app) {
       return res.status(400).json({ success: false, message: '缺少 taskId' })
     }
     try {
-      const outcome = await runDiagnosisTask(taskId)
-      return res.json({ success: true, taskId, ...outcome })
+      const outcome = await runDiagnosisOcrStep(taskId)
+      return res.json({ taskId, ...outcome })
     } catch (error) {
       return res.status(500).json({
         success: false,
