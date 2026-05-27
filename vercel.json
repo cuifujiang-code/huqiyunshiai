@@ -4,40 +4,56 @@
       "maxDuration": 60,
       "includeFiles": "server/**"
     },
+    "api/planning/generate.js": {
+      "maxDuration": 60,
+      "includeFiles": "{server/**,knowledge-base/**}"
+    },
     "api/diagnosis/generate.js": {
       "maxDuration": 60,
       "includeFiles": "{server/**,node_modules/@alicloud/pop-core/**,node_modules/mammoth/**,node_modules/pdf-parse/**,node_modules/pdfjs-dist/**}"
     },
     "api/diagnosis/submit.js": {
-      "maxDuration": 10,
-      "includeFiles": "server/**"
-    },
-    "api/diagnosis/run-ocr.js": {
-      "maxDuration": 10,
-      "includeFiles": "{server/**,node_modules/@alicloud/pop-core/**,node_modules/mammoth/**,node_modules/pdf-parse/**,node_modules/pdfjs-dist/**}"
-    },
-    "api/diagnosis/run-analysis.js": {
-      "maxDuration": 10,
+      "maxDuration": 60,
       "includeFiles": "server/**"
     },
     "api/diagnosis/status.js": {
-      "maxDuration": 10,
+      "maxDuration": 60,
       "includeFiles": "server/**"
     },
-    "api/planning/generate.js": {
+    "api/diagnosis/job.js": {
       "maxDuration": 60,
-      "includeFiles": "{server/**,knowledge-base/**}"
+      "includeFiles": "server/**"
+    },
+    "api/diagnosis/run-ocr.js": {
+      "maxDuration": 60,
+      "includeFiles": "{server/**,node_modules/@alicloud/pop-core/**,node_modules/mammoth/**,node_modules/pdf-parse/**,node_modules/pdfjs-dist/**}"
+    },
+    "api/diagnosis/run-analysis.js": {
+      "maxDuration": 60,
+      "includeFiles": "server/**"
+    },
+    "api/diagnosis/process.js": {
+      "maxDuration": 60,
+      "includeFiles": "{server/**,node_modules/@alicloud/pop-core/**,node_modules/mammoth/**,node_modules/pdf-parse/**,node_modules/pdfjs-dist/**}"
+    },
+    "api/diagnosis/process-ocr.js": {
+      "maxDuration": 60,
+      "includeFiles": "{server/**,node_modules/@alicloud/pop-core/**,node_modules/mammoth/**,node_modules/pdf-parse/**,node_modules/pdfjs-dist/**}"
+    },
+    "api/diagnosis/process-analysis.js": {
+      "maxDuration": 60,
+      "includeFiles": "server/**"
     },
     "api/teacher/decompose-submit.js": {
-      "maxDuration": 10,
+      "maxDuration": 60,
       "includeFiles": "server/**"
     },
     "api/teacher/decompose-process.js": {
-      "maxDuration": 10,
+      "maxDuration": 60,
       "includeFiles": "{server/**,node_modules/mammoth/**,node_modules/pdf-parse/**,node_modules/pdfjs-dist/**}"
     },
     "api/teacher/decompose-status.js": {
-      "maxDuration": 10,
+      "maxDuration": 60,
       "includeFiles": "server/**"
     },
     "api/teacher/[...path].js": {
