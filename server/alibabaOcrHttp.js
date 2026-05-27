@@ -1,24 +1,17 @@
 /**
- * 阿里云 OCR RecognizeHandwriting — 使用 @alicloud/pop-core 官方 SDK
- * API: ocr-api 2021-07-07（RecognizeHandwriting 不属于 2019-12-30 版本）
- * 文档: https://help.aliyun.com/zh/ocr/developer-reference/api-ocr-api-2021-07-07-recognizehandwriting
+ * 阿里云 OCR RecognizeHandwriting — @alicloud/pop-core 官方 SDK
+ * endpoint 硬编码为杭州公网地址，不读取 ALIBABA_OCR_ENDPOINT 环境变量
  */
 import { createRequire } from 'node:module'
 
 const require = createRequire(import.meta.url)
 const { RPCClient } = require('@alicloud/pop-core')
 
-/** RecognizeHandwriting 必须使用 2021-07-07，使用 2019-12-30 会报服务未开通等错误 */
-const API_VERSION = '2021-07-07'
-const DEFAULT_ENDPOINT = 'https://ocr-api.cn-hangzhou.aliyuncs.com'
+/** 唯一公网接入地址（硬编码，禁止被环境变量覆盖） */
+export const OCR_ENDPOINT = 'https://ocr-api.cn-hangzhou.aliyuncs.com'
+export const OCR_API_VERSION = '2021-07-07'
 
 let rpcClient = null
-
-function normalizeEndpoint(raw) {
-  const value = (raw || DEFAULT_ENDPOINT).trim()
-  if (value.startsWith('http://') || value.startsWith('https://')) return value
-  return `https://${value.replace(/\/$/, '')}`
-}
 
 export function getAlibabaOcrRpcClient() {
   if (rpcClient) return rpcClient
@@ -30,18 +23,18 @@ export function getAlibabaOcrRpcClient() {
     throw new Error('ALIBABA_ACCESS_KEY_ID 或 ALIBABA_ACCESS_KEY_SECRET 未配置')
   }
 
-  const endpoint = normalizeEndpoint(process.env.ALIBABA_OCR_ENDPOINT)
+  console.log('[OCR诊断] 使用endpoint:', OCR_ENDPOINT)
 
   rpcClient = new RPCClient({
     accessKeyId,
     accessKeySecret,
-    endpoint,
-    apiVersion: API_VERSION,
+    endpoint: OCR_ENDPOINT,
+    apiVersion: OCR_API_VERSION,
   })
 
   console.log('[阿里云OCR pop-core] 客户端初始化', {
-    endpoint,
-    apiVersion: API_VERSION,
+    endpoint: OCR_ENDPOINT,
+    apiVersion: OCR_API_VERSION,
     hasAccessKeyId: Boolean(accessKeyId),
   })
 
@@ -86,12 +79,14 @@ function normalizePopCoreError(error) {
 }
 
 /**
- * 通用手写体识别（图片 Base64 → 二进制 Body 上传）
+ * 通用手写体识别
  */
 export async function recognizeHandwritingHttp(imageBase64, { fileName = 'image' } = {}) {
   if (!imageBase64?.trim()) {
     throw new Error(`图片 ${fileName} Base64 为空`)
   }
+
+  console.log('[OCR诊断] 使用endpoint:', OCR_ENDPOINT)
 
   const client = getAlibabaOcrRpcClient()
   const imageBuffer = Buffer.from(imageBase64, 'base64')
@@ -100,66 +95,76 @@ export async function recognizeHandwritingHttp(imageBase64, { fileName = 'image'
     throw new Error(`图片 ${fileName} 解码后为空`)
   }
 
-  const params = {
-    NeedRotate: true,
-    Paragraph: true,
-    body: imageBuffer,
-  }
-
   const requestOption = {
     method: 'POST',
     formatParams: false,
     timeout: 120000,
   }
 
-  console.log('[阿里云OCR pop-core] 发起 RecognizeHandwriting', {
-    fileName,
-    imageBytes: imageBuffer.length,
-    apiVersion: API_VERSION,
-    endpoint: normalizeEndpoint(process.env.ALIBABA_OCR_ENDPOINT),
-  })
+  // 优先二进制 body（官方推荐）；失败时尝试 ImageBase64 参数
+  const attempts = [
+    {
+      label: 'body-binary',
+      params: { NeedRotate: true, Paragraph: true, body: imageBuffer },
+    },
+    {
+      label: 'ImageBase64',
+      params: { NeedRotate: true, Paragraph: true, ImageBase64: imageBase64 },
+    },
+  ]
 
-  let result
-  try {
-    result = await client.request('RecognizeHandwriting', params, requestOption)
-  } catch (error) {
-    const detail = normalizePopCoreError(error)
-    console.error('[阿里云OCR pop-core] SDK 异常', {
+  let lastError = null
+
+  for (const attempt of attempts) {
+    console.log('[阿里云OCR pop-core] 发起 RecognizeHandwriting', {
       fileName,
-      ...detail,
-      stack: error?.stack?.split('\n').slice(0, 6),
+      mode: attempt.label,
+      imageBytes: imageBuffer.length,
+      apiVersion: OCR_API_VERSION,
+      endpoint: OCR_ENDPOINT,
     })
-    const err = new Error(detail.message)
-    Object.assign(err, detail)
-    throw err
+
+    try {
+      const result = await client.request('RecognizeHandwriting', attempt.params, requestOption)
+
+      console.log('[阿里云OCR pop-core] 响应', {
+        fileName,
+        mode: attempt.label,
+        code: result?.Code,
+        message: result?.Message,
+        requestId: result?.RequestId,
+        dataPreview: String(result?.Data ?? '').slice(0, 500),
+      })
+
+      const code = result?.Code ?? result?.code
+      if (code && String(code) !== '200') {
+        const err = new Error(result?.Message || result?.message || `阿里云 OCR 错误码 ${code}`)
+        err.code = code
+        err.requestId = result?.RequestId ?? result?.requestId
+        err.responseBody = JSON.stringify(result).slice(0, 2000)
+        throw err
+      }
+
+      const dataField = result?.Data ?? result?.data
+      if (!dataField) {
+        throw new Error('阿里云 OCR 响应缺少 Data 字段')
+      }
+
+      return extractTextFromHandwritingData(dataField)
+    } catch (error) {
+      lastError = error
+      const detail = normalizePopCoreError(error)
+      console.warn('[阿里云OCR pop-core] 尝试失败', { fileName, mode: attempt.label, ...detail })
+    }
   }
 
-  console.log('[阿里云OCR pop-core] 响应', {
-    fileName,
-    code: result?.Code,
-    message: result?.Message,
-    requestId: result?.RequestId,
-    dataPreview: String(result?.Data ?? '').slice(0, 500),
-  })
-
-  const code = result?.Code ?? result?.code
-  if (code && String(code) !== '200') {
-    const err = new Error(result?.Message || result?.message || `阿里云 OCR 错误码 ${code}`)
-    err.code = code
-    err.requestId = result?.RequestId ?? result?.requestId
-    err.responseBody = JSON.stringify(result).slice(0, 2000)
-    throw err
-  }
-
-  const dataField = result?.Data ?? result?.data
-  if (!dataField) {
-    throw new Error('阿里云 OCR 响应缺少 Data 字段')
-  }
-
-  return extractTextFromHandwritingData(dataField)
+  const detail = normalizePopCoreError(lastError)
+  console.error('[阿里云OCR pop-core] 全部尝试失败', { fileName, ...detail })
+  const err = new Error(detail.message)
+  Object.assign(err, detail)
+  throw err
 }
 
-/** 供测试或热重载时重置单例 */
 export function resetAlibabaOcrClient() {
   rpcClient = null
 }

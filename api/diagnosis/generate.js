@@ -4,12 +4,13 @@ import { buildApiErrorPayload, buildMockFallbackPayload } from '../../server/api
 import { getDeepSeekConfigSummary, serializeError } from '../../server/deepseekClient.js'
 import { logStepError, serializeApiError } from '../../server/apiErrorUtil.js'
 import { isAlibabaOcrConfigured } from '../../server/alibabaHandwritingOcr.js'
+import { OCR_API_VERSION, OCR_ENDPOINT } from '../../server/alibabaOcrHttp.js'
 
-/** OCR 使用 @alicloud/pop-core（server/alibabaOcrHttp.js）：endpoint 杭州，apiVersion 2021-07-07 */
+/** OCR：@alicloud/pop-core，endpoint 硬编码杭州，不读 ALIBABA_OCR_ENDPOINT */
 
 export const ALIBABA_OCR_CONFIG = {
-  endpoint: 'https://ocr-api.cn-hangzhou.aliyuncs.com',
-  apiVersion: '2021-07-07',
+  endpoint: OCR_ENDPOINT,
+  apiVersion: OCR_API_VERSION,
 }
 
 function buildAnalyzeForm(body) {
@@ -45,6 +46,7 @@ async function handlePrepare(body, res) {
   const examBytes = body.examFileBase64 ? Buffer.byteLength(body.examFileBase64, 'utf8') : 0
   const imageCount = Array.isArray(body.answerImages) ? body.answerImages.length : 0
 
+  console.log('[OCR诊断] 使用endpoint:', OCR_ENDPOINT)
   console.log('[api/diagnosis/generate] prepare 请求', {
     examFileName: body.examFileName,
     examFileKB: examBytes ? (examBytes / 1024).toFixed(1) : 0,
