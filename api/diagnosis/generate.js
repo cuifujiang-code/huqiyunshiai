@@ -1,6 +1,6 @@
 import { generateDiagnosis } from '../../server/diagnosisGenerator.js'
 import { prepareDiagnosisComparison } from '../../server/diagnosisPrepare.js'
-import { buildApiErrorPayload, buildMockFallbackPayload } from '../../server/apiResponse.js'
+import { buildApiErrorPayload, buildMockFallbackPayload, setNoCacheHeaders } from '../../server/apiResponse.js'
 import { getDeepSeekConfigSummary, serializeError } from '../../server/deepseekClient.js'
 import { logStepError, serializeApiError } from '../../server/apiErrorUtil.js'
 import { isAlibabaOcrConfigured } from '../../server/alibabaHandwritingOcr.js'
@@ -157,6 +157,7 @@ async function handleAnalyze(body, res, started) {
 }
 
 export default async function handler(req, res) {
+  setNoCacheHeaders(res)
   const started = Date.now()
   const action = req.body?.action || 'analyze'
 

@@ -1,7 +1,8 @@
 import { getDiagnosisJob } from '../../server/diagnosisJobs.js'
-import { buildMockFallbackPayload } from '../../server/apiResponse.js'
+import { buildMockFallbackPayload, setNoCacheHeaders } from '../../server/apiResponse.js'
 
 export default async function handler(req, res) {
+  setNoCacheHeaders(res)
   if (req.method !== 'GET') {
     return res.status(405).json({ success: false, message: 'Method Not Allowed' })
   }

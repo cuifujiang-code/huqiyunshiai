@@ -1,5 +1,6 @@
 import { randomUUID } from 'crypto'
 import { createDiagnosisTask, isDiagnosisTaskStoreConfigured } from '../../server/diagnosisTaskStore.js'
+import { setNoCacheHeaders } from '../../server/apiResponse.js'
 
 function buildTaskInput(body) {
   return {
@@ -16,6 +17,7 @@ function buildTaskInput(body) {
 }
 
 export default async function handler(req, res) {
+  setNoCacheHeaders(res)
   if (req.method !== 'POST') {
     return res.status(405).json({ success: false, message: 'Method Not Allowed' })
   }

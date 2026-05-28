@@ -1,7 +1,9 @@
 import { runDiagnosisAnalysisStep } from '../../server/diagnosisProcessAnalysis.js'
 import { verifyDiagnosisProcessSecret } from '../../server/diagnosisTrigger.js'
+import { setNoCacheHeaders } from '../../server/apiResponse.js'
 
 export default async function handler(req, res) {
+  setNoCacheHeaders(res)
   if (req.method !== 'POST') {
     return res.status(405).json({ success: false, message: 'Method Not Allowed' })
   }

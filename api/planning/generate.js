@@ -1,8 +1,9 @@
 import { generatePlanning } from '../../server/planningGenerator.js'
-import { buildApiErrorPayload, buildMockFallbackPayload } from '../../server/apiResponse.js'
+import { buildApiErrorPayload, buildMockFallbackPayload, setNoCacheHeaders } from '../../server/apiResponse.js'
 import { getDeepSeekConfigSummary } from '../../server/deepseekClient.js'
 
 export default async function handler(req, res) {
+  setNoCacheHeaders(res)
   console.log('[api/planning/generate] 收到请求', {
     method: req.method,
     deepseekConfig: getDeepSeekConfigSummary(),

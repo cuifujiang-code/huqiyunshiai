@@ -1,11 +1,13 @@
 import { runDiagnosisOcrStep } from '../../server/diagnosisProcessOcr.js'
 import { OCR_ENDPOINT } from '../../server/alibabaOcrHttp.js'
+import { setNoCacheHeaders } from '../../server/apiResponse.js'
 
 function getTaskId(req) {
   return req.query?.taskId || req.body?.taskId
 }
 
 export default async function handler(req, res) {
+  setNoCacheHeaders(res)
   if (req.method !== 'GET' && req.method !== 'POST') {
     return res.status(405).json({ success: false, message: 'Method Not Allowed' })
   }

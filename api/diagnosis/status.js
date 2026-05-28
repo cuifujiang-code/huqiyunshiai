@@ -1,4 +1,5 @@
 import { getDiagnosisTaskByTaskId, isDiagnosisTaskStoreConfigured } from '../../server/diagnosisTaskStore.js'
+import { setNoCacheHeaders } from '../../server/apiResponse.js'
 
 const STATUS_MESSAGES = {
   processing: '正在识别答题卡...',
@@ -6,6 +7,7 @@ const STATUS_MESSAGES = {
 }
 
 export default async function handler(req, res) {
+  setNoCacheHeaders(res)
   if (req.method !== 'GET' && req.method !== 'POST') {
     return res.status(405).json({ success: false, message: 'Method Not Allowed' })
   }

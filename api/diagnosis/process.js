@@ -1,8 +1,10 @@
 import { runDiagnosisOcrStep } from '../../server/diagnosisProcessOcr.js'
 import { verifyDiagnosisProcessSecret } from '../../server/diagnosisTrigger.js'
+import { setNoCacheHeaders } from '../../server/apiResponse.js'
 
 /** @deprecated 请使用 process-ocr + process-analysis 分步处理 */
 export default async function handler(req, res) {
+  setNoCacheHeaders(res)
   if (req.method !== 'POST') {
     return res.status(405).json({ success: false, message: 'Method Not Allowed' })
   }

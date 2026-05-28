@@ -2,8 +2,10 @@ import {
   getDecomposeTaskByTaskId,
   isDecomposeTaskStoreConfigured,
 } from '../../server/teacher/decomposeTaskStore.js'
+import { setNoCacheHeaders } from '../../server/apiResponse.js'
 
 export default async function handler(req, res) {
+  setNoCacheHeaders(res)
   if (req.method !== 'GET' && req.method !== 'POST') {
     return res.status(405).json({ success: false, message: 'Method Not Allowed' })
   }

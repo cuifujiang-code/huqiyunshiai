@@ -1,5 +1,12 @@
 import { getDeepSeekConfigSummary, serializeError } from './deepseekClient.js'
 
+/** 禁止 CDN/浏览器缓存 API 响应，避免 Vercel 返回旧 HTML */
+export function setNoCacheHeaders(res) {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate')
+  res.setHeader('Pragma', 'no-cache')
+  res.setHeader('Expires', '0')
+}
+
 /**
  * 构建 Vercel/Express API 统一 JSON 响应（含错误详情）
  */
