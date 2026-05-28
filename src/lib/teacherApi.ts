@@ -8,14 +8,11 @@ import type {
 } from '../types/teacher'
 import { postApiJson } from './postApiJson'
 
-const TEACHER_API_BASE = (import.meta.env.VITE_TEACHER_API_URL ?? '').replace(/\/$/, '')
+const TEACHER_API_BASE = (import.meta.env.VITE_TEACHER_API_URL ?? 'https://api.huqiyunshiai.online').replace(/\/$/, '')
 
 function teacherApiUrl(path: string) {
   const normalized = path.replace(/^\//, '')
-  if (TEACHER_API_BASE) {
-    return `${TEACHER_API_BASE}/${normalized}`
-  }
-  return `/api/teacher/${normalized}`
+  return `${TEACHER_API_BASE}/${normalized}`
 }
 
 export async function fetchQuestions(
