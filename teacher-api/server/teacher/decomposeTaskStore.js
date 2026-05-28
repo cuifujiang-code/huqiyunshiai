@@ -41,11 +41,12 @@ export async function getDecomposeTaskByTaskId(taskId) {
 
 export async function markDecomposeTaskCompleted(taskId, questions) {
   const admin = getSupabaseAdmin()
+  const task = await getDecomposeTaskByTaskId(taskId)
   const { error } = await admin
     .from(TABLE)
     .update({
       status: 'completed',
-      result: { questions },
+      result: { ...(task?.result ?? {}), questions },
       error_message: null,
       updated_at: nowIso(),
     })

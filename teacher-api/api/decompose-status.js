@@ -34,6 +34,7 @@ export default async function handler(req, res) {
         taskId,
         status: task.status,
         message: task.status === 'parsed' ? '试卷已解析，AI 正在拆题...' : '拆题中...',
+        updated_at: task.updated_at,
       })
     }
 
@@ -44,6 +45,7 @@ export default async function handler(req, res) {
         status: 'failed',
         message: task.error_message || '拆题失败',
         error_message: task.error_message,
+        updated_at: task.updated_at,
       })
     }
 
@@ -54,6 +56,7 @@ export default async function handler(req, res) {
       status: 'completed',
       questions,
       message: `已拆分 ${questions.length} 道题目`,
+      updated_at: task.updated_at,
     })
   } catch (error) {
     console.error('[decompose-status] 查询失败', error)

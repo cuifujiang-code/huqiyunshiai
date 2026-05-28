@@ -1,3 +1,4 @@
+import { waitUntil } from '@vercel/functions'
 import '../server/applyUrlShim.js'
 import { runDecomposeTask } from '../server/teacher/decomposeProcess.js'
 import { verifyDecomposeProcessSecret } from '../server/teacher/decomposeTrigger.js'
@@ -20,20 +21,20 @@ export default async function handler(req, res) {
     return res.status(400).json({ success: false, message: '缺少 taskId' })
   }
 
-  console.log('[decompose-process] 开始', { taskId })
+  console.log('[decompose-process] 受理任务', { taskId })
 
-  try {
-    const outcome = await runDecomposeTask(taskId)
-    return res.status(200).json({ taskId, ...outcome })
-  } catch (error) {
-    console.error('[decompose-process] 未捕获错误', error)
-    return res.status(500).json({
-      success: false,
-      taskId,
-      status: 'failed',
-      message: error instanceof Error ? error.message : '拆题处理失败',
-    })
-  }
+  waitUntil(
+    runDecomposeTask(taskId).catch((error) => {
+      console.error('[decompose-process] 后台拆题失败', { taskId, error })
+    }),
+  )
+
+  return res.status(202).json({
+    success: true,
+    taskId,
+    status: 'processing',
+    message: '拆题任务已受理，正在后台处理',
+  })
 }
 
 export const config = {

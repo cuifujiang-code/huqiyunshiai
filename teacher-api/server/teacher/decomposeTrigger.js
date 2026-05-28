@@ -5,7 +5,7 @@ export function getDecomposeProcessSecret() {
 }
 
 export function triggerDecomposeProcess(taskId) {
-  const url = buildServerUrl('/api/decompose-process')
+  const url = buildServerUrl('/decompose-process')
   const secret = getDecomposeProcessSecret()
   const headers = { 'Content-Type': 'application/json' }
   if (secret) headers['x-decompose-process-secret'] = secret

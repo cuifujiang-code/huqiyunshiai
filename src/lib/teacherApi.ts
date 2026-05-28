@@ -103,6 +103,7 @@ export interface DecomposeStatusResponse {
   message?: string
   questions?: Partial<BankQuestion>[]
   error_message?: string
+  updated_at?: string
 }
 
 /** 提交异步拆题任务 */
@@ -151,14 +152,16 @@ export async function decomposeExamPaperAsync(
   }
 
   const taskId = submit.taskId
+  onProgress?.('拆题中...（已提交，等待处理）')
 
   for (let i = 0; i < DECOMPOSE_POLL_MAX; i++) {
     if (i > 0) await sleep(DECOMPOSE_POLL_INTERVAL_MS)
 
     const status = await fetchDecomposeStatus(taskId)
+    const attempt = i + 1
 
     if (status.status === 'processing' || status.status === 'parsed') {
-      onProgress?.(status.message || '拆题中...')
+      onProgress?.(`${status.message || '拆题中...'}（${attempt}/${DECOMPOSE_POLL_MAX}）`)
       continue
     }
 
@@ -175,7 +178,7 @@ export async function decomposeExamPaperAsync(
     }
   }
 
-  throw new Error('拆题处理超时，请稍后重试')
+  throw new Error('拆题处理超时（已轮询60秒），请稍后重试')
 }
 
 /** @deprecated 同步拆题，易超时 */

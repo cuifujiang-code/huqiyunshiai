@@ -6,7 +6,8 @@ import {
 } from './decomposeTaskStore.js'
 import { aiSplitExamText, parseExamText } from './questionImportService.js'
 
-const PROCESS_TIMEOUT_MS = 8_000
+/** 与 Vercel maxDuration 对齐，避免 8 秒误杀导致偶发超时 */
+const PROCESS_TIMEOUT_MS = 55_000
 
 function withTimeout(promise, ms, message) {
   return new Promise((resolve, reject) => {
@@ -59,7 +60,7 @@ export async function runDecomposeTask(taskId) {
   }
 
   try {
-    return await withTimeout(work(), PROCESS_TIMEOUT_MS, '拆题处理超时（超过8秒），请稍后重试或上传更小文件')
+    return await withTimeout(work(), PROCESS_TIMEOUT_MS, '拆题处理超时（超过55秒），请稍后重试或上传更小文件')
   } catch (error) {
     const message = error instanceof Error ? error.message : '拆题失败'
     console.error('[decomposeProcess] 失败', { taskId, message })
