@@ -8,10 +8,14 @@ import type {
 } from '../types/teacher'
 import { postApiJson } from './postApiJson'
 
-const BASE = '/api/teacher'
+const TEACHER_API_BASE = (import.meta.env.VITE_TEACHER_API_URL ?? '').replace(/\/$/, '')
 
-function teacherPath(segments: string) {
-  return `${BASE}/${segments}`
+function teacherApiUrl(path: string) {
+  const normalized = path.replace(/^\//, '')
+  if (TEACHER_API_BASE) {
+    return `${TEACHER_API_BASE}/${normalized}`
+  }
+  return `/api/teacher/${normalized}`
 }
 
 export async function fetchQuestions(
@@ -20,7 +24,7 @@ export async function fetchQuestions(
 ) {
   const params = new URLSearchParams({ teacherId, ...Object.fromEntries(Object.entries(filters).map(([k, v]) => [k, String(v)])) })
   const r = await postApiJson<{ success: boolean; items: BankQuestion[]; total: number; page: number; pageSize: number }>(
-    `${teacherPath('questions')}?${params}`,
+    `${teacherApiUrl('questions')}?${params}`,
     null,
     '题库列表',
     { method: 'GET', timeoutMs: 30000 },
@@ -31,7 +35,7 @@ export async function fetchQuestions(
 
 export async function createQuestion(teacherId: string, question: Partial<BankQuestion>) {
   const r = await postApiJson<{ success: boolean; question: BankQuestion }>(
-    teacherPath('questions'),
+    teacherApiUrl('questions'),
     { teacherId, ...question },
     '创建题目',
   )
@@ -41,7 +45,7 @@ export async function createQuestion(teacherId: string, question: Partial<BankQu
 
 export async function updateQuestion(teacherId: string, id: string, question: Partial<BankQuestion>) {
   const r = await postApiJson<{ success: boolean; question: BankQuestion }>(
-    teacherPath(`questions/${id}`),
+    teacherApiUrl(`questions/${id}`),
     { teacherId, ...question },
     '更新题目',
     { method: 'PUT' },
@@ -52,7 +56,7 @@ export async function updateQuestion(teacherId: string, id: string, question: Pa
 
 export async function deleteQuestions(teacherId: string, ids: string[]) {
   const r = await postApiJson<{ success: boolean }>(
-    teacherPath('questions'),
+    teacherApiUrl('questions'),
     { teacherId, ids },
     '删除题目',
     { method: 'DELETE' },
@@ -63,7 +67,7 @@ export async function deleteQuestions(teacherId: string, ids: string[]) {
 
 export async function batchUpdateTags(teacherId: string, ids: string[], tags: string[]) {
   const r = await postApiJson<{ success: boolean }>(
-    teacherPath('questions/batch-tags'),
+    teacherApiUrl('questions/batch-tags'),
     { teacherId, ids, tags },
     '批量标签',
   )
@@ -73,7 +77,7 @@ export async function batchUpdateTags(teacherId: string, ids: string[], tags: st
 
 export async function batchImportQuestions(teacherId: string, questions: Partial<BankQuestion>[]) {
   const r = await postApiJson<{ success: boolean; questions: BankQuestion[] }>(
-    teacherPath('questions/batch'),
+    teacherApiUrl('questions/batch'),
     { teacherId, questions },
     '批量入库',
   )
@@ -113,7 +117,7 @@ export async function submitDecomposeTask(
   grade: string,
 ): Promise<DecomposeSubmitResponse> {
   const r = await postApiJson<DecomposeSubmitResponse>(
-    '/api/teacher/decompose-submit',
+    teacherApiUrl('decompose-submit'),
     { teacherId, examFileBase64, examFileName, subject, grade },
     '拆题提交',
     { timeoutMs: 10000 },
@@ -124,7 +128,7 @@ export async function submitDecomposeTask(
 
 /** 查询拆题任务状态 */
 export async function fetchDecomposeStatus(taskId: string): Promise<DecomposeStatusResponse> {
-  const url = `/api/teacher/decompose-status?taskId=${encodeURIComponent(taskId)}`
+  const url = `${teacherApiUrl('decompose-status')}?taskId=${encodeURIComponent(taskId)}`
   const r = await postApiJson<DecomposeStatusResponse>(url, null, '拆题状态', {
     method: 'GET',
     timeoutMs: 10000,
@@ -185,7 +189,7 @@ export async function splitExamPaper(
   grade: string,
 ) {
   const r = await postApiJson<{ success: boolean; questions: Partial<BankQuestion>[] }>(
-    teacherPath('questions-import/split'),
+    teacherApiUrl('questions-import/split'),
     { examFileBase64, examFileName, subject, grade },
     '试卷拆题',
     { timeoutMs: 60000 },
@@ -202,7 +206,7 @@ export async function generateQuestion(params: {
   knowledge_point: string
 }) {
   const r = await postApiJson<{ success: boolean; question: BankQuestion }>(
-    teacherPath('questions/generate'),
+    teacherApiUrl('questions/generate'),
     params,
     'AI出题',
     { timeoutMs: 60000 },
@@ -213,7 +217,7 @@ export async function generateQuestion(params: {
 
 export async function buildExam(teacherId: string, config: Record<string, unknown>) {
   const r = await postApiJson<{ success: boolean; exam: BuiltExam }>(
-    teacherPath('exam-builder'),
+    teacherApiUrl('exam-builder'),
     { teacherId, ...config },
     '智能组卷',
     { timeoutMs: 60000 },
@@ -224,7 +228,7 @@ export async function buildExam(teacherId: string, config: Record<string, unknow
 
 export async function fetchLessonPlans(teacherId: string) {
   const r = await postApiJson<{ success: boolean; plans: LessonPlan[] }>(
-    `${teacherPath('lesson-plans')}?teacherId=${encodeURIComponent(teacherId)}`,
+    `${teacherApiUrl('lesson-plans')}?teacherId=${encodeURIComponent(teacherId)}`,
     null,
     '备课列表',
     { method: 'GET' },
@@ -235,7 +239,7 @@ export async function fetchLessonPlans(teacherId: string) {
 
 export async function saveLessonPlan(teacherId: string, plan: Partial<LessonPlan>) {
   const r = await postApiJson<{ success: boolean; plan: LessonPlan }>(
-    teacherPath('lesson-plans'),
+    teacherApiUrl('lesson-plans'),
     { teacherId, ...plan },
     '保存备课',
   )
@@ -245,7 +249,7 @@ export async function saveLessonPlan(teacherId: string, plan: Partial<LessonPlan
 
 export async function generateHandoutDraft(mode: string, input: Record<string, unknown>) {
   const r = await postApiJson<{ success: boolean; draft: HandoutContent }>(
-    teacherPath('handouts'),
+    teacherApiUrl('handouts'),
     { action: 'generate', mode, ...input },
     '生成讲义',
     { timeoutMs: 60000 },
@@ -256,7 +260,7 @@ export async function generateHandoutDraft(mode: string, input: Record<string, u
 
 export async function saveHandout(teacherId: string, handout: Partial<HandoutRecord>) {
   const r = await postApiJson<{ success: boolean; handout: HandoutRecord }>(
-    teacherPath('handouts'),
+    teacherApiUrl('handouts'),
     { teacherId, ...handout },
     '保存讲义',
   )
@@ -266,7 +270,7 @@ export async function saveHandout(teacherId: string, handout: Partial<HandoutRec
 
 export async function fetchHandouts(teacherId: string) {
   const r = await postApiJson<{ success: boolean; handouts: HandoutRecord[] }>(
-    `${teacherPath('handouts')}?teacherId=${encodeURIComponent(teacherId)}`,
+    `${teacherApiUrl('handouts')}?teacherId=${encodeURIComponent(teacherId)}`,
     null,
     '讲义列表',
     { method: 'GET' },
@@ -277,7 +281,7 @@ export async function fetchHandouts(teacherId: string) {
 
 export async function saveBook(teacherId: string, book: Partial<BookRecord>) {
   const r = await postApiJson<{ success: boolean; book: BookRecord }>(
-    teacherPath('books'),
+    teacherApiUrl('books'),
     { teacherId, ...book },
     '保存辅导书',
   )
@@ -287,7 +291,7 @@ export async function saveBook(teacherId: string, book: Partial<BookRecord>) {
 
 export async function fetchBooks(teacherId: string) {
   const r = await postApiJson<{ success: boolean; books: BookRecord[] }>(
-    `${teacherPath('books')}?teacherId=${encodeURIComponent(teacherId)}`,
+    `${teacherApiUrl('books')}?teacherId=${encodeURIComponent(teacherId)}`,
     null,
     '辅导书列表',
     { method: 'GET' },
