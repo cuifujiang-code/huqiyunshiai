@@ -1,10 +1,11 @@
+import '../../server/applyUrlShim.js'
 import { handleTeacherApi } from '../../server/teacherApiHandler.js'
 import { setNoCacheHeaders } from '../../server/apiResponse.js'
+import { getTeacherApiPathSegments } from '../../server/urlUtil.js'
 
 export default async function handler(req, res) {
   setNoCacheHeaders(res)
-  const slug = req.query.path
-  const segments = Array.isArray(slug) ? slug : slug ? [slug] : []
+  const segments = getTeacherApiPathSegments(req)
   return handleTeacherApi(req, res, segments)
 }
 

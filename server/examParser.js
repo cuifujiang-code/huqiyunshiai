@@ -1,3 +1,4 @@
+import './applyUrlShim.js'
 import mammoth from 'mammoth'
 import { createRequire } from 'node:module'
 import { logStepError } from './apiErrorUtil.js'

@@ -1,10 +1,4 @@
-function getBaseUrl() {
-  if (process.env.VERCEL_URL) {
-    return `https://${process.env.VERCEL_URL}`
-  }
-  const port = process.env.PORT || 3001
-  return `http://127.0.0.1:${port}`
-}
+import { buildServerUrl } from './urlUtil.js'
 
 export function getDiagnosisProcessSecret() {
   return process.env.DIAGNOSIS_PROCESS_SECRET || process.env.SUPABASE_SERVICE_ROLE_KEY || ''
@@ -20,7 +14,7 @@ function buildProcessHeaders() {
 }
 
 function fireProcessRequest(path, taskId, label) {
-  const url = `${getBaseUrl()}${path}`
+  const url = buildServerUrl(path)
   console.log(`[diagnosisTrigger] 触发${label}`, { taskId, path })
 
   fetch(url, {

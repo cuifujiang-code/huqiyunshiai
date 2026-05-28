@@ -1,17 +1,11 @@
-function getBaseUrl() {
-  if (process.env.VERCEL_URL) {
-    return `https://${process.env.VERCEL_URL}`
-  }
-  const port = process.env.PORT || 3001
-  return `http://127.0.0.1:${port}`
-}
+import { buildServerUrl } from '../urlUtil.js'
 
 export function getDecomposeProcessSecret() {
   return process.env.DECOMPOSE_PROCESS_SECRET || process.env.SUPABASE_SERVICE_ROLE_KEY || ''
 }
 
 export function triggerDecomposeProcess(taskId) {
-  const url = `${getBaseUrl()}/api/teacher/decompose-process`
+  const url = buildServerUrl('/api/teacher/decompose-process')
   const secret = getDecomposeProcessSecret()
   const headers = { 'Content-Type': 'application/json' }
   if (secret) headers['x-decompose-process-secret'] = secret

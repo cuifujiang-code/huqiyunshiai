@@ -1,4 +1,3 @@
-import { parseExamFile } from '../examParser.js'
 import { callDeepSeekAI, extractJson } from '../deepseekClient.js'
 
 const SYSTEM = '你是 K12 试卷拆题专家。只输出合法 JSON 数组，不要 markdown。'
@@ -37,6 +36,7 @@ function normalizeQuestions(raw, meta) {
 }
 
 export async function parseExamText(examBuffer, fileName) {
+  const { parseExamFile } = await import('../examParser.js')
   const parsed = await parseExamFile(examBuffer, fileName)
   if (!parsed.text?.trim()) {
     throw new Error('试卷解析结果为空')

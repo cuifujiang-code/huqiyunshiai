@@ -2,6 +2,7 @@
  * 阿里云 OCR RecognizeHandwriting — @alicloud/pop-core 官方 SDK
  * endpoint 硬编码为杭州公网地址，不读取 ALIBABA_OCR_ENDPOINT 环境变量
  */
+import './applyUrlShim.js'
 import { createRequire } from 'node:module'
 
 const require = createRequire(import.meta.url)

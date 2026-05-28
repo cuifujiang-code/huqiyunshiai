@@ -1,4 +1,5 @@
 import { handleTeacherApi } from './teacherApiHandler.js'
+import { getPathSegmentsFromRequest } from './urlUtil.js'
 import decomposeSubmit from '../api/teacher/decompose-submit.js'
 import decomposeProcess from '../api/teacher/decompose-process.js'
 import decomposeStatus from '../api/teacher/decompose-status.js'
@@ -10,7 +11,7 @@ export function registerTeacherRoutes(app) {
   app.post('/api/teacher/decompose-status', (req, res) => decomposeStatus(req, res))
 
   app.use('/api/teacher', async (req, res) => {
-    const segments = req.path.replace(/^\//, '').split('/').filter(Boolean)
+    const segments = getPathSegmentsFromRequest(req, '/api/teacher')
     return handleTeacherApi(req, res, segments)
   })
 }
