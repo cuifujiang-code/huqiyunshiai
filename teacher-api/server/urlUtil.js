@@ -37,10 +37,10 @@ export function resolveChatCompletionsUrl(apiBase) {
 
 /** 从 Vercel catch-all / Express 请求中解析教师 API 路径段 */
 export function getTeacherApiPathSegments(req) {
-  return getPathSegmentsFromRequest(req, '/api/teacher')
+  return normalizeTeacherPathSegments(getRawPathSegments(req))
 }
 
-export function getPathSegmentsFromRequest(req, mountPath = '/api/teacher') {
+function getRawPathSegments(req) {
   const slug = req.query?.path
   if (Array.isArray(slug) && slug.length) {
     return slug.map(String).filter(Boolean)
@@ -52,11 +52,60 @@ export function getPathSegmentsFromRequest(req, mountPath = '/api/teacher') {
   if (typeof req.url === 'string' && req.url) {
     try {
       const pathname = new URL(req.url, getServerOrigin(req)).pathname
+      return pathname.split('/').filter(Boolean)
+    } catch {
+      // ignore malformed URL
+    }
+  }
+
+  return []
+}
+
+/** 去掉 /api/teacher/、/api/、/teacher/ 等前缀，兼容主站与独立 API 域名 */
+export function normalizeTeacherPathSegments(segments = []) {
+  const parts = [...segments].map(String).filter(Boolean)
+
+  while (parts.length > 0) {
+    if (parts[0] === 'api' && parts[1] === 'teacher') {
+      parts.splice(0, 2)
+      continue
+    }
+    if (parts[0] === 'api' || parts[0] === 'teacher') {
+      parts.shift()
+      continue
+    }
+    break
+  }
+
+  return parts
+}
+
+/** 将路径段或字符串规范化为教师 API 路由 key，如 questions、lesson-plans */
+export function normalizeTeacherPath(pathOrSegments) {
+  const segments = Array.isArray(pathOrSegments)
+    ? pathOrSegments
+    : String(pathOrSegments || '').split('/').filter(Boolean)
+  return normalizeTeacherPathSegments(segments).join('/')
+}
+
+export function getPathSegmentsFromRequest(req, mountPath = '/api/teacher') {
+  const slug = req.query?.path
+  if (Array.isArray(slug) && slug.length) {
+    return normalizeTeacherPathSegments(slug)
+  }
+  if (typeof slug === 'string' && slug) {
+    return normalizeTeacherPathSegments(slug.split('/').filter(Boolean))
+  }
+
+  if (typeof req.url === 'string' && req.url) {
+    try {
+      const pathname = new URL(req.url, getServerOrigin(req)).pathname
       const normalizedMount = mountPath.endsWith('/') ? mountPath.slice(0, -1) : mountPath
       if (pathname === normalizedMount || pathname.startsWith(`${normalizedMount}/`)) {
         const rest = pathname.slice(normalizedMount.length).replace(/^\//, '')
-        return rest ? rest.split('/').filter(Boolean) : []
+        return normalizeTeacherPathSegments(rest ? rest.split('/').filter(Boolean) : [])
       }
+      return normalizeTeacherPathSegments(pathname.split('/').filter(Boolean))
     } catch {
       // ignore malformed URL
     }

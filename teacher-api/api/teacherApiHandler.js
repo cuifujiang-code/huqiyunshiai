@@ -6,6 +6,7 @@ import * as lessonPlan from '../server/teacher/lessonPlanStore.js'
 import * as handout from '../server/teacher/handoutStore.js'
 import * as book from '../server/teacher/bookStore.js'
 import { callDeepSeekAI, extractJson } from '../server/deepseekClient.js'
+import { normalizeTeacherPath } from '../server/urlUtil.js'
 
 function requireTeacher(body, query) {
   const teacherId = body?.teacherId?.trim() || query?.teacherId?.trim()
@@ -24,9 +25,15 @@ function needsSupabase(path) {
 /** 独立教师 API 路由（部署于 api.huqiyunshiai.online） */
 export async function handleTeacherApi(req, res, pathSegments = []) {
   const method = req.method
-  const path = pathSegments.join('/')
+  const path = normalizeTeacherPath(pathSegments)
   const body = req.body ?? {}
   const query = req.query ?? {}
+
+  console.log('[teacherApi] 路由', { method, path, rawSegments: pathSegments, url: req.url })
+
+  if (!path) {
+    return res.status(404).json({ success: false, message: '未知路由: （空路径）' })
+  }
 
   if (needsSupabase(path) && !isSupabaseAdminConfigured()) return notConfigured(res)
 

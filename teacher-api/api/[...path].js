@@ -1,13 +1,13 @@
 import '../server/applyUrlShim.js'
 import { handleTeacherApi } from './teacherApiHandler.js'
 import { applyApiHeaders, handleOptions } from '../server/apiResponse.js'
-import { getPathSegmentsFromRequest } from '../server/urlUtil.js'
+import { getTeacherApiPathSegments } from '../server/urlUtil.js'
 
 export default async function handler(req, res) {
   if (handleOptions(req, res)) return
   applyApiHeaders(req, res)
 
-  const segments = getPathSegmentsFromRequest(req, '/api')
+  const segments = getTeacherApiPathSegments(req)
   return handleTeacherApi(req, res, segments)
 }
 
