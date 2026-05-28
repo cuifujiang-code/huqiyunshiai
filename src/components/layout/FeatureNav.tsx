@@ -8,6 +8,7 @@ const teacherLinks = [
   { to: '/teacher/dashboard', label: '工作台' },
   { to: '/teacher/exam', label: 'AI出题' },
   { to: '/teacher/question-bank', label: '我的题库' },
+  { to: '/teacher/task-center', label: '拆题任务' },
   { to: '/teacher/lesson-prep', label: '智能备课' },
   { to: '/teacher/exam-builder', label: '智能组卷' },
   { to: '/teacher/handout-builder', label: '讲义制作' },

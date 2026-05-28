@@ -52,7 +52,7 @@ export default async function handler(req, res) {
       success: true,
       taskId,
       status: 'processing',
-      message: '拆题任务已提交',
+      message: '任务已提交，正在后台处理，可稍后查看',
     })
   } catch (error) {
     console.error('[decompose-submit] 失败', error)

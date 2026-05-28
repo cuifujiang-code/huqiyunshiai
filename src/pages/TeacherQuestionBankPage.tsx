@@ -6,11 +6,12 @@ import {
   batchImportQuestions,
   batchUpdateTags,
   createQuestion,
-  decomposeExamPaperAsync,
   deleteQuestions,
   fetchQuestions,
+  submitDecomposeTask,
   updateQuestion,
 } from '../lib/teacherApi'
+import { Link } from 'react-router-dom'
 import type { BankQuestion } from '../types/teacher'
 import {
   DIFFICULTIES,
@@ -51,7 +52,6 @@ export default function TeacherQuestionBankPage() {
   const [editing, setEditing] = useState<BankQuestion | null>(null)
   const [splitPreview, setSplitPreview] = useState<Partial<BankQuestion>[] | null>(null)
   const [importing, setImporting] = useState(false)
-  const [importProgress, setImportProgress] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     if (!teacherId) return
@@ -87,25 +87,24 @@ export default function TeacherQuestionBankPage() {
   const handleImportFile = async (file: File) => {
     if (!teacherId) return
     setImporting(true)
-    setImportProgress('拆题中...')
     setMessage(null)
     try {
       const base64 = await fileToBase64(file)
-      const questions = await decomposeExamPaperAsync(
+      const result = await submitDecomposeTask(
         teacherId,
         base64,
         file.name,
         filters.subject || '物理',
         filters.grade || '八年级',
-        (msg) => setImportProgress(msg),
       )
-      setSplitPreview(questions)
-      setMessage(`AI 已拆分 ${questions.length} 道题目，请确认后入库`)
+      if (!result.success) {
+        throw new Error(result.message || '提交拆题任务失败')
+      }
+      setMessage('任务已提交，正在后台处理，可稍后查看')
     } catch (e) {
-      setMessage(e instanceof Error ? e.message : '拆题失败')
+      setMessage(e instanceof Error ? e.message : '提交失败')
     } finally {
       setImporting(false)
-      setImportProgress(null)
     }
   }
 
@@ -128,12 +127,6 @@ export default function TeacherQuestionBankPage() {
       <DashboardHeader title="我的题库" backTo="/teacher/dashboard" backLabel="返回工作台" featureNavRole="teacher" />
       <main className="mx-auto max-w-6xl px-4 py-6">
         {message && <p className="mb-4 rounded-lg border border-blue-500/30 bg-blue-500/10 px-3 py-2 text-sm text-blue-200">{message}</p>}
-
-        {importProgress && (
-          <div className="mb-4 rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
-            {importProgress}
-          </div>
-        )}
 
         <div className="mb-4 flex flex-wrap gap-2">
           <select className={`${inputClass} w-auto`} value={filters.subject} onChange={(e) => setFilters({ ...filters, subject: e.target.value })}>
@@ -160,9 +153,10 @@ export default function TeacherQuestionBankPage() {
           <button type="button" className={btnSecondary} onClick={() => { setPage(1); load() }}>筛选</button>
           <button type="button" className={btnPrimary} onClick={() => setEditing(emptyQuestion())}>+ 单题添加</button>
           <label className={`${btnSecondary} cursor-pointer ${importing ? 'opacity-60 pointer-events-none' : ''}`}>
-            {importProgress || (importing ? '拆题中...' : '上传试卷拆题')}
+            {importing ? '提交中...' : '上传试卷拆题'}
             <input type="file" accept=".docx,.pdf" className="hidden" onChange={(e) => e.target.files?.[0] && handleImportFile(e.target.files[0])} />
           </label>
+          <Link to="/teacher/task-center" className={btnSecondary}>查看拆题任务</Link>
         </div>
 
         {selected.length > 0 && (

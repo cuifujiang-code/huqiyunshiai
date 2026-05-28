@@ -17,6 +17,7 @@ import TeacherHandoutBuilderPage from './pages/TeacherHandoutBuilderPage'
 import TeacherLessonPrepPage from './pages/TeacherLessonPrepPage'
 import TeacherPlanningPage from './pages/TeacherPlanningPage'
 import TeacherQuestionBankPage from './pages/TeacherQuestionBankPage'
+import TeacherTaskCenterPage from './pages/TeacherTaskCenterPage'
 
 export default function App() {
   return (
@@ -55,6 +56,14 @@ export default function App() {
               element={
                 <ProtectedRoute requiredRole="teacher">
                   <TeacherQuestionBankPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/teacher/task-center"
+              element={
+                <ProtectedRoute requiredRole="teacher">
+                  <TeacherTaskCenterPage />
                 </ProtectedRoute>
               }
             />

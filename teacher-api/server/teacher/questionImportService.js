@@ -50,6 +50,48 @@ export async function aiSplitExamText(text, meta) {
   return normalizeQuestions(raw, meta)
 }
 
+const BATCH_CHAR_LIMIT = 6000
+
+/** 将长试卷文本按段落切分为多个 AI 批次 */
+export function splitTextIntoBatches(text, maxLen = BATCH_CHAR_LIMIT) {
+  const normalized = text.trim()
+  if (!normalized) return []
+  if (normalized.length <= maxLen) return [normalized]
+
+  const batches = []
+  let start = 0
+  while (start < normalized.length) {
+    let end = Math.min(start + maxLen, normalized.length)
+    if (end < normalized.length) {
+      const slice = normalized.slice(start, end)
+      const lastBreak = Math.max(slice.lastIndexOf('\n\n'), slice.lastIndexOf('\n'))
+      if (lastBreak > maxLen * 0.4) {
+        end = start + lastBreak
+      }
+    }
+    const chunk = normalized.slice(start, end).trim()
+    if (chunk) batches.push(chunk)
+    start = Math.max(end, start + 1)
+  }
+  return batches
+}
+
+/** 分批调用 AI 拆题，每批完成后回调 onBatchDone */
+export async function aiSplitExamTextInBatches(text, meta, onBatchDone) {
+  const batches = splitTextIntoBatches(text)
+  const all = []
+
+  for (let i = 0; i < batches.length; i++) {
+    const batchQuestions = await aiSplitExamText(batches[i], meta)
+    all.push(...batchQuestions)
+    if (onBatchDone) {
+      await onBatchDone(all, { total: batches.length, completed: i + 1, nextIndex: i + 1 })
+    }
+  }
+
+  return all
+}
+
 export async function splitExamToQuestions(examBuffer, fileName, meta) {
   const text = await parseExamText(examBuffer, fileName)
   return aiSplitExamText(text, meta)

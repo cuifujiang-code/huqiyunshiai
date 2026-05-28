@@ -15,6 +15,10 @@
     "api/decompose-status.js": {
       "maxDuration": 60,
       "includeFiles": "server/**"
+    },
+    "api/decompose-tasks.js": {
+      "maxDuration": 10,
+      "includeFiles": "server/**"
     }
   },
   "rewrites": [

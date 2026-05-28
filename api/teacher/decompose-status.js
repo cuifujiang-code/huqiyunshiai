@@ -26,12 +26,20 @@ export default async function handler(req, res) {
       return res.status(404).json({ success: false, status: 'not_found', message: '任务不存在' })
     }
 
-    if (task.status === 'processing' || task.status === 'parsed') {
+    if (task.status === 'processing' || task.status === 'parsed' || task.status === 'splitting') {
+      const batchProgress = task.result?.batchProgress
+      const progressMsg = task.status === 'splitting' && batchProgress
+        ? `AI 拆题中（${batchProgress.completed}/${batchProgress.total} 批）...`
+        : task.status === 'parsed'
+          ? '试卷已解析，AI 正在拆题...'
+          : '拆题中...'
       return res.status(200).json({
         success: true,
         taskId,
         status: task.status,
-        message: task.status === 'parsed' ? '试卷已解析，AI 正在拆题...' : '拆题中...',
+        message: progressMsg,
+        batchProgress,
+        questionCount: task.result?.questions?.length ?? 0,
         updated_at: task.updated_at,
       })
     }
