@@ -1,3 +1,4 @@
+import '../../server/applyUrlShim.js'
 import { runDiagnosisOcrStep } from '../../server/diagnosisProcessOcr.js'
 import { verifyDiagnosisProcessSecret } from '../../server/diagnosisTrigger.js'
 import { setNoCacheHeaders } from '../../server/apiResponse.js'

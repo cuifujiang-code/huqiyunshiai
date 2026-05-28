@@ -1,6 +1,7 @@
 /**
  * DeepSeek API 统一调用客户端（OpenAI 兼容格式）
  */
+import { resolveChatCompletionsUrl } from './urlUtil.js'
 
 export class DeepSeekApiError extends Error {
   constructor(message, { statusCode, responseBody, url, model, config } = {}) {
@@ -31,7 +32,7 @@ export function getDeepSeekConfig() {
   const apiBase = (process.env.DEEPSEEK_API_BASE_URL || 'https://api.deepseek.com').replace(/\/$/, '')
   const model = process.env.DEEPSEEK_MODEL || 'deepseek-chat'
   const visionModelEnv = process.env.DEEPSEEK_VISION_MODEL?.trim() || ''
-  const url = apiBase.includes('/chat/completions') ? apiBase : `${apiBase}/chat/completions`
+  const url = resolveChatCompletionsUrl(apiBase)
 
   return {
     apiKey,

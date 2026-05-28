@@ -1,3 +1,4 @@
+import '../../server/applyUrlShim.js'
 import {
   getDecomposeTaskByTaskId,
   isDecomposeTaskStoreConfigured,

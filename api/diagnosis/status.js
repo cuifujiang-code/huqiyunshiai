@@ -1,3 +1,4 @@
+import '../../server/applyUrlShim.js'
 import { getDiagnosisTaskByTaskId, isDiagnosisTaskStoreConfigured } from '../../server/diagnosisTaskStore.js'
 import { setNoCacheHeaders } from '../../server/apiResponse.js'
 

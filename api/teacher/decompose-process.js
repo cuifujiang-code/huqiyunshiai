@@ -1,3 +1,4 @@
+import '../../server/applyUrlShim.js'
 import { runDecomposeTask } from '../../server/teacher/decomposeProcess.js'
 import { verifyDecomposeProcessSecret } from '../../server/teacher/decomposeTrigger.js'
 import { setNoCacheHeaders } from '../../server/apiResponse.js'

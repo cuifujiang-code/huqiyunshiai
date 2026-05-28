@@ -1,3 +1,4 @@
+import '../../server/applyUrlShim.js'
 import { getDiagnosisJob } from '../../server/diagnosisJobs.js'
 import { buildMockFallbackPayload, setNoCacheHeaders } from '../../server/apiResponse.js'
 

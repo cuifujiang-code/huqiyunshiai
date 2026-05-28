@@ -1,3 +1,4 @@
+import '../../server/applyUrlShim.js'
 import { generateDiagnosis } from '../../server/diagnosisGenerator.js'
 import { prepareDiagnosisComparison } from '../../server/diagnosisPrepare.js'
 import { buildApiErrorPayload, buildMockFallbackPayload, setNoCacheHeaders } from '../../server/apiResponse.js'

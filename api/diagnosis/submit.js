@@ -1,3 +1,4 @@
+import '../../server/applyUrlShim.js'
 import { randomUUID } from 'crypto'
 import { createDiagnosisTask, isDiagnosisTaskStoreConfigured } from '../../server/diagnosisTaskStore.js'
 import { setNoCacheHeaders } from '../../server/apiResponse.js'

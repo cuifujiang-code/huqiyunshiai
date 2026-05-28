@@ -1,3 +1,4 @@
+import '../server/applyUrlShim.js'
 import { generateExam } from '../server/examGenerator.js'
 import { buildApiErrorPayload, buildMockFallbackPayload, setNoCacheHeaders } from '../server/apiResponse.js'
 import { getDeepSeekConfigSummary } from '../server/deepseekClient.js'

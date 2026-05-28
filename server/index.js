@@ -1,4 +1,5 @@
 import 'dotenv/config'
+import './applyUrlShim.js'
 import express from 'express'
 import cors from 'cors'
 import { ensureMockUser } from './mockAuth.js'
@@ -7,6 +8,7 @@ import { registerDiagnosisRoute } from './diagnosisRoute.js'
 import { registerDiagnosisAsyncRoutes } from './diagnosisAsyncRoute.js'
 import { registerPlanningRoute } from './planningRoute.js'
 import { registerTeacherRoutes } from './teacherRoute.js'
+import { resolveChatCompletionsUrl } from './urlUtil.js'
 
 const app = express()
 const PORT = process.env.PORT || 3001
@@ -60,7 +62,7 @@ app.get('/api/deepseek/test', async (_req, res) => {
     })
   }
 
-  const url = apiBase.includes('/chat/completions') ? apiBase : `${apiBase}/chat/completions`
+  const url = resolveChatCompletionsUrl(apiBase)
 
   try {
     const response = await fetch(url, {

@@ -1,3 +1,4 @@
+import '../../server/applyUrlShim.js'
 import { runDiagnosisOcrStep } from '../../server/diagnosisProcessOcr.js'
 import { OCR_ENDPOINT } from '../../server/alibabaOcrHttp.js'
 import { setNoCacheHeaders } from '../../server/apiResponse.js'

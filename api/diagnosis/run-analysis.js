@@ -1,3 +1,4 @@
+import '../../server/applyUrlShim.js'
 import { runDiagnosisAnalysisStep } from '../../server/diagnosisProcessAnalysis.js'
 import { setNoCacheHeaders } from '../../server/apiResponse.js'
 

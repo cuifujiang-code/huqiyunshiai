@@ -1,3 +1,4 @@
+import '../../server/applyUrlShim.js'
 import { generatePlanning } from '../../server/planningGenerator.js'
 import { buildApiErrorPayload, buildMockFallbackPayload, setNoCacheHeaders } from '../../server/apiResponse.js'
 import { getDeepSeekConfigSummary } from '../../server/deepseekClient.js'

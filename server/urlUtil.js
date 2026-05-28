@@ -21,6 +21,20 @@ export function buildServerUrl(path, req) {
   return new URL(path, getServerOrigin(req)).href
 }
 
+/** 解析 DeepSeek 等 OpenAI 兼容 chat/completions 端点 */
+export function resolveChatCompletionsUrl(apiBase) {
+  const trimmed = (apiBase || 'https://api.deepseek.com').replace(/\/$/, '')
+  try {
+    const base = new URL(trimmed.includes('://') ? trimmed : `https://${trimmed}`)
+    if (base.pathname.includes('chat/completions')) {
+      return base.href
+    }
+    return new URL('chat/completions', `${base.origin}/`).href
+  } catch {
+    return trimmed.includes('/chat/completions') ? trimmed : `${trimmed}/chat/completions`
+  }
+}
+
 /** 从 Vercel catch-all / Express 请求中解析教师 API 路径段 */
 export function getTeacherApiPathSegments(req) {
   return getPathSegmentsFromRequest(req, '/api/teacher')
@@ -151,12 +165,6 @@ export function applyLegacyUrlParseShim() {
   if (legacyUrlParseShimApplied) return
   legacyUrlParseShimApplied = true
 
-  const originalParse = nodeUrl.parse.bind(nodeUrl)
-  nodeUrl.parse = (urlString, parseQueryString, slashesDenoteHost) => {
-    try {
-      return legacyParseWithWhatwg(urlString, parseQueryString, slashesDenoteHost)
-    } catch {
-      return originalParse(urlString, parseQueryString, slashesDenoteHost)
-    }
-  }
+  nodeUrl.parse = (urlString, parseQueryString, slashesDenoteHost) =>
+    legacyParseWithWhatwg(urlString, parseQueryString, slashesDenoteHost)
 }

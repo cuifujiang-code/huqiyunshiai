@@ -1,3 +1,4 @@
+import '../../server/applyUrlShim.js'
 import { randomUUID } from 'crypto'
 import {
   createDecomposeTask,
