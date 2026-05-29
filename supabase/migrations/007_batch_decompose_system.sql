@@ -79,3 +79,36 @@ ALTER TABLE public.batch_question_bank ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "deny_direct_batch_tasks" ON public.batch_decompose_tasks FOR ALL USING (false) WITH CHECK (false);
 CREATE POLICY "deny_direct_batch_items" ON public.batch_decompose_items FOR ALL USING (false) WITH CHECK (false);
 CREATE POLICY "deny_direct_batch_qb" ON public.batch_question_bank FOR ALL USING (false) WITH CHECK (false);
+
+-- ---------------------------------------------------------------------------
+-- 结构同步（可重复执行）：CREATE TABLE IF NOT EXISTS 不会给已存在的旧表补列，
+-- 若线上库缺少 file_name / imported_questions / meta 等字段，执行以下语句即可修复。
+-- 完整补丁亦见 supabase/migrations/008_batch_decompose_schema_sync.sql
+-- ---------------------------------------------------------------------------
+
+ALTER TABLE public.batch_decompose_tasks ADD COLUMN IF NOT EXISTS file_name TEXT DEFAULT '';
+ALTER TABLE public.batch_decompose_tasks ADD COLUMN IF NOT EXISTS total_questions INT NOT NULL DEFAULT 0;
+ALTER TABLE public.batch_decompose_tasks ADD COLUMN IF NOT EXISTS imported_questions INT NOT NULL DEFAULT 0;
+ALTER TABLE public.batch_decompose_tasks ADD COLUMN IF NOT EXISTS error_message TEXT;
+ALTER TABLE public.batch_decompose_tasks ADD COLUMN IF NOT EXISTS meta JSONB NOT NULL DEFAULT '{}'::jsonb;
+ALTER TABLE public.batch_decompose_tasks ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+
+ALTER TABLE public.batch_decompose_items ADD COLUMN IF NOT EXISTS question_count INT NOT NULL DEFAULT 0;
+ALTER TABLE public.batch_decompose_items ADD COLUMN IF NOT EXISTS result JSONB NOT NULL DEFAULT '{}'::jsonb;
+ALTER TABLE public.batch_decompose_items ADD COLUMN IF NOT EXISTS error_message TEXT;
+ALTER TABLE public.batch_decompose_items ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'batch_decompose_tasks_status_check'
+      AND conrelid = 'public.batch_decompose_tasks'::regclass
+  ) THEN
+    ALTER TABLE public.batch_decompose_tasks DROP CONSTRAINT batch_decompose_tasks_status_check;
+  END IF;
+END $$;
+
+ALTER TABLE public.batch_decompose_tasks
+  ADD CONSTRAINT batch_decompose_tasks_status_check
+  CHECK (status IN ('pending', 'running', 'completed', 'failed', 'partial'));
