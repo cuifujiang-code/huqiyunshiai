@@ -5,8 +5,10 @@ import { useAuth } from '../context/AuthContext'
 import { fileToBase64 } from '../lib/fileBase64'
 import {
   fetchBatchProgress,
+  isTaskStuck,
   listBatchTasks,
   startBatchTask,
+  triggerBatchAutoRetry,
   uploadBatchTask,
   type BatchProgress,
   type BatchQuestion,
@@ -58,6 +60,9 @@ export default function TeacherBatchDecomposePage() {
   const [preview, setPreview] = useState<BatchQuestion[] | null>(null)
   const [startingId, setStartingId] = useState<string | null>(null)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const autoRetryRef = useRef(false)
+  const tasksRef = useRef<BatchProgress[]>([])
+  tasksRef.current = tasks
 
   const loadTasks = useCallback(async () => {
     if (!teacherId) return
@@ -77,10 +82,32 @@ export default function TeacherBatchDecomposePage() {
   }, [loadTasks])
 
   useEffect(() => {
-    const hasRunning = tasks.some((t) => t.status === 'running' || t.status === 'pending')
-    if (hasRunning && !pollRef.current) {
+    if (!teacherId || autoRetryRef.current) return
+    autoRetryRef.current = true
+    triggerBatchAutoRetry()
+      .then((report) => {
+        if (report.processed > 0) {
+          setMessage(`已自动恢复 ${report.processed} 个卡住的批量任务`)
+          loadTasks()
+        }
+      })
+      .catch(() => {})
+  }, [teacherId, loadTasks])
+
+  useEffect(() => {
+    const hasRunning = tasks.some(
+      (t) =>
+        t.status === 'running'
+        || t.status === 'pending'
+        || (t.status === 'partial' && (t.pendingItems > 0 || t.processingItems > 0)),
+    )
+    const hasStuck = tasks.some((t) => isTaskStuck(t))
+    if ((hasRunning || hasStuck) && !pollRef.current) {
       pollRef.current = setInterval(() => {
         loadTasks()
+        if (tasksRef.current.some((t) => isTaskStuck(t))) {
+          triggerBatchAutoRetry().catch(() => {})
+        }
       }, 5000)
     }
     if (!hasRunning && pollRef.current) {
@@ -252,14 +279,24 @@ export default function TeacherBatchDecomposePage() {
                           {startingId === task.batchId ? '启动中...' : '启动'}
                         </button>
                       )}
-                      {task.status === 'running' && task.progressPercent === 0 && task.pendingItems > 0 && (
+                      {task.status === 'running' && (task.pendingItems > 0 || task.processingItems > 0) && (
                         <button
                           type="button"
                           className={btnSecondary}
                           disabled={startingId === task.batchId}
                           onClick={() => handleStart(task.batchId)}
                         >
-                          {startingId === task.batchId ? '重试中...' : '重新触发'}
+                          {startingId === task.batchId ? '重试中...' : isTaskStuck(task) ? '恢复处理' : '重新触发'}
+                        </button>
+                      )}
+                      {task.status === 'partial' && (task.pendingItems > 0 || task.processingItems > 0) && (
+                        <button
+                          type="button"
+                          className={btnSecondary}
+                          disabled={startingId === task.batchId}
+                          onClick={() => handleStart(task.batchId)}
+                        >
+                          {startingId === task.batchId ? '恢复中...' : '继续处理'}
                         </button>
                       )}
                       {(task.status === 'completed' || task.status === 'partial') && (

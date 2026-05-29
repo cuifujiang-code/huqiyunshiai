@@ -167,7 +167,13 @@ export async function runBatchWorker(batchId) {
   for (const r of results) {
     if (r.success && r.questions?.length) {
       console.log('[batchWorker] 入库题目', { batchId, itemId: r.itemId, count: r.questions.length })
-      await insertBatchQuestions(batchId, task.teacher_id, r.itemId, r.questions)
+      try {
+        await insertBatchQuestions(batchId, task.teacher_id, r.itemId, r.questions)
+      } catch (insertErr) {
+        const msg = insertErr instanceof Error ? insertErr.message : String(insertErr)
+        console.error('[batchWorker] 入库失败，终止任务', { batchId, itemId: r.itemId, msg })
+        throw insertErr
+      }
     }
   }
 

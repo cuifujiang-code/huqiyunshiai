@@ -10,6 +10,18 @@ function nowIso() {
   return new Date().toISOString()
 }
 
+function staleCutoffIso(staleMinutes) {
+  return new Date(Date.now() - staleMinutes * 60 * 1000).toISOString()
+}
+
+function formatSupabaseError(error) {
+  const parts = [error.message || '未知数据库错误']
+  if (error.code) parts.push(`code=${error.code}`)
+  if (error.details) parts.push(`details=${error.details}`)
+  if (error.hint) parts.push(`hint=${error.hint}`)
+  return parts.join('; ')
+}
+
 export async function createBatchTask({ batchId, teacherId, fileName, subject, grade, chunks, meta = {} }) {
   const admin = getSupabaseAdmin()
 
@@ -57,6 +69,36 @@ export async function getBatchTaskForTeacher(batchId, teacherId) {
   if (!task) return null
   if (task.teacher_id !== teacherId) return null
   return task
+}
+
+/** 任务级 status：running=处理中，partial=部分完成；超过 staleMinutes 未更新视为卡住 */
+export async function listStuckBatchTasks(staleMinutes = 10) {
+  const admin = getSupabaseAdmin()
+  const cutoff = staleCutoffIso(staleMinutes)
+  const { data, error } = await admin
+    .from(TASKS)
+    .select('*')
+    .in('status', ['running', 'partial'])
+    .lt('updated_at', cutoff)
+    .order('updated_at', { ascending: true })
+    .limit(30)
+  if (error) throw new Error(error.message)
+  return data ?? []
+}
+
+/** 将长时间处于 processing 的分块重置为 pending，便于 worker 重新处理 */
+export async function resetStuckProcessingItems(batchId, staleMinutes = 10) {
+  const admin = getSupabaseAdmin()
+  const cutoff = staleCutoffIso(staleMinutes)
+  const { data, error } = await admin
+    .from(ITEMS)
+    .update({ status: 'pending', updated_at: nowIso() })
+    .eq('batch_id', batchId)
+    .eq('status', 'processing')
+    .lt('updated_at', cutoff)
+    .select('id')
+  if (error) throw new Error(error.message)
+  return data?.length ?? 0
 }
 
 export async function listBatchTasksByTeacher(teacherId, limit = 30) {
@@ -182,14 +224,16 @@ export async function insertBatchQuestions(batchId, teacherId, itemId, questions
 
   const { error } = await admin.from(BANK).insert(rows)
   if (error) {
+    const detail = formatSupabaseError(error)
     console.error('[batchTaskStore] batch_question_bank 入库失败', {
       batchId,
       itemId,
-      message: error.message,
-      code: error.code,
-      details: error.details,
+      fields: Object.keys(rows[0] ?? {}),
+      ...error,
     })
-    throw new Error(error.message)
+    await markItemFailed(itemId, `batch_question_bank 入库失败: ${detail}`)
+    await markBatchFailed(batchId, `batch_question_bank 入库失败 (item=${itemId}): ${detail}`)
+    throw new Error(`batch_question_bank 入库失败: ${detail}`)
   }
 
   // 同步写入教师主题库
@@ -208,7 +252,14 @@ export async function insertBatchQuestions(batchId, teacherId, itemId, questions
     tags: q.tags,
     updated_at: nowIso(),
   }))
-  await admin.from('teacher_question_bank').insert(tqbRows)
+  const { error: tqbErr } = await admin.from('teacher_question_bank').insert(tqbRows)
+  if (tqbErr) {
+    const detail = formatSupabaseError(tqbErr)
+    console.error('[batchTaskStore] teacher_question_bank 同步失败', { batchId, itemId, ...tqbErr })
+    await markItemFailed(itemId, `teacher_question_bank 同步失败: ${detail}`)
+    await markBatchFailed(batchId, `teacher_question_bank 同步失败 (item=${itemId}): ${detail}`)
+    throw new Error(`teacher_question_bank 同步失败: ${detail}`)
+  }
 
   const task = await getBatchTask(batchId)
   await admin.from(TASKS).update({

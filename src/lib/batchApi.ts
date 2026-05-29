@@ -114,3 +114,37 @@ export async function listBatchTasks(teacherId: string) {
     'GET',
   )
 }
+
+export interface BatchAutoRetryReport {
+  success: boolean
+  scanned: number
+  processed: number
+  failed: number
+  skipped: number
+  staleMinutes: number
+  details?: Array<{
+    batchId: string
+    previousStatus: string
+    action: string
+    reason: string
+  }>
+}
+
+/** 自动恢复卡住的批量任务（running/partial 超时未更新） */
+export async function triggerBatchAutoRetry() {
+  return callBatch<BatchAutoRetryReport>(
+    batchApiUrl('batch/auto-retry'),
+    null,
+    '批量自动恢复',
+    'GET',
+  )
+}
+
+function isTaskStuck(task: BatchProgress, staleMinutes = 10) {
+  if (task.status !== 'running' && task.status !== 'partial') return false
+  if (task.pendingItems <= 0 && task.processingItems <= 0) return false
+  const ageMs = Date.now() - new Date(task.updatedAt).getTime()
+  return ageMs > staleMinutes * 60 * 1000
+}
+
+export { isTaskStuck }

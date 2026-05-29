@@ -39,8 +39,18 @@
     "api/batch/worker.js": {
       "maxDuration": 60,
       "includeFiles": "{server/**,node_modules/mammoth/**,node_modules/pdf-parse/**,node_modules/pdfjs-dist/**}"
+    },
+    "api/batch/auto-retry.js": {
+      "maxDuration": 60,
+      "includeFiles": "server/**"
     }
   },
+  "crons": [
+    {
+      "path": "/api/batch/auto-retry",
+      "schedule": "*/5 * * * *"
+    }
+  ],
   "rewrites": [
     { "source": "/(.*)", "destination": "/api/index" }
   ]
