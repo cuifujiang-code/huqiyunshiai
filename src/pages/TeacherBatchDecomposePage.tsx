@@ -56,6 +56,7 @@ export default function TeacherBatchDecomposePage() {
   const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
   const [preview, setPreview] = useState<BatchQuestion[] | null>(null)
+  const [startingId, setStartingId] = useState<string | null>(null)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const loadTasks = useCallback(async () => {
@@ -108,6 +109,22 @@ export default function TeacherBatchDecomposePage() {
       setMessage(e instanceof Error ? e.message : '提交失败')
     } finally {
       setUploading(false)
+    }
+  }
+
+  const handleStart = async (batchId: string) => {
+    if (!teacherId) return
+    setStartingId(batchId)
+    setMessage(null)
+    try {
+      const res = await startBatchTask(teacherId, batchId)
+      setMessage(res.message || '已启动批量拆题')
+      await loadTasks()
+    } catch (e) {
+      setMessage(e instanceof Error ? e.message : '启动失败')
+      await loadTasks()
+    } finally {
+      setStartingId(null)
     }
   }
 
@@ -225,6 +242,26 @@ export default function TeacherBatchDecomposePage() {
                       {task.importedQuestions > 0 ? task.importedQuestions : '—'}
                     </td>
                     <td className="p-3">
+                      {(task.status === 'pending' || task.status === 'failed') && (
+                        <button
+                          type="button"
+                          className={btnPrimary}
+                          disabled={startingId === task.batchId}
+                          onClick={() => handleStart(task.batchId)}
+                        >
+                          {startingId === task.batchId ? '启动中...' : '启动'}
+                        </button>
+                      )}
+                      {task.status === 'running' && task.progressPercent === 0 && task.pendingItems > 0 && (
+                        <button
+                          type="button"
+                          className={btnSecondary}
+                          disabled={startingId === task.batchId}
+                          onClick={() => handleStart(task.batchId)}
+                        >
+                          {startingId === task.batchId ? '重试中...' : '重新触发'}
+                        </button>
+                      )}
                       {(task.status === 'completed' || task.status === 'partial') && (
                         <button type="button" className={btnPrimary} onClick={() => viewResult(task.batchId)}>
                           查看题目

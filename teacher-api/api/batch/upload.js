@@ -9,7 +9,9 @@ import {
   listBatchTasksByTeacher,
   formatBatchProgress,
   countItemsByStatus,
+  markBatchFailed,
 } from '../../server/batch/batchTaskStore.js'
+import { startBatchProcessing } from '../../server/batch/batchStart.js'
 
 async function parseUploadToText(body) {
   const { examFileBase64, examFileName, rawText } = body ?? {}
@@ -62,7 +64,7 @@ export default async function handler(req, res) {
   }
 
   const body = req.body ?? {}
-  const { teacherId, subject, grade } = body
+  const { teacherId, subject, grade, autoStart = true } = body
 
   if (!teacherId) {
     return res.status(400).json({ success: false, message: '缺少 teacherId' })
@@ -86,18 +88,35 @@ export default async function handler(req, res) {
       meta: { chunkCount: chunks.length, textLength: text.length },
     })
 
+    let startResult = null
+    if (autoStart !== false) {
+      console.log('[batch/upload] 自动启动 worker', { batchId, teacherId })
+      startResult = await startBatchProcessing(batchId, teacherId, req)
+      if (!startResult.ok) {
+        return res.status(startResult.httpStatus ?? 500).json({
+          success: false,
+          batchId,
+          status: startResult.taskStatus ?? 'failed',
+          message: startResult.message || '任务已创建但 worker 启动失败',
+        })
+      }
+    }
+
     return res.status(200).json({
       success: true,
       batchId,
-      status: 'pending',
+      status: startResult?.taskStatus ?? 'pending',
       totalItems: chunks.length,
-      message: `批量任务已创建，共 ${chunks.length} 个处理分块，请调用 /batch/start 启动`,
+      message: startResult?.ok
+        ? `批量任务已创建并启动，共 ${chunks.length} 个处理分块`
+        : `批量任务已创建，共 ${chunks.length} 个处理分块，请调用 /api/batch/start 启动`,
     })
   } catch (error) {
     console.error('[batch/upload]', error)
+    const msg = error instanceof Error ? error.message : '上传失败'
     return res.status(500).json({
       success: false,
-      message: error instanceof Error ? error.message : '上传失败',
+      message: msg,
     })
   }
 }
