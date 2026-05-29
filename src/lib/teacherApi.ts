@@ -10,9 +10,16 @@ import { postApiJson } from './postApiJson'
 
 const TEACHER_API_BASE = (import.meta.env.VITE_TEACHER_API_URL ?? 'https://api.huqiyunshiai.online').replace(/\/$/, '')
 
+/** 教师业务 API（题库/组卷/讲义/辅导书等）→ /api/teacher/* */
 function teacherApiUrl(path: string) {
   const normalized = path.replace(/^\//, '')
-  return `${TEACHER_API_BASE}/${normalized}`
+  return `${TEACHER_API_BASE}/api/teacher/${normalized}`
+}
+
+/** 独立 teacher-api 上的拆题专用路由 → /api/decompose-* */
+function teacherDecomposeApiUrl(path: string) {
+  const normalized = path.replace(/^\//, '')
+  return `${TEACHER_API_BASE}/api/${normalized}`
 }
 
 export async function fetchQuestions(
@@ -124,7 +131,7 @@ export async function submitDecomposeTask(
   grade: string,
 ): Promise<DecomposeSubmitResponse> {
   const r = await postApiJson<DecomposeSubmitResponse>(
-    teacherApiUrl('decompose-submit'),
+    teacherDecomposeApiUrl('decompose-submit'),
     { teacherId, examFileBase64, examFileName, subject, grade },
     '拆题提交',
     { timeoutMs: 30000 },
@@ -135,7 +142,7 @@ export async function submitDecomposeTask(
 
 /** 查询单个拆题任务状态 */
 export async function fetchDecomposeStatus(taskId: string): Promise<DecomposeStatusResponse> {
-  const url = `${teacherApiUrl('decompose-status')}?taskId=${encodeURIComponent(taskId)}`
+  const url = `${teacherDecomposeApiUrl('decompose-status')}?taskId=${encodeURIComponent(taskId)}`
   const r = await postApiJson<DecomposeStatusResponse>(url, null, '拆题状态', {
     method: 'GET',
     timeoutMs: 10000,
@@ -146,7 +153,7 @@ export async function fetchDecomposeStatus(taskId: string): Promise<DecomposeSta
 
 /** 查询教师所有拆题任务 */
 export async function fetchDecomposeTasks(teacherId: string): Promise<DecomposeTaskSummary[]> {
-  const url = `${teacherApiUrl('decompose-tasks')}?teacherId=${encodeURIComponent(teacherId)}`
+  const url = `${teacherDecomposeApiUrl('decompose-tasks')}?teacherId=${encodeURIComponent(teacherId)}`
   const r = await postApiJson<{ success: boolean; tasks: DecomposeTaskSummary[] }>(url, null, '拆题任务列表', {
     method: 'GET',
     timeoutMs: 15000,
@@ -158,7 +165,7 @@ export async function fetchDecomposeTasks(teacherId: string): Promise<DecomposeT
 /** 重新提交失败的拆题任务 */
 export async function retryDecomposeTask(teacherId: string, taskId: string) {
   const r = await postApiJson<{ success: boolean; message?: string }>(
-    teacherApiUrl('decompose-tasks'),
+    teacherDecomposeApiUrl('decompose-tasks'),
     { teacherId, taskId },
     '重新拆题',
     { timeoutMs: 10000 },

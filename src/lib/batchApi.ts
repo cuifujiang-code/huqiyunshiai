@@ -1,14 +1,16 @@
 import { postApiJson } from './postApiJson'
 
+const DEFAULT_TEACHER_API = 'https://api.huqiyunshiai.online'
+
 function getBatchApiBase(): string {
   const teacherApi = (import.meta.env.VITE_TEACHER_API_URL ?? '').replace(/\/$/, '')
   if (import.meta.env.VITE_BATCH_USE_TEACHER_API === 'true' && teacherApi) {
-    return teacherApi
+    return `${teacherApi}/api`
   }
   if (typeof window !== 'undefined') {
     return `${window.location.origin}/api`
   }
-  return teacherApi || 'https://api.huqiyunshiai.online'
+  return `${teacherApi || DEFAULT_TEACHER_API}/api`
 }
 
 function batchApiUrl(path: string) {
