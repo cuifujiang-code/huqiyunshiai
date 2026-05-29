@@ -1,7 +1,7 @@
 import '../../server/applyUrlShim.js'
 import { applyApiHeaders, handleOptions } from '../../server/apiResponse.js'
 import { triggerBatchWorker } from '../../server/batch/batchTrigger.js'
-import { getBatchTaskForTeacher, isBatchStoreConfigured, markBatchRunning } from '../../server/batch/batchTaskStore.js'
+import { getBatchTaskForTeacher, isBatchStoreConfigured, markBatchFailed, markBatchRunning } from '../../server/batch/batchTaskStore.js'
 
 export default async function handler(req, res) {
   if (handleOptions(req, res)) return
@@ -35,7 +35,17 @@ export default async function handler(req, res) {
     }
 
     await markBatchRunning(batchId)
-    triggerBatchWorker(batchId)
+    const triggered = await triggerBatchWorker(batchId, req)
+    if (!triggered.ok) {
+      const errMsg = triggered.error || 'Worker 触发失败'
+      console.error('[batch/start] worker 未启动', { batchId, errMsg })
+      await markBatchFailed(batchId, errMsg)
+      return res.status(500).json({
+        success: false,
+        batchId,
+        message: errMsg,
+      })
+    }
 
     return res.status(200).json({
       success: true,
