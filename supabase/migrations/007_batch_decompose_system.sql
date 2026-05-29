@@ -1,28 +1,35 @@
--- 大批量教育题库拆题系统（多用户、异步、LaTeX/几何图形）
--- 在 Supabase Dashboard → SQL Editor 中执行
+-- =============================================================================
+-- 大批量拆题系统 · 建表脚本（Supabase SQL Editor 可直接执行）
+-- =============================================================================
+-- 字段来源：teacher-api/api/batch/*.js → server/batch/batchTaskStore.js
 --
--- 字段与 teacher-api/server/batch/batchTaskStore.js 及 api/batch/*.js 对齐。
+-- batch_decompose_tasks
+--   INSERT : batch_id, teacher_id, file_name, subject, grade, status,
+--            total_items, completed_items, total_questions, imported_questions,
+--            meta, updated_at
+--   UPDATE : status, completed_items, total_questions, imported_questions,
+--            error_message, updated_at
+--   SELECT : 上述字段 + created_at（listBatchTasksByTeacher 排序）
+--
+-- batch_decompose_items
+--   INSERT : batch_id, item_index, status, chunk_text, question_count, result, updated_at
+--   UPDATE : status, question_count, result, error_message, updated_at
+--   SELECT : id, batch_id, item_index, status, chunk_text, question_count, result,
+--            error_message, created_at, updated_at
+--
 -- 线上已有旧表时，请再执行 008_batch_decompose_schema_sync.sql 做全量对齐。
+-- =============================================================================
 
--- =============================================================================
--- 1. batch_decompose_tasks（批量任务主表）
--- =============================================================================
--- 代码 INSERT/UPDATE 字段：
---   batch_id, teacher_id, file_name, subject, grade, status,
---   total_items, completed_items, total_questions, imported_questions,
---   meta, error_message, updated_at
--- 扩展字段：
---   file_size（上传文件字节数，可与 meta.textLength 对应）
--- =============================================================================
+-- ── 1. batch_decompose_tasks ─────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS public.batch_decompose_tasks (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  batch_id TEXT UNIQUE NOT NULL,
+  batch_id TEXT NOT NULL UNIQUE,
   teacher_id TEXT NOT NULL,
   file_name TEXT NOT NULL DEFAULT '',
-  file_size INT NOT NULL DEFAULT 0,
   subject TEXT NOT NULL DEFAULT '数学',
   grade TEXT NOT NULL DEFAULT '八年级',
   status TEXT NOT NULL DEFAULT 'pending'
+    CONSTRAINT batch_decompose_tasks_status_check
     CHECK (status IN ('pending', 'running', 'completed', 'failed', 'partial')),
   total_items INT NOT NULL DEFAULT 0,
   completed_items INT NOT NULL DEFAULT 0,
@@ -34,23 +41,26 @@ CREATE TABLE IF NOT EXISTS public.batch_decompose_tasks (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS batch_tasks_batch_id_idx ON public.batch_decompose_tasks (batch_id);
-CREATE INDEX IF NOT EXISTS batch_tasks_teacher_idx ON public.batch_decompose_tasks (teacher_id);
-CREATE INDEX IF NOT EXISTS batch_tasks_status_idx ON public.batch_decompose_tasks (status);
+CREATE UNIQUE INDEX IF NOT EXISTS batch_tasks_batch_id_idx
+  ON public.batch_decompose_tasks (batch_id);
 
--- =============================================================================
--- 2. batch_decompose_items（分块拆题明细表）
--- =============================================================================
--- 代码 INSERT/UPDATE 字段：
---   batch_id, item_index, status, chunk_text, question_count,
---   result, error_message, updated_at
--- 注意：代码使用 item_index，非遗留列 chunk_index
--- =============================================================================
+CREATE INDEX IF NOT EXISTS batch_tasks_teacher_idx
+  ON public.batch_decompose_tasks (teacher_id);
+
+CREATE INDEX IF NOT EXISTS batch_tasks_status_idx
+  ON public.batch_decompose_tasks (status);
+
+CREATE INDEX IF NOT EXISTS batch_tasks_created_at_idx
+  ON public.batch_decompose_tasks (created_at DESC);
+
+-- ── 2. batch_decompose_items ─────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS public.batch_decompose_items (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  batch_id TEXT NOT NULL REFERENCES public.batch_decompose_tasks (batch_id) ON DELETE CASCADE,
+  batch_id TEXT NOT NULL
+    REFERENCES public.batch_decompose_tasks (batch_id) ON DELETE CASCADE,
   item_index INT NOT NULL DEFAULT 0,
   status TEXT NOT NULL DEFAULT 'pending'
+    CONSTRAINT batch_decompose_items_status_check
     CHECK (status IN ('pending', 'processing', 'completed', 'failed')),
   chunk_text TEXT NOT NULL DEFAULT '',
   question_count INT NOT NULL DEFAULT 0,
@@ -58,15 +68,22 @@ CREATE TABLE IF NOT EXISTS public.batch_decompose_items (
   error_message TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  UNIQUE (batch_id, item_index)
+  CONSTRAINT batch_decompose_items_batch_item_unique UNIQUE (batch_id, item_index)
 );
 
-CREATE INDEX IF NOT EXISTS batch_items_batch_idx ON public.batch_decompose_items (batch_id);
-CREATE INDEX IF NOT EXISTS batch_items_status_idx ON public.batch_decompose_items (status);
+CREATE INDEX IF NOT EXISTS batch_items_batch_idx
+  ON public.batch_decompose_items (batch_id);
 
--- =============================================================================
--- 3. batch_question_bank（拆题结果题库，供进度查询 withQuestions 使用）
--- =============================================================================
+CREATE INDEX IF NOT EXISTS batch_items_status_idx
+  ON public.batch_decompose_items (status);
+
+CREATE INDEX IF NOT EXISTS batch_items_batch_status_idx
+  ON public.batch_decompose_items (batch_id, status);
+
+CREATE INDEX IF NOT EXISTS batch_items_batch_item_index_idx
+  ON public.batch_decompose_items (batch_id, item_index);
+
+-- ── 3. batch_question_bank（progress?withQuestions=true 查询拆题结果） ─────────
 CREATE TABLE IF NOT EXISTS public.batch_question_bank (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   batch_id TEXT NOT NULL,
@@ -89,22 +106,31 @@ CREATE TABLE IF NOT EXISTS public.batch_question_bank (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS batch_qb_teacher_idx ON public.batch_question_bank (teacher_id);
-CREATE INDEX IF NOT EXISTS batch_qb_batch_idx ON public.batch_question_bank (batch_id);
-CREATE INDEX IF NOT EXISTS batch_qb_subject_idx ON public.batch_question_bank (subject);
+CREATE INDEX IF NOT EXISTS batch_qb_teacher_idx
+  ON public.batch_question_bank (teacher_id);
 
--- =============================================================================
--- RLS：仅通过 service_role API 访问，多用户隔离由 teacher_id 在 API 层强制校验
--- =============================================================================
+CREATE INDEX IF NOT EXISTS batch_qb_batch_idx
+  ON public.batch_question_bank (batch_id);
+
+CREATE INDEX IF NOT EXISTS batch_qb_batch_teacher_idx
+  ON public.batch_question_bank (batch_id, teacher_id);
+
+CREATE INDEX IF NOT EXISTS batch_qb_sort_idx
+  ON public.batch_question_bank (batch_id, sort_order);
+
+-- ── RLS：仅 service_role API 访问 ────────────────────────────────────────────
 ALTER TABLE public.batch_decompose_tasks ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.batch_decompose_items ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.batch_question_bank ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS "deny_direct_batch_tasks" ON public.batch_decompose_tasks;
-CREATE POLICY "deny_direct_batch_tasks" ON public.batch_decompose_tasks FOR ALL USING (false) WITH CHECK (false);
+CREATE POLICY "deny_direct_batch_tasks"
+  ON public.batch_decompose_tasks FOR ALL USING (false) WITH CHECK (false);
 
 DROP POLICY IF EXISTS "deny_direct_batch_items" ON public.batch_decompose_items;
-CREATE POLICY "deny_direct_batch_items" ON public.batch_decompose_items FOR ALL USING (false) WITH CHECK (false);
+CREATE POLICY "deny_direct_batch_items"
+  ON public.batch_decompose_items FOR ALL USING (false) WITH CHECK (false);
 
 DROP POLICY IF EXISTS "deny_direct_batch_qb" ON public.batch_question_bank;
-CREATE POLICY "deny_direct_batch_qb" ON public.batch_question_bank FOR ALL USING (false) WITH CHECK (false);
+CREATE POLICY "deny_direct_batch_qb"
+  ON public.batch_question_bank FOR ALL USING (false) WITH CHECK (false);
