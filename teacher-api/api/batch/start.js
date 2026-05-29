@@ -7,6 +7,17 @@ export default async function handler(req, res) {
   if (handleOptions(req, res)) return
   applyApiHeaders(req, res)
 
+  const batchId = req.body?.batchId
+  const teacherId = req.body?.teacherId
+
+  console.log('[batch/start] === 收到请求 ===', {
+    batchId,
+    teacherId,
+    method: req.method,
+    host: req.headers?.host,
+    origin: req.headers?.origin,
+  })
+
   if (req.method !== 'POST') {
     return res.status(405).json({ success: false, message: 'Method Not Allowed' })
   }
@@ -15,12 +26,25 @@ export default async function handler(req, res) {
     return res.status(503).json({ success: false, message: 'Supabase 未配置' })
   }
 
-  const batchId = req.body?.batchId
-  const teacherId = req.body?.teacherId
-
   try {
     const result = await startBatchProcessing(batchId, teacherId, req)
-    return res.status(result.httpStatus ?? (result.ok ? 200 : 500)).json({
+
+    console.log('[batch/start] === 处理结果 ===', {
+      batchId: result.batchId ?? batchId,
+      ok: result.ok,
+      taskStatus: result.taskStatus,
+      message: result.message,
+      skipped: result.skipped,
+    })
+
+    if (!result.ok) {
+      console.error('[batch/start] 启动失败（已 markBatchFailed）', {
+        batchId: result.batchId ?? batchId,
+        message: result.message,
+      })
+    }
+
+    return res.status(result.httpStatus ?? (result.ok ? 202 : 500)).json({
       success: result.ok,
       batchId: result.batchId ?? batchId,
       status: result.taskStatus,
@@ -28,7 +52,12 @@ export default async function handler(req, res) {
     })
   } catch (error) {
     const msg = error instanceof Error ? error.message : '启动失败'
-    console.error('[batch/start] 未捕获异常', { batchId, teacherId, msg })
+    console.error('[batch/start] 未捕获异常', {
+      batchId,
+      teacherId,
+      msg,
+      stack: error instanceof Error ? error.stack : undefined,
+    })
     if (batchId) {
       try {
         await markBatchFailed(String(batchId).trim(), msg)

@@ -24,7 +24,11 @@ export function resolveBatchWorkerUrl(req) {
     path = path.startsWith('/batch/') ? `/api${path}` : '/api/batch/worker'
   }
 
-  const apiBase = (process.env.TEACHER_API_URL || process.env.VITE_TEACHER_API_URL || '').replace(/\/$/, '')
+  const apiBase = (
+    process.env.TEACHER_API_URL
+    || process.env.VITE_TEACHER_API_URL
+    || 'https://api.huqiyunshiai.online'
+  ).replace(/\/$/, '')
   if (apiBase) return `${apiBase}${path}`
 
   return buildServerUrl(path, req)
@@ -67,11 +71,20 @@ export async function triggerBatchWorker(batchId, req) {
   }
 }
 
-/** 链式触发下一批 worker（大批量分轮处理，避免单次 60s 超时） */
+import { markBatchFailed } from './batchTaskStore.js'
+
+/** 链式触发下一批 worker（新 Serverless 实例，走 HTTP） */
 export function chainBatchWorker(batchId) {
-  triggerBatchWorker(batchId).then((result) => {
+  console.log('[batchTrigger] 链式续跑 triggerBatchWorker', { batchId })
+  triggerBatchWorker(batchId).then(async (result) => {
     if (!result.ok) {
-      console.error('[batchTrigger] 链式触发失败', { batchId, error: result.error })
+      const errMsg = result.error || '链式 worker 触发失败'
+      console.error('[batchTrigger] 链式触发失败', { batchId, errMsg, httpStatus: result.status })
+      try {
+        await markBatchFailed(batchId, errMsg)
+      } catch (markErr) {
+        console.error('[batchTrigger] 链式 markBatchFailed 失败', { batchId, markErr })
+      }
     }
   })
 }

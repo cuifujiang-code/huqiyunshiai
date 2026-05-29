@@ -78,6 +78,8 @@ export default async function handler(req, res) {
     }
 
     const batchId = randomUUID()
+    console.log('[batch/upload] 创建任务', { batchId, teacherId, chunkCount: chunks.length, autoStart })
+
     await createBatchTask({
       batchId,
       teacherId,
@@ -90,8 +92,9 @@ export default async function handler(req, res) {
 
     let startResult = null
     if (autoStart !== false) {
-      console.log('[batch/upload] 自动启动 worker', { batchId, teacherId })
+      console.log('[batch/upload] 自动启动 → startBatchProcessing', { batchId, teacherId })
       startResult = await startBatchProcessing(batchId, teacherId, req)
+      console.log('[batch/upload] 自动启动结果', { batchId, startResult })
       if (!startResult.ok) {
         return res.status(startResult.httpStatus ?? 500).json({
           success: false,

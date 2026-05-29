@@ -17,18 +17,20 @@ export default async function handler(req, res) {
   if (handleOptions(req, res)) return
   applyApiHeaders(req, res)
 
-  if (req.method !== 'POST') {
-    return res.status(405).json({ success: false, message: 'Method Not Allowed' })
-  }
-
   const batchId = resolveBatchId(req)
-  console.log('[batch/worker] 收到请求', {
+
+  console.log('[batch/worker] === 收到请求 ===', {
     method: req.method,
     url: req.url,
     batchId,
     fromBody: Boolean(req.body?.batchId),
     fromQuery: Boolean(req.query?.batchId),
+    host: req.headers?.host,
   })
+
+  if (req.method !== 'POST') {
+    return res.status(405).json({ success: false, message: 'Method Not Allowed' })
+  }
 
   if (!verifyBatchWorkerSecret(req)) {
     console.error('[batch/worker] 鉴权失败', {
@@ -48,8 +50,13 @@ export default async function handler(req, res) {
         console.log('[batch/worker] waitUntil 后台任务开始', { batchId })
         const result = await safeRunBatchWorker(batchId)
         console.log('[batch/worker] waitUntil 后台任务结束', { batchId, result })
-        if (result && result.success === false && result.message) {
+
+        if (result?.success === false && result.message) {
           console.error('[batch/worker] safeRunBatchWorker 返回失败', { batchId, result })
+          await markBatchFailed(batchId, result.message)
+        } else if (result?.done && result.status === 'failed') {
+          console.error('[batch/worker] 任务最终失败', { batchId, result })
+          await markBatchFailed(batchId, result.message || '批量拆题失败')
         }
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)
@@ -66,6 +73,8 @@ export default async function handler(req, res) {
       }
     })(),
   )
+
+  console.log('[batch/worker] 已受理，返回 202', { batchId })
 
   return res.status(202).json({
     success: true,
