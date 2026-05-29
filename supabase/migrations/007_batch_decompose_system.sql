@@ -1,5 +1,8 @@
 -- 大批量教育题库拆题系统（多用户、异步、LaTeX/几何图形）
 -- 在 Supabase Dashboard → SQL Editor 中执行
+--
+-- 线上已有旧表时，请再执行 008_batch_decompose_schema_sync.sql 做全量对齐
+-- （补列、回填 NULL、修正 NOT NULL/CHECK、chunk_index→item_index 迁移）
 
 -- 1. 批量任务表
 CREATE TABLE IF NOT EXISTS public.batch_decompose_tasks (
@@ -23,16 +26,16 @@ CREATE TABLE IF NOT EXISTS public.batch_decompose_tasks (
 
 CREATE INDEX IF NOT EXISTS batch_tasks_teacher_idx ON public.batch_decompose_tasks (teacher_id);
 CREATE INDEX IF NOT EXISTS batch_tasks_status_idx ON public.batch_decompose_tasks (status);
-CREATE INDEX IF NOT EXISTS batch_tasks_batch_id_idx ON public.batch_decompose_tasks (batch_id);
+CREATE UNIQUE INDEX IF NOT EXISTS batch_tasks_batch_id_idx ON public.batch_decompose_tasks (batch_id);
 
--- 2. 题目明细分块表（每块对应一次 AI 处理单元，支持 100～1000 题大批量）
+-- 2. 题目明细分块表（代码使用 item_index，非 chunk_index）
 CREATE TABLE IF NOT EXISTS public.batch_decompose_items (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   batch_id TEXT NOT NULL REFERENCES public.batch_decompose_tasks (batch_id) ON DELETE CASCADE,
-  item_index INT NOT NULL,
+  item_index INT NOT NULL DEFAULT 0,
   status TEXT NOT NULL DEFAULT 'pending'
     CHECK (status IN ('pending', 'processing', 'completed', 'failed')),
-  chunk_text TEXT NOT NULL,
+  chunk_text TEXT NOT NULL DEFAULT '',
   question_count INT NOT NULL DEFAULT 0,
   result JSONB NOT NULL DEFAULT '{}'::jsonb,
   error_message TEXT,
@@ -76,66 +79,11 @@ ALTER TABLE public.batch_decompose_tasks ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.batch_decompose_items ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.batch_question_bank ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "deny_direct_batch_tasks" ON public.batch_decompose_tasks;
 CREATE POLICY "deny_direct_batch_tasks" ON public.batch_decompose_tasks FOR ALL USING (false) WITH CHECK (false);
+
+DROP POLICY IF EXISTS "deny_direct_batch_items" ON public.batch_decompose_items;
 CREATE POLICY "deny_direct_batch_items" ON public.batch_decompose_items FOR ALL USING (false) WITH CHECK (false);
+
+DROP POLICY IF EXISTS "deny_direct_batch_qb" ON public.batch_question_bank;
 CREATE POLICY "deny_direct_batch_qb" ON public.batch_question_bank FOR ALL USING (false) WITH CHECK (false);
-
--- ---------------------------------------------------------------------------
--- 结构同步（可重复执行）：CREATE TABLE IF NOT EXISTS 不会给已存在的旧表补列。
--- 完整可执行脚本见 supabase/migrations/008_batch_decompose_schema_sync.sql
--- ---------------------------------------------------------------------------
-
-ALTER TABLE public.batch_decompose_tasks ADD COLUMN IF NOT EXISTS batch_id TEXT;
-ALTER TABLE public.batch_decompose_tasks ADD COLUMN IF NOT EXISTS teacher_id TEXT;
-ALTER TABLE public.batch_decompose_tasks ADD COLUMN IF NOT EXISTS file_name TEXT DEFAULT '';
-ALTER TABLE public.batch_decompose_tasks ADD COLUMN IF NOT EXISTS subject TEXT NOT NULL DEFAULT '数学';
-ALTER TABLE public.batch_decompose_tasks ADD COLUMN IF NOT EXISTS grade TEXT NOT NULL DEFAULT '八年级';
-ALTER TABLE public.batch_decompose_tasks ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'pending';
-ALTER TABLE public.batch_decompose_tasks ADD COLUMN IF NOT EXISTS total_items INT NOT NULL DEFAULT 0;
-ALTER TABLE public.batch_decompose_tasks ADD COLUMN IF NOT EXISTS completed_items INT NOT NULL DEFAULT 0;
-ALTER TABLE public.batch_decompose_tasks ADD COLUMN IF NOT EXISTS total_questions INT NOT NULL DEFAULT 0;
-ALTER TABLE public.batch_decompose_tasks ADD COLUMN IF NOT EXISTS imported_questions INT NOT NULL DEFAULT 0;
-ALTER TABLE public.batch_decompose_tasks ADD COLUMN IF NOT EXISTS error_message TEXT;
-ALTER TABLE public.batch_decompose_tasks ADD COLUMN IF NOT EXISTS meta JSONB NOT NULL DEFAULT '{}'::jsonb;
-ALTER TABLE public.batch_decompose_tasks ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
-ALTER TABLE public.batch_decompose_tasks ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
-
-ALTER TABLE public.batch_decompose_items ADD COLUMN IF NOT EXISTS batch_id TEXT;
-ALTER TABLE public.batch_decompose_items ADD COLUMN IF NOT EXISTS item_index INT;
-ALTER TABLE public.batch_decompose_items ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'pending';
-ALTER TABLE public.batch_decompose_items ADD COLUMN IF NOT EXISTS chunk_text TEXT NOT NULL DEFAULT '';
-ALTER TABLE public.batch_decompose_items ADD COLUMN IF NOT EXISTS question_count INT NOT NULL DEFAULT 0;
-ALTER TABLE public.batch_decompose_items ADD COLUMN IF NOT EXISTS result JSONB NOT NULL DEFAULT '{}'::jsonb;
-ALTER TABLE public.batch_decompose_items ADD COLUMN IF NOT EXISTS error_message TEXT;
-ALTER TABLE public.batch_decompose_items ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
-ALTER TABLE public.batch_decompose_items ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
-
-DO $$
-BEGIN
-  IF EXISTS (
-    SELECT 1 FROM pg_constraint
-    WHERE conname = 'batch_decompose_tasks_status_check'
-      AND conrelid = 'public.batch_decompose_tasks'::regclass
-  ) THEN
-    ALTER TABLE public.batch_decompose_tasks DROP CONSTRAINT batch_decompose_tasks_status_check;
-  END IF;
-END $$;
-
-ALTER TABLE public.batch_decompose_tasks
-  ADD CONSTRAINT batch_decompose_tasks_status_check
-  CHECK (status IN ('pending', 'running', 'completed', 'failed', 'partial'));
-
-DO $$
-BEGIN
-  IF EXISTS (
-    SELECT 1 FROM pg_constraint
-    WHERE conname = 'batch_decompose_items_status_check'
-      AND conrelid = 'public.batch_decompose_items'::regclass
-  ) THEN
-    ALTER TABLE public.batch_decompose_items DROP CONSTRAINT batch_decompose_items_status_check;
-  END IF;
-END $$;
-
-ALTER TABLE public.batch_decompose_items
-  ADD CONSTRAINT batch_decompose_items_status_check
-  CHECK (status IN ('pending', 'processing', 'completed', 'failed'));

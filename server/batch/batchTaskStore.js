@@ -16,15 +16,15 @@ export async function createBatchTask({ batchId, teacherId, fileName, subject, g
   const { error: taskErr } = await admin.from(TASKS).insert({
     batch_id: batchId,
     teacher_id: teacherId,
-    file_name: fileName,
-    subject,
-    grade,
+    file_name: fileName ?? '',
+    subject: subject || '数学',
+    grade: grade || '八年级',
     status: 'pending',
     total_items: chunks.length,
     completed_items: 0,
     total_questions: 0,
     imported_questions: 0,
-    meta,
+    meta: meta ?? {},
     updated_at: nowIso(),
   })
   if (taskErr) throw new Error(taskErr.message)
@@ -34,6 +34,8 @@ export async function createBatchTask({ batchId, teacherId, fileName, subject, g
     item_index: index,
     status: 'pending',
     chunk_text: text,
+    question_count: 0,
+    result: {},
     updated_at: nowIso(),
   }))
 
