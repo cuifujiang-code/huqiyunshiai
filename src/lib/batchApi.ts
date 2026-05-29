@@ -1,10 +1,19 @@
 import { postApiJson } from './postApiJson'
 
-const TEACHER_API_BASE = (import.meta.env.VITE_TEACHER_API_URL ?? 'https://api.huqiyunshiai.online').replace(/\/$/, '')
+function getBatchApiBase(): string {
+  const teacherApi = (import.meta.env.VITE_TEACHER_API_URL ?? '').replace(/\/$/, '')
+  if (import.meta.env.VITE_BATCH_USE_TEACHER_API === 'true' && teacherApi) {
+    return teacherApi
+  }
+  if (typeof window !== 'undefined') {
+    return `${window.location.origin}/api`
+  }
+  return teacherApi || 'https://api.huqiyunshiai.online'
+}
 
 function batchApiUrl(path: string) {
   const normalized = path.replace(/^\//, '')
-  return `${TEACHER_API_BASE}/${normalized}`
+  return `${getBatchApiBase()}/${normalized}`
 }
 
 export interface BatchProgress {

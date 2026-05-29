@@ -1,4 +1,5 @@
 import { callDeepSeekAI, extractJson } from '../deepseekClient.js'
+import { safeJsonParse } from './safeJson.js'
 import { BATCH_SYSTEM_PROMPT, buildBatchSplitPrompt, normalizeBatchQuestions } from './batchPrompt.js'
 import {
   countItemsByStatus,
@@ -28,7 +29,7 @@ async function processOneItem(item, meta, sortOffset) {
       maxTokens: 4096,
       label: 'batch-split',
     })
-    const raw = JSON.parse(extractJson(content))
+    const raw = safeJsonParse(extractJson(content))
     const questions = normalizeBatchQuestions(raw, meta, sortOffset)
     await markItemCompleted(item.id, questions)
     return { success: true, questions, itemId: item.id }

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import DashboardHeader from '../components/layout/DashboardHeader'
 import { useAuth } from '../context/AuthContext'
-import { fileToBase64 } from '../lib/answerSheetCompress'
+import { fileToBase64 } from '../lib/fileBase64'
 import {
   fetchBatchProgress,
   listBatchTasks,

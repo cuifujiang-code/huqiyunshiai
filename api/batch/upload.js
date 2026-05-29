@@ -2,6 +2,7 @@ import '../../server/applyUrlShim.js'
 import { randomUUID } from 'crypto'
 import { setNoCacheHeaders } from '../../server/apiResponse.js'
 import { splitTextIntoChunks } from '../../server/batch/batchChunker.js'
+import { parseExamText } from '../../server/teacher/questionImportService.js'
 import { createBatchTask, isBatchStoreConfigured, listBatchTasksByTeacher, formatBatchProgress, countItemsByStatus, getBatchTaskForTeacher } from '../../server/batch/batchTaskStore.js'
 
 async function parseUploadToText(body) {
@@ -15,7 +16,6 @@ async function parseUploadToText(body) {
     throw new Error('请提供 examFileBase64+examFileName 或 rawText')
   }
 
-  const { parseExamText } = await import('../../server/teacher/questionImportService.js')
   const buffer = Buffer.from(examFileBase64, 'base64')
   const text = await parseExamText(buffer, examFileName)
   return { text, fileName: examFileName }

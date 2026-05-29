@@ -1,4 +1,5 @@
 import Compressor from 'compressorjs'
+export { fileToBase64 } from './fileBase64'
 
 /** 答题卡上传前压缩目标：500KB 以内 */
 export const TARGET_ANSWER_SHEET_BYTES = 500 * 1024
@@ -27,18 +28,6 @@ export async function compressAnswerSheetIfNeeded(file: File): Promise<File> {
   return compressAnswerSheetForUpload(file)
 }
 
-export function fileToBase64(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = () => {
-      const result = String(reader.result)
-      const comma = result.indexOf(',')
-      resolve(comma >= 0 ? result.slice(comma + 1) : result)
-    }
-    reader.onerror = () => reject(new Error('读取文件失败'))
-    reader.readAsDataURL(file)
-  })
-}
 
 export function formatFileSize(bytes: number) {
   if (bytes < 1024) return `${bytes} B`

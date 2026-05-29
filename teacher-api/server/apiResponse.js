@@ -9,10 +9,11 @@ export function setNoCacheHeaders(res) {
 
 function getAllowedOrigin(req) {
   const configured = process.env.TEACHER_API_ALLOWED_ORIGINS
-    || 'https://huqiyunshiai.online,https://www.huqiyunshiai.online'
+    || 'https://huqiyunshiai.online,https://www.huqiyunshiai.online,http://localhost:5173,http://127.0.0.1:5173'
   const allowed = configured.split(',').map((item) => item.trim()).filter(Boolean)
   const origin = req?.headers?.origin
   if (origin && allowed.includes(origin)) return origin
+  if (origin && /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) return origin
   return allowed[0] || '*'
 }
 
