@@ -152,31 +152,34 @@ async function executeDeepSeekRequest(body, { label = 'DeepSeek', model } = {}) 
   return content
 }
 
-export async function callDeepSeekAI(systemPrompt, userPrompt) {
+export async function callDeepSeekAI(systemPrompt, userPrompt, options = {}) {
   const cfg = getDeepSeekConfig()
+  const model = options.model || cfg.model
+  const maxTokens = options.maxTokens ?? 4096
+  const label = options.label || 'DeepSeek'
 
-  console.log('[DeepSeek] 配置检查', getDeepSeekConfigSummary())
+  console.log(`[${label}] 配置检查`, getDeepSeekConfigSummary())
 
   if (!cfg.apiKey) {
     const err = new DeepSeekApiError('DEEPSEEK_API_KEY 未配置', {
       config: getDeepSeekConfigSummary(),
     })
-    console.error('[DeepSeek] 调用失败', err.toJSON())
+    console.error(`[${label}] 调用失败`, err.toJSON())
     throw err
   }
 
   return executeDeepSeekRequest(
     {
-      model: cfg.model,
+      model,
       messages: [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userPrompt },
       ],
       temperature: 0.7,
-      max_tokens: 4096,
+      max_tokens: maxTokens,
       stream: false,
     },
-    { label: 'DeepSeek', model: cfg.model },
+    { label, model },
   )
 }
 
@@ -234,9 +237,15 @@ export function extractJson(text) {
   const codeBlock = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/)
   if (codeBlock) return codeBlock[1].trim()
 
-  const start = trimmed.indexOf('{')
-  const end = trimmed.lastIndexOf('}')
-  if (start >= 0 && end > start) return trimmed.slice(start, end + 1)
+  const arrStart = trimmed.indexOf('[')
+  const arrEnd = trimmed.lastIndexOf(']')
+  const objStart = trimmed.indexOf('{')
+  const objEnd = trimmed.lastIndexOf('}')
+
+  if (arrStart >= 0 && arrEnd > arrStart && (objStart < 0 || arrStart <= objStart)) {
+    return trimmed.slice(arrStart, arrEnd + 1)
+  }
+  if (objStart >= 0 && objEnd > objStart) return trimmed.slice(objStart, objEnd + 1)
   return trimmed
 }
 

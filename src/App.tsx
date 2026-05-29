@@ -18,6 +18,7 @@ import TeacherLessonPrepPage from './pages/TeacherLessonPrepPage'
 import TeacherPlanningPage from './pages/TeacherPlanningPage'
 import TeacherQuestionBankPage from './pages/TeacherQuestionBankPage'
 import TeacherTaskCenterPage from './pages/TeacherTaskCenterPage'
+import TeacherBatchDecomposePage from './pages/TeacherBatchDecomposePage'
 
 export default function App() {
   return (
@@ -64,6 +65,14 @@ export default function App() {
               element={
                 <ProtectedRoute requiredRole="teacher">
                   <TeacherTaskCenterPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/teacher/batch-decompose"
+              element={
+                <ProtectedRoute requiredRole="teacher">
+                  <TeacherBatchDecomposePage />
                 </ProtectedRoute>
               }
             />

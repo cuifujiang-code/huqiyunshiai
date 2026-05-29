@@ -157,6 +157,7 @@ export default function TeacherQuestionBankPage() {
             <input type="file" accept=".docx,.pdf" className="hidden" onChange={(e) => e.target.files?.[0] && handleImportFile(e.target.files[0])} />
           </label>
           <Link to="/teacher/task-center" className={btnSecondary}>查看拆题任务</Link>
+          <Link to="/teacher/batch-decompose" className={btnPrimary}>大批量拆题（100～1000题）</Link>
         </div>
 
         {selected.length > 0 && (

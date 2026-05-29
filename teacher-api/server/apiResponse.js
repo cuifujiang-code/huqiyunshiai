@@ -20,7 +20,7 @@ function getAllowedOrigin(req) {
 export function setCorsHeaders(req, res) {
   res.setHeader('Access-Control-Allow-Origin', getAllowedOrigin(req))
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-decompose-process-secret')
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-decompose-process-secret, x-batch-worker-secret')
   res.setHeader('Access-Control-Max-Age', '86400')
 }
 
