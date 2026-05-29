@@ -164,24 +164,33 @@ export async function insertBatchQuestions(batchId, teacherId, itemId, questions
     batch_id: batchId,
     teacher_id: teacherId,
     item_id: itemId,
-    subject: q.subject,
-    grade: q.grade,
-    knowledge_point: q.knowledge_point,
-    question_type: q.question_type,
-    difficulty: q.difficulty,
+    subject: q.subject || '数学',
+    grade: q.grade || '八年级',
+    knowledge_point: q.knowledge_point ?? '',
+    question_type: q.question_type || '应用题',
+    difficulty: q.difficulty || '中等',
     content: q.content,
-    options: q.options,
-    answer: q.answer,
-    analysis: q.analysis,
-    geometry_desc: q.geometry_desc,
-    latex_blocks: q.latex_blocks,
-    source: q.source,
-    tags: q.tags,
+    options: Array.isArray(q.options) ? q.options : [],
+    answer: q.answer ?? '',
+    analysis: q.analysis ?? '',
+    geometry_desc: q.geometry_desc ?? '',
+    latex_blocks: Array.isArray(q.latex_blocks) ? q.latex_blocks : [],
+    source: q.source || '批量拆题',
+    tags: Array.isArray(q.tags) ? q.tags : [],
     sort_order: q.sort_order ?? 0,
   }))
 
   const { error } = await admin.from(BANK).insert(rows)
-  if (error) throw new Error(error.message)
+  if (error) {
+    console.error('[batchTaskStore] batch_question_bank 入库失败', {
+      batchId,
+      itemId,
+      message: error.message,
+      code: error.code,
+      details: error.details,
+    })
+    throw new Error(error.message)
+  }
 
   // 同步写入教师主题库
   const tqbRows = rows.map((q) => ({

@@ -17,7 +17,13 @@
 --   SELECT : id, batch_id, item_index, status, chunk_text, question_count, result,
 --            error_message, created_at, updated_at
 --
--- 线上已有旧表时，请再执行 008_batch_decompose_schema_sync.sql 做全量对齐。
+-- batch_question_bank（insertBatchQuestions / listBatchQuestions）
+--   INSERT : batch_id, teacher_id, item_id, subject, grade, knowledge_point,
+--            question_type, difficulty, content, options, answer, analysis,
+--            geometry_desc, latex_blocks, source, tags, sort_order
+--   SELECT : 上述字段 + id, created_at（按 sort_order 排序）
+--
+-- 线上已有旧表时，请执行 008_batch_decompose_schema_sync.sql 或 010_batch_schema_complete_sync.sql。
 -- =============================================================================
 
 -- ── 1. batch_decompose_tasks ─────────────────────────────────────────────────
