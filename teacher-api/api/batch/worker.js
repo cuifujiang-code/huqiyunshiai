@@ -1,8 +1,8 @@
-import '../server/applyUrlShim.js'
+import '../../server/applyUrlShim.js'
 import { waitUntil } from '@vercel/functions'
-import { applyApiHeaders, handleOptions } from '../server/apiResponse.js'
-import { verifyBatchWorkerSecret } from '../server/batch/batchTrigger.js'
-import { safeRunBatchWorker } from '../server/batch/batchWorker.js'
+import { applyApiHeaders, handleOptions } from '../../server/apiResponse.js'
+import { verifyBatchWorkerSecret } from '../../server/batch/batchTrigger.js'
+import { safeRunBatchWorker } from '../../server/batch/batchWorker.js'
 
 export default async function handler(req, res) {
   if (handleOptions(req, res)) return

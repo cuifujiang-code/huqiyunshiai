@@ -1,7 +1,7 @@
-import '../server/applyUrlShim.js'
-import { applyApiHeaders, handleOptions } from '../server/apiResponse.js'
-import { triggerBatchWorker } from '../server/batch/batchTrigger.js'
-import { getBatchTaskForTeacher, isBatchStoreConfigured, markBatchRunning } from '../server/batch/batchTaskStore.js'
+import '../../server/applyUrlShim.js'
+import { applyApiHeaders, handleOptions } from '../../server/apiResponse.js'
+import { triggerBatchWorker } from '../../server/batch/batchTrigger.js'
+import { getBatchTaskForTeacher, isBatchStoreConfigured, markBatchRunning } from '../../server/batch/batchTaskStore.js'
 
 export default async function handler(req, res) {
   if (handleOptions(req, res)) return
