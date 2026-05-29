@@ -51,6 +51,32 @@ export interface BatchQuestion {
   knowledge_point: string
   subject: string
   grade: string
+  sort_order?: number
+  question_number?: string
+}
+
+export function normalizeBatchQuestions(raw: unknown): BatchQuestion[] {
+  if (!Array.isArray(raw)) return []
+  return raw.map((q, index) => {
+    const row = q as Record<string, unknown>
+    const sortOrder = Number(row.sort_order)
+    return {
+      id: String(row.id ?? `batch-q-${index}`),
+      content: String(row.content ?? '').trim() || `题目 ${index + 1}`,
+      options: Array.isArray(row.options) ? row.options.map(String) : [],
+      answer: String(row.answer ?? '').trim() || '暂无',
+      analysis: String(row.analysis ?? '').trim() || '暂无',
+      geometry_desc: String(row.geometry_desc ?? '').trim(),
+      latex_blocks: Array.isArray(row.latex_blocks) ? row.latex_blocks.map(String) : [],
+      question_type: String(row.question_type ?? '应用题'),
+      difficulty: String(row.difficulty ?? '中等'),
+      knowledge_point: String(row.knowledge_point ?? '未分类'),
+      subject: String(row.subject ?? '数学'),
+      grade: String(row.grade ?? '八年级'),
+      sort_order: Number.isFinite(sortOrder) ? sortOrder : index + 1,
+      question_number: String(row.question_number ?? sortOrder ?? index + 1),
+    }
+  })
 }
 
 async function callBatch<T>(url: string, body: unknown, label: string, method: 'GET' | 'POST' = 'POST') {
@@ -96,13 +122,16 @@ export async function fetchBatchProgress(teacherId: string, batchId: string, wit
   return callBatch<{
     success: boolean
     progress: BatchProgress
-    questions?: BatchQuestion[]
+    questions: BatchQuestion[]
   }>(
     `${batchApiUrl('batch/progress')}?${params}`,
     null,
     '批量进度',
     'GET',
-  )
+  ).then((data) => ({
+    ...data,
+    questions: normalizeBatchQuestions(data.questions),
+  }))
 }
 
 export async function listBatchTasks(teacherId: string) {

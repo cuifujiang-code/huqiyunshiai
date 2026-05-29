@@ -1,3 +1,4 @@
+import { createClient } from '@supabase/supabase-js'
 import { getSupabaseAdmin, isSupabaseAdminConfigured } from '../supabaseAdmin.js'
 
 const TASKS = 'batch_decompose_tasks'
@@ -20,6 +21,62 @@ function formatSupabaseError(error) {
   if (error.details) parts.push(`details=${error.details}`)
   if (error.hint) parts.push(`hint=${error.hint}`)
   return parts.join('; ')
+}
+
+/** 入库专用：强制使用后端 service_role 环境变量（不用 VITE_ / anon key） */
+function getBatchInsertSupabaseAdmin() {
+  const url = process.env.SUPABASE_URL || ''
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || ''
+  if (!url || !key) {
+    throw new Error('Supabase 未配置：请设置 SUPABASE_URL 与 SUPABASE_SERVICE_ROLE_KEY')
+  }
+  return createClient(url, key, {
+    auth: { autoRefreshToken: false, persistSession: false },
+  })
+}
+
+function normalizeBankInsertRow(q, batchId, teacherId, itemId, fallbackIndex) {
+  const sortOrder = Number.isFinite(Number(q.sort_order)) ? Number(q.sort_order) : fallbackIndex + 1
+  const rawContent = String(q.content ?? '').trim()
+  const questionNumber = String(q.question_number ?? q.questionNumber ?? '').trim() || String(sortOrder)
+  return {
+    batch_id: batchId,
+    teacher_id: teacherId,
+    item_id: itemId ?? null,
+    subject: String(q.subject ?? '').trim() || '数学',
+    grade: String(q.grade ?? '').trim() || '八年级',
+    knowledge_point: String(q.knowledge_point ?? '').trim() || '未分类',
+    question_type: String(q.question_type ?? '').trim() || '应用题',
+    difficulty: String(q.difficulty ?? '').trim() || '中等',
+    content: rawContent || `题目 ${sortOrder}`,
+    options: Array.isArray(q.options) ? q.options : [],
+    answer: String(q.answer ?? '').trim() || '暂无',
+    analysis: String(q.analysis ?? '').trim() || '暂无',
+    geometry_desc: String(q.geometry_desc ?? '').trim() || '',
+    latex_blocks: Array.isArray(q.latex_blocks) ? q.latex_blocks : [],
+    source: String(q.source ?? '').trim() || '批量拆题',
+    tags: Array.isArray(q.tags) ? q.tags : [],
+    sort_order: sortOrder,
+    question_number: questionNumber,
+  }
+}
+
+async function failBatchInsert(batchId, itemId, stage, detail) {
+  const message = `${stage}: ${detail}`
+  console.error(`[入库失败] ${message}`, { batchId, itemId })
+  if (itemId) {
+    try {
+      await markItemFailed(itemId, message)
+    } catch (e) {
+      console.error('[入库失败] markItemFailed 异常', e)
+    }
+  }
+  try {
+    await markBatchFailed(batchId, message)
+  } catch (e) {
+    console.error('[入库失败] markBatchFailed 异常', e)
+  }
+  return { success: false, count: 0, error: message }
 }
 
 export async function createBatchTask({ batchId, teacherId, fileName, subject, grade, chunks, meta = {} }) {
@@ -200,40 +257,35 @@ export async function countItemsByStatus(batchId) {
 }
 
 export async function insertBatchQuestions(batchId, teacherId, itemId, questions) {
-  if (!questions.length) return 0
-  const admin = getSupabaseAdmin()
-  const rows = questions.map((q) => ({
-    batch_id: batchId,
-    teacher_id: teacherId,
-    item_id: itemId,
-    subject: q.subject || '数学',
-    grade: q.grade || '八年级',
-    knowledge_point: q.knowledge_point ?? '',
-    question_type: q.question_type || '应用题',
-    difficulty: q.difficulty || '中等',
-    content: q.content,
-    options: Array.isArray(q.options) ? q.options : [],
-    answer: q.answer ?? '',
-    analysis: q.analysis ?? '',
-    geometry_desc: q.geometry_desc ?? '',
-    latex_blocks: Array.isArray(q.latex_blocks) ? q.latex_blocks : [],
-    source: q.source || '批量拆题',
-    tags: Array.isArray(q.tags) ? q.tags : [],
-    sort_order: q.sort_order ?? 0,
-  }))
+  if (!questions.length) return { success: true, count: 0 }
+
+  console.log(`[入库] batchId=${batchId}, itemId=${itemId}, 待写入题目数=${questions.length}`)
+
+  let admin
+  try {
+    admin = getBatchInsertSupabaseAdmin()
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err)
+    return failBatchInsert(batchId, itemId, 'Supabase 客户端初始化失败', detail)
+  }
+
+  const rows = questions.map((q, i) => normalizeBankInsertRow(q, batchId, teacherId, itemId, i))
 
   const { error } = await admin.from(BANK).insert(rows)
   if (error) {
     const detail = formatSupabaseError(error)
-    console.error('[batchTaskStore] batch_question_bank 入库失败', {
+    console.error('[入库失败] batch_question_bank 写入错误', {
       batchId,
       itemId,
-      fields: Object.keys(rows[0] ?? {}),
-      ...error,
+      teacherId,
+      rowCount: rows.length,
+      sampleRow: rows[0],
+      message: error.message,
+      code: error.code,
+      details: error.details,
+      hint: error.hint,
     })
-    await markItemFailed(itemId, `batch_question_bank 入库失败: ${detail}`)
-    await markBatchFailed(batchId, `batch_question_bank 入库失败 (item=${itemId}): ${detail}`)
-    throw new Error(`batch_question_bank 入库失败: ${detail}`)
+    return failBatchInsert(batchId, itemId, 'batch_question_bank 入库失败', detail)
   }
 
   // 同步写入教师主题库
@@ -255,10 +307,15 @@ export async function insertBatchQuestions(batchId, teacherId, itemId, questions
   const { error: tqbErr } = await admin.from('teacher_question_bank').insert(tqbRows)
   if (tqbErr) {
     const detail = formatSupabaseError(tqbErr)
-    console.error('[batchTaskStore] teacher_question_bank 同步失败', { batchId, itemId, ...tqbErr })
-    await markItemFailed(itemId, `teacher_question_bank 同步失败: ${detail}`)
-    await markBatchFailed(batchId, `teacher_question_bank 同步失败 (item=${itemId}): ${detail}`)
-    throw new Error(`teacher_question_bank 同步失败: ${detail}`)
+    console.error('[入库失败] teacher_question_bank 同步错误', {
+      batchId,
+      itemId,
+      message: tqbErr.message,
+      code: tqbErr.code,
+      details: tqbErr.details,
+      hint: tqbErr.hint,
+    })
+    return failBatchInsert(batchId, itemId, 'teacher_question_bank 同步失败', detail)
   }
 
   const task = await getBatchTask(batchId)
@@ -268,19 +325,86 @@ export async function insertBatchQuestions(batchId, teacherId, itemId, questions
     updated_at: nowIso(),
   }).eq('batch_id', batchId)
 
-  return rows.length
+  console.log(`[入库成功] batchId=${batchId}, itemId=${itemId}, 共写入 ${rows.length} 题 → batch_question_bank`)
+  return { success: true, count: rows.length }
 }
 
+const BANK_SELECT_FIELDS = [
+  'id',
+  'batch_id',
+  'teacher_id',
+  'item_id',
+  'subject',
+  'grade',
+  'knowledge_point',
+  'question_type',
+  'difficulty',
+  'content',
+  'options',
+  'answer',
+  'analysis',
+  'geometry_desc',
+  'latex_blocks',
+  'source',
+  'tags',
+  'sort_order',
+  'question_number',
+  'created_at',
+].join(', ')
+
+export function normalizeBatchQuestionRow(row) {
+  if (!row) return null
+  return {
+    id: row.id,
+    batch_id: row.batch_id,
+    teacher_id: row.teacher_id,
+    item_id: row.item_id,
+    subject: row.subject ?? '数学',
+    grade: row.grade ?? '八年级',
+    knowledge_point: row.knowledge_point ?? '未分类',
+    question_type: row.question_type ?? '应用题',
+    difficulty: row.difficulty ?? '中等',
+    content: row.content ?? '',
+    options: Array.isArray(row.options) ? row.options : [],
+    answer: row.answer ?? '暂无',
+    analysis: row.analysis ?? '暂无',
+    geometry_desc: row.geometry_desc ?? '',
+    latex_blocks: Array.isArray(row.latex_blocks) ? row.latex_blocks : [],
+    source: row.source ?? '批量拆题',
+    tags: Array.isArray(row.tags) ? row.tags : [],
+    sort_order: row.sort_order ?? 0,
+    question_number: row.question_number ?? '',
+    created_at: row.created_at,
+  }
+}
+
+/** 从 batch_question_bank 查询批次题目（按 sort_order 升序） */
 export async function listBatchQuestions(batchId, teacherId) {
   const admin = getSupabaseAdmin()
   const { data, error } = await admin
     .from(BANK)
-    .select('*')
+    .select(BANK_SELECT_FIELDS)
     .eq('batch_id', batchId)
     .eq('teacher_id', teacherId)
     .order('sort_order', { ascending: true })
-  if (error) throw new Error(error.message)
-  return data ?? []
+
+  if (error) {
+    console.error('[listBatchQuestions] batch_question_bank 查询失败', {
+      batchId,
+      teacherId,
+      message: error.message,
+      code: error.code,
+    })
+    throw new Error(error.message)
+  }
+
+  const items = (data ?? []).map(normalizeBatchQuestionRow).filter(Boolean)
+  console.log('[listBatchQuestions] batch_question_bank 查询结果', {
+    batchId,
+    teacherId,
+    count: items.length,
+  })
+  return items
 }
 
 export function formatBatchProgress(task, itemCounts) {

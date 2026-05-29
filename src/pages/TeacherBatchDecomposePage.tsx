@@ -58,6 +58,7 @@ export default function TeacherBatchDecomposePage() {
   const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
   const [preview, setPreview] = useState<BatchQuestion[] | null>(null)
+  const [previewEmpty, setPreviewEmpty] = useState(false)
   const [startingId, setStartingId] = useState<string | null>(null)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const autoRetryRef = useRef(false)
@@ -158,13 +159,16 @@ export default function TeacherBatchDecomposePage() {
   const viewResult = async (batchId: string) => {
     if (!teacherId) return
     setMessage(null)
+    setPreviewEmpty(false)
     try {
       const res = await fetchBatchProgress(teacherId, batchId, true)
-      if (!res.questions?.length) {
-        setMessage('暂无题目结果')
+      const questions = Array.isArray(res.questions) ? res.questions : []
+      if (questions.length === 0) {
+        setPreview(null)
+        setPreviewEmpty(true)
         return
       }
-      setPreview(res.questions)
+      setPreview(questions)
     } catch (e) {
       setMessage(e instanceof Error ? e.message : '获取结果失败')
     }
@@ -313,17 +317,47 @@ export default function TeacherBatchDecomposePage() {
         </div>
       </main>
 
+      {previewEmpty && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+          <div className="w-full max-w-md rounded-2xl border border-slate-700 bg-slate-900 p-6 text-center">
+            <h3 className="mb-3 text-lg font-semibold text-amber-300">暂无题目记录</h3>
+            <p className="mb-2 text-sm text-slate-300">
+              该批次在数据库中没有拆题结果。旧任务数据可能已丢失，无法恢复。
+            </p>
+            <p className="mb-6 text-sm text-slate-400">
+              请重新上传一份新试卷进行批量拆题；部署修复后产生的新任务会正常入库并在此查看。
+            </p>
+            <button type="button" className={btnSecondary} onClick={() => setPreviewEmpty(false)}>
+              关闭
+            </button>
+          </div>
+        </div>
+      )}
+
       {preview && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
           <div className="max-h-[90vh] w-full max-w-4xl overflow-y-auto rounded-2xl border border-slate-700 bg-slate-900 p-6">
             <h3 className="mb-4 text-lg font-semibold">拆题结果（{preview.length} 道，已自动入库）</h3>
             <div className="space-y-3">
-              {preview.map((q) => (
-                <div key={q.id} className="rounded-lg border border-slate-700 p-3">
+              {preview.map((q, idx) => (
+                <div key={q.id || `q-${idx}`} className="rounded-lg border border-slate-700 p-3">
                   <p className="text-xs text-slate-500">
-                    {q.question_type} · {q.difficulty} · {q.knowledge_point}
+                    第 {q.sort_order ?? idx + 1} 题 · {q.question_type} · {q.difficulty} · {q.knowledge_point}
                   </p>
                   <p className="mt-2 whitespace-pre-wrap text-sm">{q.content}</p>
+                  {q.options.length > 0 && (
+                    <ul className="mt-2 space-y-1 text-sm text-slate-300">
+                      {q.options.map((opt, oi) => (
+                        <li key={oi}>{opt}</li>
+                      ))}
+                    </ul>
+                  )}
+                  {q.answer && q.answer !== '暂无' && (
+                    <p className="mt-2 text-sm text-emerald-300">答案：{q.answer}</p>
+                  )}
+                  {q.analysis && q.analysis !== '暂无' && (
+                    <p className="mt-1 text-sm text-slate-400">解析：{q.analysis}</p>
+                  )}
                   {q.geometry_desc && (
                     <p className="mt-2 text-xs text-amber-200/80">图形：{q.geometry_desc}</p>
                   )}
