@@ -26,14 +26,24 @@ export async function fetchQuestions(
   teacherId: string,
   filters: Record<string, string | number> = {},
 ) {
-  const params = new URLSearchParams({ teacherId, ...Object.fromEntries(Object.entries(filters).map(([k, v]) => [k, String(v)])) })
+  const params = new URLSearchParams({ teacherId, page: String(filters.page ?? 1), pageSize: String(filters.pageSize ?? 10) })
+  for (const [key, value] of Object.entries(filters)) {
+    if (key === 'page' || key === 'pageSize') continue
+    if (value != null && String(value).trim() !== '') {
+      params.set(key, String(value))
+    }
+  }
+  const url = `${teacherApiUrl('questions')}?${params}`
   const r = await postApiJson<{ success: boolean; items: BankQuestion[]; total: number; page: number; pageSize: number }>(
-    `${teacherApiUrl('questions')}?${params}`,
+    url,
     null,
     '题库列表',
     { method: 'GET', timeoutMs: 30000 },
   )
-  if (r.kind === 'success' && r.data.success) return r.data
+  if (r.kind === 'success' && r.data.success && Array.isArray(r.data.items)) return r.data
+  if (r.kind === 'success' && !r.data.success) {
+    throw new Error((r.data as { message?: string }).message || `题库 API 响应异常: ${JSON.stringify(r.data).slice(0, 200)}`)
+  }
   throw new Error(r.kind === 'fallback' ? r.reason : '加载题库失败')
 }
 

@@ -41,7 +41,9 @@ export async function handleTeacherApi(req, res, pathSegments = []) {
     if (path === 'questions' && method === 'GET') {
       const teacherId = query.teacherId
       if (!teacherId) return res.status(400).json({ success: false, message: '缺少 teacherId' })
+      console.log('[teacherApi] 查询题库', { teacherId, query })
       const result = await questionBank.listQuestions(teacherId, query)
+      console.log('[teacherApi] 题库结果', { teacherId, total: result.total, itemCount: result.items?.length ?? 0 })
       return res.status(200).json({ success: true, ...result })
     }
 
