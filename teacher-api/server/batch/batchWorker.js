@@ -1,6 +1,6 @@
 import { callDeepSeekAI, extractJson } from '../deepseekClient.js'
 import { safeJsonParse } from './safeJson.js'
-import { BATCH_SYSTEM_PROMPT, buildBatchSplitPrompt, extractQuestionsFromAiRaw, normalizeBatchQuestions } from './batchPrompt.js'
+import { BATCH_SYSTEM_PROMPT, buildBatchSplitPrompt, parseBatchSplitAiResponse } from './batchPrompt.js'
 import {
   countItemsByStatus,
   fetchPendingItems,
@@ -123,19 +123,30 @@ async function processOneItem(item, meta, sortOffset) {
       maxTokens: 4096,
       label: 'batch-split',
     })
-    const raw = safeJsonParse(extractJson(content))
-    const rawQuestions = extractQuestionsFromAiRaw(raw)
-    console.log('[batchWorker] AI 原始解析', {
+
+    const { questions, rawQuestions, extractPath, parsed } = parseBatchSplitAiResponse(
+      content,
+      meta,
+      sortOffset,
+      extractJson,
+      safeJsonParse,
+    )
+
+    console.log('[batchWorker] AI 解析结果', {
       itemId: item.id,
-      rawType: Array.isArray(raw) ? 'array' : typeof raw,
-      rawKeys: raw && typeof raw === 'object' && !Array.isArray(raw) ? Object.keys(raw) : [],
+      extractPath,
       rawQuestionsCount: rawQuestions.length,
+      questionCount: questions.length,
+      parsedType: parsed == null ? 'null' : Array.isArray(parsed) ? 'array' : typeof parsed,
     })
-    const questions = normalizeBatchQuestions(rawQuestions.length ? rawQuestions : raw, meta, sortOffset)
-    console.log('[batchWorker] AI 拆题完成', { itemId: item.id, questionCount: questions.length })
+
     if (!questions.length) {
-      const msg = 'AI 未解析出任何题目（rawQuestions 为空）'
-      console.warn('[Worker] rawQuestions 为空，标记分块失败', { itemId: item.id, rawPreview: JSON.stringify(raw).slice(0, 300) })
+      const msg = `AI 未解析出任何题目（extractPath=${extractPath || 'unknown'}）`
+      console.warn('[Worker] rawQuestions 为空，标记分块失败', {
+        itemId: item.id,
+        extractPath,
+        rawPreview: String(content ?? '').slice(0, 500),
+      })
       await markItemFailed(item.id, msg)
       return { success: false, error: msg, itemId: item.id, rawQuestions: [], questions: [] }
     }
