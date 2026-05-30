@@ -357,16 +357,18 @@ export async function countItemsByStatus(batchId) {
 }
 
 export async function insertBatchQuestions(batchId, teacherId, itemId, questions, taskMeta = {}) {
-  const questionCount = Array.isArray(questions) ? questions.length : 0
-  console.log(`[入库] batchId=${batchId}, 待写入题目数=${questionCount}`)
-
-  logSupabaseInsertEnv(batchId)
+  const rawQuestions = Array.isArray(questions) ? questions : []
+  const questionCount = rawQuestions.length
+  console.log('[入库] 收到题目数据，数量=' + questionCount, { batchId, itemId, teacherId })
 
   if (!questionCount) {
-    const detail = 'AI 拆题结果为空，无可入库题目'
-    console.error(`[入库失败] ${detail}`, { batchId, itemId, teacherId })
-    return failBatchInsert(batchId, itemId, '无可入库题目', detail)
+    const errMsg = '[入库] 错误：rawQuestions 为空，拒绝写入'
+    console.error(errMsg, { batchId, itemId, teacherId })
+    await failBatchInsert(batchId, itemId, '无可入库题目', 'rawQuestions 为空，拒绝写入')
+    throw new Error(errMsg)
   }
+
+  logSupabaseInsertEnv(batchId)
 
   let admin
   try {
@@ -378,12 +380,18 @@ export async function insertBatchQuestions(batchId, teacherId, itemId, questions
     return failBatchInsert(batchId, itemId, 'Supabase 客户端初始化失败', detail)
   }
 
-  const rows = questions.map((q, i) => normalizeBankInsertRow(q, batchId, teacherId, itemId, i, taskMeta))
+  const rows = rawQuestions.map((q, i) => normalizeBankInsertRow(q, batchId, teacherId, itemId, i, taskMeta))
 
   console.log('[入库] 首条题目完整 JSON', JSON.stringify(rows[0], null, 2))
   console.log('[入库] 首条题目摘要', { batchId, itemId, ...summarizeBankRow(rows[0]) })
 
   const { data: insertedRows, error, status, statusText } = await admin.from(BANK).insert(rows).select('id, batch_id, item_id')
+  console.log('[入库] 插入结果，返回行数=' + (insertedRows?.length || 0), {
+    batchId,
+    itemId,
+    attempted: rows.length,
+    hasError: Boolean(error),
+  })
   if (error) {
     console.error('[入库失败] batch_question_bank 写入错误（完整 Supabase 错误）', {
       batchId,

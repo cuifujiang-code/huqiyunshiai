@@ -80,6 +80,8 @@ export function deepFindQuestionArrays(node, depth = 0, maxDepth = 8) {
     const priorityKeys = [
       'questions', 'question_list', 'questions_list', 'items', 'data',
       'result', 'results', 'output', 'response', 'list', 'payload',
+      'choices', 'message', 'messages', 'content', 'body', 'text',
+      'answer', 'completion', 'delta', 'tool_calls', 'function_call',
       '题目', '试题', 'exam_questions', 'parsed_questions',
     ]
     for (const key of priorityKeys) {
@@ -107,6 +109,22 @@ export function deepFindQuestionArrays(node, depth = 0, maxDepth = 8) {
 }
 
 export function extractQuestionsFromAiRaw(raw, { logWarnings = true } = {}) {
+  if (typeof raw === 'string' && raw.trim()) {
+    try {
+      const inner = JSON.parse(raw.trim())
+      const extracted = extractQuestionsFromAiRaw(inner, { logWarnings: false })
+      if (extracted.length) {
+        if (logWarnings) console.log('[batchPrompt] 题目提取路径', { path: 'string_json_parse', count: extracted.length })
+        return extracted
+      }
+    } catch {
+      if (logWarnings) {
+        console.warn(`[Prompt] 无法解析 AI 响应，原始内容前500字符=${raw.slice(0, 500)}`)
+      }
+    }
+    return []
+  }
+
   if (Array.isArray(raw)) {
     if (isQuestionArray(raw)) return raw.filter(Boolean)
     const merged = []
@@ -119,7 +137,11 @@ export function extractQuestionsFromAiRaw(raw, { logWarnings = true } = {}) {
 
   if (!raw || typeof raw !== 'object') return []
 
-  const topKeys = ['questions', 'question_list', 'items', 'data', 'result', 'results', 'output', 'list', '题目', '试题']
+  const topKeys = [
+    'questions', 'question_list', 'items', 'data', 'result', 'results',
+    'output', 'response', 'list', 'choices', 'message', 'messages',
+    'content', 'body', 'text', '题目', '试题',
+  ]
   for (const key of topKeys) {
     const val = raw[key]
     if (val == null) continue
@@ -202,19 +224,31 @@ export function normalizeBatchQuestions(raw, meta, startOrder = 0) {
  * @returns {{ questions: object[], rawQuestions: object[], extractPath: string, parsed: unknown }}
  */
 export function parseBatchSplitAiResponse(aiText, meta, sortOffset, extractJson, safeJsonParse) {
-  const rawPreview = String(aiText ?? '').slice(0, 500)
-  console.log('[batchWorker] AI 原始响应前500字符:', rawPreview)
+  const rawText = String(aiText ?? '')
+  const rawPreview500 = rawText.slice(0, 500)
+  const rawPreview1000 = rawText.slice(0, 1000)
 
-  if (!String(aiText ?? '').trim()) {
+  if (!rawText.trim()) {
     console.warn('[batchWorker] AI 响应为空')
+    console.warn(`[Prompt] 无法解析 AI 响应，原始内容前500字符=${rawPreview500}`)
     return { questions: [], rawQuestions: [], extractPath: 'empty_response', parsed: null }
   }
 
   const attempts = []
   const jsonCandidates = [
     extractJson(aiText),
-    String(aiText).trim(),
+    rawText.trim(),
   ]
+
+  // 若整体是字符串，先 JSON.parse 再提取
+  if (rawText.trim().startsWith('"') || rawText.trim().startsWith("'")) {
+    try {
+      const unquoted = JSON.parse(rawText.trim())
+      if (typeof unquoted === 'string') jsonCandidates.unshift(extractJson(unquoted))
+    } catch {
+      attempts.push('unquote_string_fail')
+    }
+  }
 
   let parsed = null
   for (const candidate of jsonCandidates) {
@@ -228,9 +262,15 @@ export function parseBatchSplitAiResponse(aiText, meta, sortOffset, extractJson,
     }
   }
 
+  const topKeysBefore = parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+    ? Object.keys(parsed)
+    : Array.isArray(parsed) ? [`array(${parsed.length})`] : [typeof parsed]
+  console.log('[Worker] 提取题目，原始数据字段=' + topKeysBefore.join(','))
+
   if (parsed == null) {
-    console.warn('[batchWorker] JSON 解析全部失败', { attempts, preview: rawPreview })
-    return { questions: [], rawQuestions: [], extractPath: 'json_parse_failed', parsed: null }
+    console.warn(`[Prompt] 无法解析 AI 响应，原始内容前500字符=${rawPreview500}`)
+    console.warn('[batchWorker] JSON 解析全部失败', { attempts })
+    return { questions: [], rawQuestions: [], extractPath: 'json_parse_failed', parsed: null, rawPreview1000 }
   }
 
   let rawQuestions = extractQuestionsFromAiRaw(parsed)
@@ -239,7 +279,7 @@ export function parseBatchSplitAiResponse(aiText, meta, sortOffset, extractJson,
   if (!rawQuestions.length) {
     console.warn('[batchWorker] 主路径提取为空，尝试 deepFindQuestionArrays', {
       parsedType: Array.isArray(parsed) ? 'array' : typeof parsed,
-      topKeys: parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? Object.keys(parsed) : [],
+      topKeys: topKeysBefore,
     })
     rawQuestions = deepFindQuestionArrays(parsed)
     extractPath = rawQuestions.length ? 'deepFindQuestionArrays' : extractPath
@@ -250,15 +290,26 @@ export function parseBatchSplitAiResponse(aiText, meta, sortOffset, extractJson,
     if (rawQuestions.length) extractPath = 'array_filter_objects'
   }
 
+  if (!rawQuestions.length && typeof parsed === 'string') {
+    rawQuestions = extractQuestionsFromAiRaw(parsed)
+    if (rawQuestions.length) extractPath = 'parsed_string_reextract'
+  }
+
+  const topKeysAfter = rawQuestions.length
+    ? ['extracted_questions']
+    : (parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? Object.keys(parsed) : topKeysBefore)
+  console.log('[Worker] 提取题目，原始数据字段=' + topKeysAfter.join(',') + ` (count=${rawQuestions.length})`)
+
   if (!rawQuestions.length) {
+    console.warn(`[Prompt] 无法解析 AI 响应，原始内容前500字符=${rawPreview500}`)
     console.warn('[batchWorker] 所有提取路径均为空', {
       attempts,
       parsedPreview: JSON.stringify(parsed).slice(0, 400),
     })
-    return { questions: [], rawQuestions: [], extractPath: 'all_paths_empty', parsed }
+    return { questions: [], rawQuestions: [], extractPath: 'all_paths_empty', parsed, rawPreview1000 }
   }
 
   const questions = normalizeBatchQuestions(rawQuestions, meta, sortOffset)
   console.log('[batchWorker] 题目提取成功', { extractPath, rawCount: rawQuestions.length, normalizedCount: questions.length })
-  return { questions, rawQuestions, extractPath, parsed }
+  return { questions, rawQuestions, extractPath, parsed, rawPreview1000 }
 }
