@@ -28,6 +28,32 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
+/** 入库失败或 imported_questions=0 时不得标记 completed */
+async function resolveFinalBatchStatus(batchId, counts) {
+  const task = await getBatchTask(batchId)
+  const imported = task?.imported_questions ?? 0
+
+  if (counts.pending > 0 || counts.processing > 0) {
+    return null
+  }
+
+  if (imported <= 0) {
+    const msg = '拆题流程结束但未检测到入库题目（imported_questions=0），请检查 batch_question_bank 表结构与 Supabase 环境变量'
+    console.error('[batchWorker] 无入库题目，标记 failed', { batchId, counts, imported })
+    await markBatchFailed(batchId, msg)
+    return 'failed'
+  }
+
+  const finalStatus = counts.failed > 0 ? 'partial' : 'completed'
+  console.log('[batchWorker] 收尾状态', { batchId, finalStatus, imported, counts })
+  await updateBatchProgress(batchId, {
+    completedItems: counts.completed + counts.failed,
+    status: finalStatus,
+  })
+  await markBatchCompleted(batchId)
+  return finalStatus
+}
+
 /** 链式触发下一轮 worker：先延迟 2s，失败最多重试 2 次（每次间隔递增 2s） */
 async function chainNextWorker(batchId, roundNum, remainingChunks) {
   console.log(`[batchWorker] 第${roundNum}轮完成，剩余${remainingChunks}个分块`, { batchId })
@@ -90,17 +116,40 @@ async function processOneItem(item, meta, sortOffset) {
     const raw = safeJsonParse(extractJson(content))
     const questions = normalizeBatchQuestions(raw, meta, sortOffset)
     console.log('[batchWorker] AI 拆题完成', { itemId: item.id, questionCount: questions.length })
-    await markItemCompleted(item.id, questions)
+    if (!questions.length) {
+      const msg = 'AI 未解析出任何题目'
+      await markItemFailed(item.id, msg)
+      return { success: false, error: msg, itemId: item.id, questions: [] }
+    }
     return { success: true, questions, itemId: item.id }
   } catch (error) {
     const msg = error instanceof Error ? error.message : '拆题失败'
     console.error('[batchWorker] 分块处理失败', { itemId: item.id, msg })
     await markItemFailed(item.id, msg)
-    return { success: false, error: msg, itemId: item.id }
+    return { success: false, error: msg, itemId: item.id, questions: [] }
   }
 }
 
-async function runPool(items, meta, startSort) {
+async function persistItemQuestions(batchId, teacherId, itemId, questions, taskMeta) {
+  console.log('[batchWorker] 入库题目', { batchId, itemId, count: questions.length })
+  const insertResult = await insertBatchQuestions(batchId, teacherId, itemId, questions, taskMeta)
+  if (!insertResult?.success || !insertResult.count) {
+    const msg = insertResult?.error || '入库失败或未写入任何题目'
+    console.error('[batchWorker] 入库失败，终止任务', {
+      batchId,
+      itemId,
+      success: insertResult?.success,
+      count: insertResult?.count,
+      msg,
+    })
+    await markItemFailed(itemId, msg)
+    throw new Error(msg)
+  }
+  await markItemCompleted(itemId, questions)
+  return insertResult.count
+}
+
+async function runPool(items, meta, startSort, batchId, teacherId, taskMeta) {
   let sort = startSort
   const results = []
   for (let i = 0; i < items.length; i += CONCURRENCY) {
@@ -109,7 +158,10 @@ async function runPool(items, meta, startSort) {
     const settled = await Promise.all(slice.map((item) => processOneItem(item, meta, sort)))
     for (const r of settled) {
       results.push(r)
-      if (r.success && r.questions) sort += r.questions.length
+      if (r.success && r.questions?.length) {
+        const written = await persistItemQuestions(batchId, teacherId, r.itemId, r.questions, taskMeta)
+        sort += written
+      }
     }
   }
   return results
@@ -130,6 +182,7 @@ export async function runBatchWorker(batchId) {
     status: task.status,
     totalItems: task.total_items,
     teacherId: task.teacher_id,
+    importedQuestions: task.imported_questions,
   })
 
   if (task.status === 'completed') {
@@ -149,38 +202,13 @@ export async function runBatchWorker(batchId) {
 
   if (!pending.length) {
     const counts = await countItemsByStatus(batchId)
-    const finalStatus = counts.failed > 0 && counts.completed === 0 ? 'failed' : counts.failed > 0 ? 'partial' : 'completed'
+    const finalStatus = await resolveFinalBatchStatus(batchId, counts)
     console.log('[batchWorker] 无待处理分块，收尾', { batchId, finalStatus, counts })
-    await updateBatchProgress(batchId, {
-      completedItems: counts.completed + counts.failed,
-      status: finalStatus,
-    })
-    if (finalStatus === 'completed' || finalStatus === 'partial') {
-      await markBatchCompleted(batchId)
-    }
-    return { done: true, status: finalStatus, counts }
+    return { done: true, status: finalStatus ?? task.status, counts }
   }
 
   const startSort = task.total_questions ?? 0
-  const results = await runPool(pending, meta, startSort)
-
-  for (const r of results) {
-    if (r.success && r.questions?.length) {
-      console.log('[batchWorker] 入库题目', { batchId, itemId: r.itemId, count: r.questions.length })
-      try {
-        const insertResult = await insertBatchQuestions(batchId, task.teacher_id, r.itemId, r.questions)
-        if (!insertResult?.success) {
-          const msg = insertResult?.error || '入库失败'
-          console.error('[batchWorker] 入库失败，终止任务', { batchId, itemId: r.itemId, msg })
-          throw new Error(msg)
-        }
-      } catch (insertErr) {
-        const msg = insertErr instanceof Error ? insertErr.message : String(insertErr)
-        console.error('[batchWorker] 入库失败，终止任务', { batchId, itemId: r.itemId, msg })
-        throw insertErr
-      }
-    }
-  }
+  await runPool(pending, meta, startSort, batchId, task.teacher_id, meta)
 
   const counts = await countItemsByStatus(batchId)
   const doneChunks = counts.completed + counts.failed
@@ -197,13 +225,9 @@ export async function runBatchWorker(batchId) {
     return { continued: true, processed: pending.length, counts, roundNum, remainingChunks }
   }
 
-  const finalStatus = counts.failed > 0 ? 'partial' : 'completed'
+  const finalStatus = await resolveFinalBatchStatus(batchId, counts)
   console.log('[batchWorker] 全部完成', { batchId, finalStatus, counts })
-  await updateBatchProgress(batchId, { status: finalStatus })
-  if (finalStatus === 'completed' || finalStatus === 'partial') {
-    await markBatchCompleted(batchId)
-  }
-  return { done: true, status: finalStatus, counts }
+  return { done: true, status: finalStatus ?? 'failed', counts }
 }
 
 export async function safeRunBatchWorker(batchId) {
@@ -219,6 +243,6 @@ export async function safeRunBatchWorker(batchId) {
     } catch (markErr) {
       console.error('[batchWorker] 标记 failed 也失败', { batchId, markErr })
     }
-    return { success: false, message: msg }
+    return { success: false, message: msg, status: 'failed' }
   }
 }

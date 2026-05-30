@@ -35,29 +35,68 @@ function getBatchInsertSupabaseAdmin() {
   })
 }
 
-function normalizeBankInsertRow(q, batchId, teacherId, itemId, fallbackIndex) {
-  const sortOrder = Number.isFinite(Number(q.sort_order)) ? Number(q.sort_order) : fallbackIndex + 1
-  const rawContent = String(q.content ?? '').trim()
-  const questionNumber = String(q.question_number ?? q.questionNumber ?? '').trim() || String(sortOrder)
+function normalizeBankInsertRow(q, batchId, teacherId, itemId, fallbackIndex, taskMeta = {}) {
+  const sortOrder = Number.isFinite(Number(q?.sort_order))
+    ? Math.max(1, Number(q.sort_order))
+    : fallbackIndex + 1
+  const rawContent = String(q?.content ?? q?.question ?? q?.title ?? '').trim()
+  const questionNumber = String(q?.question_number ?? q?.questionNumber ?? q?.number ?? '').trim() || String(sortOrder)
+
+  const VALID_TYPES = new Set(['选择题', '填空题', '计算题', '证明题', '实验题', '应用题'])
+  const VALID_DIFFICULTY = new Set(['基础', '中等', '拔高'])
+
+  let questionType = String(q?.question_type ?? q?.type ?? '').trim() || '应用题'
+  if (!VALID_TYPES.has(questionType)) questionType = '应用题'
+
+  let difficulty = String(q?.difficulty ?? '').trim() || '中等'
+  if (!VALID_DIFFICULTY.has(difficulty)) difficulty = '中等'
+
+  const optionsRaw = q?.options ?? q?.choices ?? []
+  const options = Array.isArray(optionsRaw)
+    ? optionsRaw.map((o) => String(o ?? '').trim()).filter(Boolean)
+    : []
+
+  const latexRaw = q?.latex_blocks ?? q?.latexBlocks ?? []
+  const latexBlocks = Array.isArray(latexRaw)
+    ? latexRaw.map((b) => String(b ?? '').trim()).filter(Boolean)
+    : []
+
+  const tagsRaw = q?.tags ?? []
+  const tags = Array.isArray(tagsRaw)
+    ? tagsRaw.map((t) => String(t ?? '').trim()).filter(Boolean)
+    : []
+
   return {
     batch_id: batchId,
     teacher_id: teacherId,
     item_id: itemId ?? null,
-    subject: String(q.subject ?? '').trim() || '数学',
-    grade: String(q.grade ?? '').trim() || '八年级',
-    knowledge_point: String(q.knowledge_point ?? '').trim() || '未分类',
-    question_type: String(q.question_type ?? '').trim() || '应用题',
-    difficulty: String(q.difficulty ?? '').trim() || '中等',
+    subject: String(q?.subject ?? taskMeta.subject ?? '').trim() || '数学',
+    grade: String(q?.grade ?? taskMeta.grade ?? '').trim() || '八年级',
+    knowledge_point: String(q?.knowledge_point ?? q?.knowledgePoint ?? '').trim() || '未分类',
+    question_type: questionType,
+    difficulty,
     content: rawContent || `题目 ${sortOrder}`,
-    options: Array.isArray(q.options) ? q.options : [],
-    answer: String(q.answer ?? '').trim() || '暂无',
-    analysis: String(q.analysis ?? '').trim() || '暂无',
-    geometry_desc: String(q.geometry_desc ?? '').trim() || '',
-    latex_blocks: Array.isArray(q.latex_blocks) ? q.latex_blocks : [],
-    source: String(q.source ?? '').trim() || '批量拆题',
-    tags: Array.isArray(q.tags) ? q.tags : [],
+    options,
+    answer: String(q?.answer ?? q?.correct_answer ?? '').trim() || '暂无',
+    analysis: String(q?.analysis ?? q?.explanation ?? q?.解析 ?? '').trim() || '暂无',
+    geometry_desc: String(q?.geometry_desc ?? q?.geometryDesc ?? '').trim() || '',
+    latex_blocks: latexBlocks,
+    source: String(q?.source ?? '').trim() || '批量拆题',
+    tags,
     sort_order: sortOrder,
     question_number: questionNumber,
+  }
+}
+
+function summarizeBankRow(row) {
+  return {
+    sort_order: row.sort_order,
+    question_number: row.question_number,
+    question_type: row.question_type,
+    difficulty: row.difficulty,
+    contentPreview: String(row.content ?? '').slice(0, 120),
+    optionsCount: Array.isArray(row.options) ? row.options.length : 0,
+    answerPreview: String(row.answer ?? '').slice(0, 40),
   }
 }
 
@@ -298,10 +337,15 @@ export async function countItemsByStatus(batchId) {
   return counts
 }
 
-export async function insertBatchQuestions(batchId, teacherId, itemId, questions) {
-  if (!questions.length) return { success: true, count: 0 }
+export async function insertBatchQuestions(batchId, teacherId, itemId, questions, taskMeta = {}) {
+  const questionCount = Array.isArray(questions) ? questions.length : 0
+  console.log(`[入库] batchId=${batchId}, 待写入题目数=${questionCount}`)
 
-  console.log(`[入库] batchId=${batchId}, itemId=${itemId}, 待写入题目数=${questions.length}`)
+  if (!questionCount) {
+    const detail = 'AI 拆题结果为空，无可入库题目'
+    console.error(`[入库失败] ${detail}`, { batchId, itemId, teacherId })
+    return failBatchInsert(batchId, itemId, '无可入库题目', detail)
+  }
 
   let admin
   try {
@@ -311,64 +355,90 @@ export async function insertBatchQuestions(batchId, teacherId, itemId, questions
     return failBatchInsert(batchId, itemId, 'Supabase 客户端初始化失败', detail)
   }
 
-  const rows = questions.map((q, i) => normalizeBankInsertRow(q, batchId, teacherId, itemId, i))
+  const rows = questions.map((q, i) => normalizeBankInsertRow(q, batchId, teacherId, itemId, i, taskMeta))
 
-  const { error } = await admin.from(BANK).insert(rows)
+  console.log('[入库] 首条题目摘要', { batchId, itemId, ...summarizeBankRow(rows[0]) })
+
+  const { data: insertedRows, error } = await admin.from(BANK).insert(rows).select('id')
   if (error) {
-    const detail = formatSupabaseError(error)
-    console.error('[入库失败] batch_question_bank 写入错误', {
+    console.error('[入库失败] batch_question_bank 写入错误（完整 Supabase 错误）', {
       batchId,
       itemId,
       teacherId,
       rowCount: rows.length,
-      sampleRow: rows[0],
       message: error.message,
       code: error.code,
       details: error.details,
       hint: error.hint,
+      sampleRow: rows[0],
     })
+    return failBatchInsert(
+      batchId,
+      itemId,
+      'batch_question_bank 入库失败',
+      formatSupabaseError(error),
+    )
+  }
+
+  const insertedCount = insertedRows?.length ?? rows.length
+  if (!insertedCount) {
+    const detail = 'batch_question_bank insert 未返回行数，可能写入被 RLS 或约束拦截'
+    console.error('[入库失败]', { batchId, itemId, detail })
     return failBatchInsert(batchId, itemId, 'batch_question_bank 入库失败', detail)
   }
 
-  // 同步写入教师主题库
-  const tqbRows = rows.map((q) => ({
-    teacher_id: teacherId,
-    subject: q.subject,
-    grade: q.grade,
-    knowledge_point: q.knowledge_point,
-    question_type: q.question_type,
-    difficulty: q.difficulty,
-    content: q.content,
-    options: q.options,
-    answer: q.answer,
-    analysis: q.analysis,
-    source: '批量拆题',
-    tags: q.tags,
-    updated_at: nowIso(),
-  }))
-  const { error: tqbErr } = await admin.from('teacher_question_bank').insert(tqbRows)
-  if (tqbErr) {
-    const detail = formatSupabaseError(tqbErr)
-    console.error('[入库失败] teacher_question_bank 同步错误', {
+  // 同步写入教师主题库（失败不阻断 batch_question_bank 入库，仅记录警告）
+  try {
+    const tqbRows = rows.map((q) => ({
+      teacher_id: teacherId,
+      subject: q.subject,
+      grade: q.grade,
+      knowledge_point: q.knowledge_point,
+      question_type: q.question_type,
+      difficulty: q.difficulty,
+      content: q.content,
+      options: q.options,
+      answer: q.answer,
+      analysis: q.analysis,
+      source: '批量拆题',
+      tags: q.tags,
+      updated_at: nowIso(),
+    }))
+    const { error: tqbErr } = await admin.from('teacher_question_bank').insert(tqbRows)
+    if (tqbErr) {
+      console.warn('[入库] teacher_question_bank 同步失败（batch_question_bank 已写入）', {
+        batchId,
+        itemId,
+        message: tqbErr.message,
+        code: tqbErr.code,
+        details: tqbErr.details,
+        hint: tqbErr.hint,
+      })
+    }
+  } catch (syncErr) {
+    console.warn('[入库] teacher_question_bank 同步异常（batch_question_bank 已写入）', {
       batchId,
       itemId,
-      message: tqbErr.message,
-      code: tqbErr.code,
-      details: tqbErr.details,
-      hint: tqbErr.hint,
+      error: syncErr instanceof Error ? syncErr.message : String(syncErr),
     })
-    return failBatchInsert(batchId, itemId, 'teacher_question_bank 同步失败', detail)
   }
 
   const task = await getBatchTask(batchId)
-  await admin.from(TASKS).update({
-    imported_questions: (task?.imported_questions ?? 0) + rows.length,
-    total_questions: (task?.total_questions ?? 0) + rows.length,
+  const { error: progressErr } = await admin.from(TASKS).update({
+    imported_questions: (task?.imported_questions ?? 0) + insertedCount,
+    total_questions: (task?.total_questions ?? 0) + insertedCount,
     updated_at: nowIso(),
   }).eq('batch_id', batchId)
+  if (progressErr) {
+    console.error('[入库] 更新 imported_questions 失败', {
+      batchId,
+      message: progressErr.message,
+      code: progressErr.code,
+    })
+  }
 
-  console.log(`[入库成功] batchId=${batchId}, itemId=${itemId}, 共写入 ${rows.length} 题 → batch_question_bank`)
-  return { success: true, count: rows.length }
+  console.log(`[入库成功] 共写入 ${insertedCount} 题`, { batchId, itemId, teacherId })
+  return { success: true, count: insertedCount }
 }
 
 const BANK_SELECT_FIELDS = [
