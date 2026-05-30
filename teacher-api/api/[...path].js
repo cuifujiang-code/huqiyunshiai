@@ -1,17 +1,15 @@
 import '../server/applyUrlShim.js'
-import { handleTeacherApi } from './teacherApiHandler.js'
 import { applyApiHeaders, handleOptions } from '../server/apiResponse.js'
-import { getTeacherApiPathSegments } from '../server/urlUtil.js'
+import { dispatchApiRequest } from '../server/apiRouter.js'
 
+/** Vercel catch-all：/api/batch/*、/api/teacher/* 等嵌套路由 */
 export default async function handler(req, res) {
   if (handleOptions(req, res)) return
   applyApiHeaders(req, res)
-
-  const segments = getTeacherApiPathSegments(req)
-  return handleTeacherApi(req, res, segments)
+  return dispatchApiRequest(req, res)
 }
 
 export const config = {
   maxDuration: 60,
-  api: { bodyParser: { sizeLimit: '50mb' } },
+  includeFiles: '{server/**,node_modules/mammoth/**,node_modules/pdf-parse/**,node_modules/pdfjs-dist/**}',
 }

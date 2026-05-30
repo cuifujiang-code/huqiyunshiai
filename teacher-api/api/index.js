@@ -1,8 +1,8 @@
 /**
  * Teacher API 健康检查（根路径 / 经 vercel.json rewrite 指向此处）
- * 保持零依赖，避免 import 链导致冷启动失败返回空白页
+ * 若嵌套路由 /api/batch/* 等被错误 rewrite 到此，则转发至 apiRouter 兜底分发。
  */
-export default function handler(req, res) {
+export default async function handler(req, res) {
   try {
     const origin = req.headers?.origin
     const allowedOrigins = (
@@ -24,6 +24,23 @@ export default function handler(req, res) {
       return res.status(204).end()
     }
 
+    const pathname = (() => {
+      if (typeof req.url !== 'string' || !req.url) return '/api'
+      try {
+        const host = req.headers?.host || 'localhost'
+        const proto = req.headers?.['x-forwarded-proto'] === 'https' ? 'https' : 'http'
+        return new URL(req.url, `${proto}://${host}`).pathname
+      } catch {
+        return req.url.split('?')[0] || '/api'
+      }
+    })()
+
+    if (pathname !== '/api' && pathname !== '/') {
+      console.log('[api/index] 嵌套路由兜底转发', { pathname, url: req.url })
+      const { dispatchApiRequest } = await import('../server/apiRouter.js')
+      return dispatchApiRequest(req, res)
+    }
+
     return res.status(200).json({
       status: 'ok',
       message: 'Teacher API is running',
@@ -40,5 +57,6 @@ export default function handler(req, res) {
 }
 
 export const config = {
-  maxDuration: 10,
+  maxDuration: 60,
+  includeFiles: '{server/**,node_modules/mammoth/**,node_modules/pdf-parse/**,node_modules/pdfjs-dist/**}',
 }

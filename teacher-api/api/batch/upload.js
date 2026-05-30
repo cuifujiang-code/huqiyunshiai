@@ -14,6 +14,7 @@ import { startBatchProcessing } from '../../server/batch/batchStart.js'
 
 function buildUploadPayload({
   batchId,
+  id,
   chunkCount,
   status,
   message,
@@ -22,10 +23,15 @@ function buildUploadPayload({
   startFailed = false,
   startError,
 }) {
+  const normalizedBatchId = String(batchId ?? '').trim()
+  if (!normalizedBatchId) {
+    throw new Error('buildUploadPayload: batchId 不能为空')
+  }
   return {
     success,
-    batchId,
-    taskId: batchId,
+    batchId: normalizedBatchId,
+    taskId: normalizedBatchId,
+    ...(id ? { id: String(id) } : {}),
     status: status ?? 'pending',
     totalItems: chunkCount,
     total_items: chunkCount,
@@ -36,6 +42,19 @@ function buildUploadPayload({
     ...(startError ? { startError } : {}),
     message: message ?? `批量任务已创建，共 ${chunkCount} 个处理分块`,
   }
+}
+
+function sendUploadResponse(res, statusCode, payload) {
+  const body = buildUploadPayload(payload)
+  console.log('[upload] 返回 batchId:', body.batchId, {
+    statusCode,
+    chunkCount: body.chunkCount,
+    status: body.status,
+    autoStarted: body.autoStarted,
+    startFailed: body.startFailed,
+    id: body.id,
+  })
+  return res.status(statusCode).json(body)
 }
 
 async function parseUploadToText(body) {
@@ -95,6 +114,10 @@ export default async function handler(req, res) {
   }
 
   if (!isBatchStoreConfigured()) {
+    console.error('[batch/upload] Supabase 未配置', {
+      hasSupabaseUrl: Boolean(process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL),
+      hasServiceRoleKey: Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY),
+    })
     return res.status(503).json({ success: false, message: '请配置 SUPABASE_URL 与 SUPABASE_SERVICE_ROLE_KEY' })
   }
 
@@ -148,31 +171,29 @@ export default async function handler(req, res) {
     }
 
     if (startResult && !startResult.ok) {
-      return res.status(200).json(
-        buildUploadPayload({
-          batchId,
-          chunkCount,
-          status: startResult.taskStatus ?? 'pending',
-          autoStarted: false,
-          startFailed: true,
-          startError: startResult.message,
-          message: `任务已创建（${chunkCount} 个分块），Worker 启动失败：${startResult.message}。请在列表中点击「启动」重试。`,
-        }),
-      )
+      return sendUploadResponse(res, 200, {
+        batchId,
+        id: created.id,
+        chunkCount,
+        status: startResult.taskStatus ?? 'pending',
+        autoStarted: false,
+        startFailed: true,
+        startError: startResult.message,
+        message: `任务已创建（${chunkCount} 个分块），Worker 启动失败：${startResult.message}。请在列表中点击「启动」重试。`,
+      })
     }
 
     const running = startResult?.ok && startResult.taskStatus === 'running'
-    return res.status(200).json(
-      buildUploadPayload({
-        batchId,
-        chunkCount,
-        status: startResult?.taskStatus ?? 'pending',
-        autoStarted: running,
-        message: running
-          ? `批量任务已创建并启动，共 ${chunkCount} 个处理分块`
-          : `批量任务已创建，共 ${chunkCount} 个处理分块${autoStart === false ? '，请手动启动' : ''}`,
-      }),
-    )
+    return sendUploadResponse(res, 200, {
+      batchId,
+      id: created.id,
+      chunkCount,
+      status: startResult?.taskStatus ?? 'pending',
+      autoStarted: running,
+      message: running
+        ? `批量任务已创建并启动，共 ${chunkCount} 个处理分块`
+        : `批量任务已创建，共 ${chunkCount} 个处理分块${autoStart === false ? '，请手动启动' : ''}`,
+    })
   } catch (error) {
     console.error('[batch/upload] POST 失败', error)
     const msg = error instanceof Error ? error.message : '上传失败'

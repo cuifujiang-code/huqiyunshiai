@@ -91,7 +91,7 @@ export async function createBatchTask({ batchId, teacherId, fileName, subject, g
     table: TASKS,
   })
 
-  const { error: taskErr } = await admin.from(TASKS).insert({
+  const { data: taskRow, error: taskErr } = await admin.from(TASKS).insert({
     batch_id: batchId,
     teacher_id: teacherId,
     file_name: fileName ?? '',
@@ -104,7 +104,7 @@ export async function createBatchTask({ batchId, teacherId, fileName, subject, g
     imported_questions: 0,
     meta: meta ?? {},
     updated_at: nowIso(),
-  })
+  }).select('id, batch_id, teacher_id, status, total_items').single()
   if (taskErr) {
     console.error('[batchTaskStore] createBatchTask 任务表写入失败', {
       batchId,
@@ -114,6 +114,9 @@ export async function createBatchTask({ batchId, teacherId, fileName, subject, g
       details: taskErr.details,
     })
     throw new Error(`batch_decompose_tasks 写入失败: ${formatSupabaseError(taskErr)}`)
+  }
+  if (!taskRow?.batch_id) {
+    throw new Error('batch_decompose_tasks 写入后未返回 batch_id，请检查 Supabase 表结构与 RLS 策略')
   }
 
   const itemRows = chunks.map((text, index) => ({
@@ -138,13 +141,19 @@ export async function createBatchTask({ batchId, teacherId, fileName, subject, g
   }
 
   console.log('[batchTaskStore] createBatchTask 成功', {
-    batchId,
+    id: taskRow.id,
+    batchId: taskRow.batch_id,
     teacherId,
     totalItems: chunkCount,
     itemsInserted: itemRows.length,
   })
 
-  return { batchId, totalItems: chunkCount, taskId: batchId }
+  return {
+    id: taskRow.id,
+    batchId: taskRow.batch_id,
+    totalItems: chunkCount,
+    taskId: taskRow.batch_id,
+  }
 }
 
 export async function getBatchTask(batchId) {

@@ -99,24 +99,52 @@ export interface BatchUploadResult {
   startError?: string
 }
 
+/** 从 API 原始响应中提取 batchId（兼容嵌套 data/result/task 与 snake_case） */
+export function extractBatchId(raw: unknown): string {
+  if (!raw || typeof raw !== 'object') return ''
+  const obj = raw as Record<string, unknown>
+  const nested = [obj.data, obj.result, obj.task, obj.payload].find(
+    (v) => v && typeof v === 'object',
+  ) as Record<string, unknown> | undefined
+
+  const candidates = [
+    obj.batchId,
+    obj.batch_id,
+    obj.taskId,
+    obj.task_id,
+    nested?.batchId,
+    nested?.batch_id,
+    nested?.taskId,
+    nested?.task_id,
+  ]
+
+  for (const value of candidates) {
+    if (value != null && String(value).trim()) {
+      return String(value).trim()
+    }
+  }
+  return ''
+}
+
 /** 统一解析上传响应中的分块数量与 batchId（兼容多种字段名） */
 export function normalizeBatchUploadResponse(raw: Record<string, unknown>): BatchUploadResult {
-  const batchId = String(raw.batchId ?? raw.batch_id ?? raw.taskId ?? raw.task_id ?? '')
+  const batchId = extractBatchId(raw)
+  const source = (raw.data && typeof raw.data === 'object' ? raw.data : raw) as Record<string, unknown>
   const totalItems = Number(
-    raw.totalItems ?? raw.total_items ?? raw.total_chunks ?? raw.totalChunks ?? raw.chunkCount ?? 0,
+    source.totalItems ?? source.total_items ?? source.total_chunks ?? source.totalChunks ?? source.chunkCount ?? 0,
   )
   return {
     success: raw.success !== false,
     batchId,
     taskId: batchId,
-    status: String(raw.status ?? 'pending'),
+    status: String(source.status ?? raw.status ?? 'pending'),
     totalItems: Number.isFinite(totalItems) ? totalItems : 0,
     total_chunks: Number.isFinite(totalItems) ? totalItems : 0,
     chunkCount: Number.isFinite(totalItems) ? totalItems : 0,
-    message: String(raw.message ?? ''),
-    autoStarted: Boolean(raw.autoStarted),
-    startFailed: Boolean(raw.startFailed),
-    startError: raw.startError ? String(raw.startError) : undefined,
+    message: String(source.message ?? raw.message ?? ''),
+    autoStarted: Boolean(source.autoStarted ?? raw.autoStarted),
+    startFailed: Boolean(source.startFailed ?? raw.startFailed),
+    startError: (source.startError ?? raw.startError) ? String(source.startError ?? raw.startError) : undefined,
   }
 }
 
@@ -132,8 +160,22 @@ export async function uploadBatchTask(
     { teacherId, examFileBase64, examFileName, subject, grade, autoStart: true },
     '批量上传',
   )
-  return normalizeBatchUploadResponse(data)
+  const normalized = normalizeBatchUploadResponse(data)
+  if (!normalized.batchId) {
+    console.warn('[batchApi] 上传响应缺少 batchId', {
+      url: batchApiUrl('batch/upload'),
+      raw: data,
+      hint: '若 raw 含 status:"ok" 而无 batchId，说明请求落到了健康检查路由，请检查 Vercel Root Directory 与 teacher-api 部署',
+    })
+    throw new Error(
+      '上传成功但未返回 batchId：API 可能未正确路由到 batch/upload，或 Supabase 未配置。请检查 teacher-api 部署与环境变量 SUPABASE_URL、SUPABASE_SERVICE_ROLE_KEY',
+    )
+  }
+  return normalized
 }
+
+/** uploadBatchTask 别名，兼容旧调用名 uploadExam */
+export const uploadExam = uploadBatchTask
 
 export async function startBatchTask(teacherId: string, batchId: string) {
   return callBatch<{ success: boolean; batchId: string; status: string; message: string }>(
