@@ -1,5 +1,10 @@
-import { createClient } from '@supabase/supabase-js'
-import { getSupabaseAdmin, isSupabaseAdminConfigured } from '../supabaseAdmin.js'
+import {
+  createServiceRoleClient,
+  getServiceRoleKey,
+  getSupabaseUrl,
+  getSupabaseAdmin,
+  isSupabaseAdminConfigured,
+} from '../supabaseAdmin.js'
 
 const TASKS = 'batch_decompose_tasks'
 const ITEMS = 'batch_decompose_items'
@@ -23,33 +28,15 @@ function formatSupabaseError(error) {
   return parts.join('; ')
 }
 
-/** 入库专用：强制 service_role，禁止 anon key；URL 与 getSupabaseAdmin 对齐 */
-function decodeJwtRole(key) {
-  try {
-    const parts = String(key).split('.')
-    if (parts.length < 2) return null
-    const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'))
-    return payload?.role ?? null
-  } catch {
-    return null
-  }
-}
-
 function maskEnvValue(value, prefixLen = 10) {
   if (!value) return '(missing)'
   return `${String(value).slice(0, prefixLen)}…(len=${String(value).length})`
 }
 
-function resolveInsertSupabaseConfig() {
-  const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || ''
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || ''
-  const anonKey = process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || ''
-  return { url, key, anonKey }
-}
-
 function logSupabaseInsertEnv(batchId) {
-  const { url, key, anonKey } = resolveInsertSupabaseConfig()
-  const jwtRole = decodeJwtRole(key)
+  const url = getSupabaseUrl()
+  const key = getServiceRoleKey()
+  const anonKey = process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || ''
   console.log('[入库] Supabase 环境变量检查', {
     batchId,
     supabaseUrlPrefix: url ? url.slice(0, 20) : '(missing)',
@@ -57,30 +44,14 @@ function logSupabaseInsertEnv(batchId) {
     hasSupabaseUrl: Boolean(process.env.SUPABASE_URL),
     hasViteSupabaseUrl: Boolean(process.env.VITE_SUPABASE_URL),
     hasServiceRoleKey: Boolean(key),
-    jwtRole: jwtRole ?? '(无法解析)',
-    usingViteUrlFallback: !process.env.SUPABASE_URL && Boolean(process.env.VITE_SUPABASE_URL),
+    usingServiceRoleKeyOnly: true,
     anonKeyMatchesServiceKey: Boolean(anonKey && key && anonKey === key),
   })
 }
 
-function getBatchInsertSupabaseAdmin() {
-  const { url, key, anonKey } = resolveInsertSupabaseConfig()
-  if (!url || !key) {
-    throw new Error('Supabase 未配置：请设置 SUPABASE_URL（或 VITE_SUPABASE_URL）与 SUPABASE_SERVICE_ROLE_KEY')
-  }
-  if (anonKey && key === anonKey) {
-    throw new Error('SUPABASE_SERVICE_ROLE_KEY 与 ANON_KEY 相同，请使用 Settings → API → service_role secret')
-  }
-  const jwtRole = decodeJwtRole(key)
-  if (jwtRole === 'anon') {
-    throw new Error('SUPABASE_SERVICE_ROLE_KEY 解析为 anon 角色，无法绕过 RLS，请更换为 service_role key')
-  }
-  if (jwtRole && jwtRole !== 'service_role') {
-    console.warn('[入库] JWT role 非 service_role', { jwtRole })
-  }
-  return createClient(url, key, {
-    auth: { autoRefreshToken: false, persistSession: false },
-  })
+/** batch_question_bank 读写专用：统一走 createServiceRoleClient（SUPABASE_SERVICE_ROLE_KEY） */
+function getBatchQuestionBankClient() {
+  return createServiceRoleClient()
 }
 
 function normalizeBankInsertRow(q, batchId, teacherId, itemId, fallbackIndex, taskMeta = {}) {
@@ -399,7 +370,8 @@ export async function insertBatchQuestions(batchId, teacherId, itemId, questions
 
   let admin
   try {
-    admin = getBatchInsertSupabaseAdmin()
+    admin = getBatchQuestionBankClient()
+    console.log('[Supabase] 使用 SERVICE_ROLE_KEY，RLS 已绕过', { batchId, table: BANK })
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err)
     console.error('[入库失败] Supabase 客户端初始化失败', { batchId, detail })
@@ -574,9 +546,9 @@ export function normalizeBatchQuestionRow(row) {
   }
 }
 
-/** 从 batch_question_bank 查询批次题目（按 sort_order 升序） */
+/** 从 batch_question_bank 查询批次题目（service_role 绕过 RLS） */
 export async function listBatchQuestions(batchId, teacherId) {
-  const admin = getSupabaseAdmin()
+  const admin = getBatchQuestionBankClient()
   const { data, error } = await admin
     .from(BANK)
     .select(BANK_SELECT_FIELDS)
