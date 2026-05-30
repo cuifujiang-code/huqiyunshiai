@@ -133,8 +133,23 @@ export default function TeacherBatchDecomposePage() {
     try {
       const base64 = await fileToBase64(file)
       const uploaded = await uploadBatchTask(teacherId, base64, file.name, subject, grade)
-      await startBatchTask(teacherId, uploaded.batchId)
-      setMessage(`已提交大批量拆题：${uploaded.totalItems} 个分块，后台正在处理`)
+
+      if (!uploaded.batchId) {
+        throw new Error('上传成功但未返回 batchId，请检查 API 部署与环境变量')
+      }
+
+      const chunkCount = uploaded.totalItems || uploaded.chunkCount || uploaded.total_chunks
+      if (!uploaded.autoStarted && uploaded.status === 'pending' && !uploaded.startFailed) {
+        console.log('[BatchDecompose] upload 未自动启动，手动调用 start', uploaded.batchId)
+        await startBatchTask(teacherId, uploaded.batchId)
+      } else if (uploaded.startFailed) {
+        console.warn('[BatchDecompose] Worker 启动失败，任务已创建', uploaded)
+      }
+
+      setMessage(
+        uploaded.message
+        || `已提交大批量拆题：${chunkCount} 个分块，后台正在处理（任务 ID: ${uploaded.batchId.slice(0, 8)}…）`,
+      )
       await loadTasks()
     } catch (e) {
       setMessage(e instanceof Error ? e.message : '提交失败')

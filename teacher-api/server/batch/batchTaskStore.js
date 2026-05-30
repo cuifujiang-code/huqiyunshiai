@@ -81,6 +81,15 @@ async function failBatchInsert(batchId, itemId, stage, detail) {
 
 export async function createBatchTask({ batchId, teacherId, fileName, subject, grade, chunks, meta = {} }) {
   const admin = getSupabaseAdmin()
+  const chunkCount = chunks.length
+
+  console.log('[batchTaskStore] createBatchTask 开始', {
+    batchId,
+    teacherId,
+    fileName,
+    chunkCount,
+    table: TASKS,
+  })
 
   const { error: taskErr } = await admin.from(TASKS).insert({
     batch_id: batchId,
@@ -89,14 +98,23 @@ export async function createBatchTask({ batchId, teacherId, fileName, subject, g
     subject: subject || '数学',
     grade: grade || '八年级',
     status: 'pending',
-    total_items: chunks.length,
+    total_items: chunkCount,
     completed_items: 0,
     total_questions: 0,
     imported_questions: 0,
     meta: meta ?? {},
     updated_at: nowIso(),
   })
-  if (taskErr) throw new Error(taskErr.message)
+  if (taskErr) {
+    console.error('[batchTaskStore] createBatchTask 任务表写入失败', {
+      batchId,
+      teacherId,
+      message: taskErr.message,
+      code: taskErr.code,
+      details: taskErr.details,
+    })
+    throw new Error(`batch_decompose_tasks 写入失败: ${formatSupabaseError(taskErr)}`)
+  }
 
   const itemRows = chunks.map((text, index) => ({
     batch_id: batchId,
@@ -109,9 +127,24 @@ export async function createBatchTask({ batchId, teacherId, fileName, subject, g
   }))
 
   const { error: itemsErr } = await admin.from(ITEMS).insert(itemRows)
-  if (itemsErr) throw new Error(itemsErr.message)
+  if (itemsErr) {
+    console.error('[batchTaskStore] createBatchTask 分块表写入失败', {
+      batchId,
+      itemCount: itemRows.length,
+      message: itemsErr.message,
+      code: itemsErr.code,
+    })
+    throw new Error(`batch_decompose_items 写入失败: ${formatSupabaseError(itemsErr)}`)
+  }
 
-  return { batchId, totalItems: chunks.length }
+  console.log('[batchTaskStore] createBatchTask 成功', {
+    batchId,
+    teacherId,
+    totalItems: chunkCount,
+    itemsInserted: itemRows.length,
+  })
+
+  return { batchId, totalItems: chunkCount, taskId: batchId }
 }
 
 export async function getBatchTask(batchId) {

@@ -47,8 +47,10 @@ export default async function handler(req, res) {
     return res.status(result.httpStatus ?? (result.ok ? 202 : 500)).json({
       success: result.ok,
       batchId: result.batchId ?? batchId,
+      taskId: result.batchId ?? batchId,
       status: result.taskStatus,
       message: result.message,
+      skipped: result.skipped ?? false,
     })
   } catch (error) {
     const msg = error instanceof Error ? error.message : '启动失败'

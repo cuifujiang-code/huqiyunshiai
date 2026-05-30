@@ -85,6 +85,41 @@ async function callBatch<T>(url: string, body: unknown, label: string, method: '
   throw new Error(r.reason)
 }
 
+export interface BatchUploadResult {
+  success: boolean
+  batchId: string
+  taskId: string
+  status: string
+  totalItems: number
+  total_chunks: number
+  chunkCount: number
+  message: string
+  autoStarted?: boolean
+  startFailed?: boolean
+  startError?: string
+}
+
+/** 统一解析上传响应中的分块数量与 batchId（兼容多种字段名） */
+export function normalizeBatchUploadResponse(raw: Record<string, unknown>): BatchUploadResult {
+  const batchId = String(raw.batchId ?? raw.batch_id ?? raw.taskId ?? raw.task_id ?? '')
+  const totalItems = Number(
+    raw.totalItems ?? raw.total_items ?? raw.total_chunks ?? raw.totalChunks ?? raw.chunkCount ?? 0,
+  )
+  return {
+    success: raw.success !== false,
+    batchId,
+    taskId: batchId,
+    status: String(raw.status ?? 'pending'),
+    totalItems: Number.isFinite(totalItems) ? totalItems : 0,
+    total_chunks: Number.isFinite(totalItems) ? totalItems : 0,
+    chunkCount: Number.isFinite(totalItems) ? totalItems : 0,
+    message: String(raw.message ?? ''),
+    autoStarted: Boolean(raw.autoStarted),
+    startFailed: Boolean(raw.startFailed),
+    startError: raw.startError ? String(raw.startError) : undefined,
+  }
+}
+
 export async function uploadBatchTask(
   teacherId: string,
   examFileBase64: string,
@@ -92,17 +127,12 @@ export async function uploadBatchTask(
   subject: string,
   grade: string,
 ) {
-  return callBatch<{
-    success: boolean
-    batchId: string
-    status: string
-    totalItems: number
-    message: string
-  }>(
+  const data = await callBatch<Record<string, unknown>>(
     batchApiUrl('batch/upload'),
-    { teacherId, examFileBase64, examFileName, subject, grade },
+    { teacherId, examFileBase64, examFileName, subject, grade, autoStart: true },
     '批量上传',
   )
+  return normalizeBatchUploadResponse(data)
 }
 
 export async function startBatchTask(teacherId: string, batchId: string) {
@@ -139,12 +169,17 @@ export async function fetchBatchProgress(teacherId: string, batchId: string, wit
 
 export async function listBatchTasks(teacherId: string) {
   const params = new URLSearchParams({ teacherId })
-  return callBatch<{ success: boolean; tasks: BatchProgress[] }>(
+  const data = await callBatch<{ success: boolean; tasks?: BatchProgress[]; message?: string }>(
     `${batchApiUrl('batch/upload')}?${params}`,
     null,
     '批量任务列表',
     'GET',
   )
+  return {
+    success: data.success !== false,
+    tasks: Array.isArray(data.tasks) ? data.tasks : [],
+    message: data.message,
+  }
 }
 
 export interface BatchAutoRetryReport {
