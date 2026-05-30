@@ -1,6 +1,6 @@
 import { callDeepSeekAI, extractJson } from '../deepseekClient.js'
 import { safeJsonParse } from './safeJson.js'
-import { BATCH_SYSTEM_PROMPT, buildBatchSplitPrompt, normalizeBatchQuestions } from './batchPrompt.js'
+import { BATCH_SYSTEM_PROMPT, buildBatchSplitPrompt, extractQuestionsFromAiRaw, normalizeBatchQuestions } from './batchPrompt.js'
 import {
   countItemsByStatus,
   fetchPendingItems,
@@ -98,6 +98,16 @@ async function chainNextWorker(batchId, roundNum, remainingChunks) {
   await markBatchFailed(batchId, errMsg)
 }
 
+function summarizeRawQuestion(q) {
+  if (!q || typeof q !== 'object') return String(q)
+  return JSON.stringify({
+    content: String(q.content ?? q.question ?? q.题干 ?? '').slice(0, 100),
+    question_type: q.question_type ?? q.type,
+    optionsCount: Array.isArray(q.options) ? q.options.length : Array.isArray(q.choices) ? q.choices.length : 0,
+    answerPreview: String(q.answer ?? q.correct_answer ?? '').slice(0, 40),
+  })
+}
+
 async function processOneItem(item, meta, sortOffset) {
   console.log('[batchWorker] 开始处理分块', {
     itemId: item.id,
@@ -114,25 +124,49 @@ async function processOneItem(item, meta, sortOffset) {
       label: 'batch-split',
     })
     const raw = safeJsonParse(extractJson(content))
-    const questions = normalizeBatchQuestions(raw, meta, sortOffset)
+    const rawQuestions = extractQuestionsFromAiRaw(raw)
+    console.log('[batchWorker] AI 原始解析', {
+      itemId: item.id,
+      rawType: Array.isArray(raw) ? 'array' : typeof raw,
+      rawKeys: raw && typeof raw === 'object' && !Array.isArray(raw) ? Object.keys(raw) : [],
+      rawQuestionsCount: rawQuestions.length,
+    })
+    const questions = normalizeBatchQuestions(rawQuestions.length ? rawQuestions : raw, meta, sortOffset)
     console.log('[batchWorker] AI 拆题完成', { itemId: item.id, questionCount: questions.length })
     if (!questions.length) {
-      const msg = 'AI 未解析出任何题目'
+      const msg = 'AI 未解析出任何题目（rawQuestions 为空）'
+      console.warn('[Worker] rawQuestions 为空，标记分块失败', { itemId: item.id, rawPreview: JSON.stringify(raw).slice(0, 300) })
       await markItemFailed(item.id, msg)
-      return { success: false, error: msg, itemId: item.id, questions: [] }
+      return { success: false, error: msg, itemId: item.id, rawQuestions: [], questions: [] }
     }
-    return { success: true, questions, itemId: item.id }
+    return { success: true, rawQuestions: questions, questions, itemId: item.id }
   } catch (error) {
     const msg = error instanceof Error ? error.message : '拆题失败'
     console.error('[batchWorker] 分块处理失败', { itemId: item.id, msg })
     await markItemFailed(item.id, msg)
-    return { success: false, error: msg, itemId: item.id, questions: [] }
+    return { success: false, error: msg, itemId: item.id, rawQuestions: [], questions: [] }
   }
 }
 
-async function persistItemQuestions(batchId, teacherId, itemId, questions, taskMeta) {
-  console.log('[batchWorker] 入库题目', { batchId, itemId, count: questions.length })
-  const insertResult = await insertBatchQuestions(batchId, teacherId, itemId, questions, taskMeta)
+async function persistItemQuestions(batchId, teacherId, itemId, rawQuestions, taskMeta) {
+  const count = Array.isArray(rawQuestions) ? rawQuestions.length : 0
+  const firstSummary = count ? summarizeRawQuestion(rawQuestions[0]) : '(空)'
+
+  console.log(`[Worker] 准备入库，题目数量=${count}，第一条题目摘要=${firstSummary}`, {
+    batchId,
+    itemId,
+    teacherId,
+  })
+
+  if (!count) {
+    const msg = 'rawQuestions 为空，无法入库'
+    console.warn('[Worker] rawQuestions 为空，标记任务失败', { batchId, itemId })
+    await markItemFailed(itemId, msg)
+    await markBatchFailed(batchId, msg)
+    throw new Error(msg)
+  }
+
+  const insertResult = await insertBatchQuestions(batchId, teacherId, itemId, rawQuestions, taskMeta)
   if (!insertResult?.success || !insertResult.count) {
     const msg = insertResult?.error || '入库失败或未写入任何题目'
     console.error('[batchWorker] 入库失败，终止任务', {
@@ -145,7 +179,7 @@ async function persistItemQuestions(batchId, teacherId, itemId, questions, taskM
     await markItemFailed(itemId, msg)
     throw new Error(msg)
   }
-  await markItemCompleted(itemId, questions)
+  await markItemCompleted(itemId, rawQuestions)
   return insertResult.count
 }
 
@@ -158,8 +192,8 @@ async function runPool(items, meta, startSort, batchId, teacherId, taskMeta) {
     const settled = await Promise.all(slice.map((item) => processOneItem(item, meta, sort)))
     for (const r of settled) {
       results.push(r)
-      if (r.success && r.questions?.length) {
-        const written = await persistItemQuestions(batchId, teacherId, r.itemId, r.questions, taskMeta)
+      if (r.success && r.rawQuestions?.length) {
+        const written = await persistItemQuestions(batchId, teacherId, r.itemId, r.rawQuestions, taskMeta)
         sort += written
       }
     }

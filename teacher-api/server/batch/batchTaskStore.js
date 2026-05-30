@@ -23,12 +23,60 @@ function formatSupabaseError(error) {
   return parts.join('; ')
 }
 
-/** 入库专用：强制使用后端 service_role 环境变量（不用 VITE_ / anon key） */
-function getBatchInsertSupabaseAdmin() {
-  const url = process.env.SUPABASE_URL || ''
+/** 入库专用：强制 service_role，禁止 anon key；URL 与 getSupabaseAdmin 对齐 */
+function decodeJwtRole(key) {
+  try {
+    const parts = String(key).split('.')
+    if (parts.length < 2) return null
+    const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'))
+    return payload?.role ?? null
+  } catch {
+    return null
+  }
+}
+
+function maskEnvValue(value, prefixLen = 10) {
+  if (!value) return '(missing)'
+  return `${String(value).slice(0, prefixLen)}…(len=${String(value).length})`
+}
+
+function resolveInsertSupabaseConfig() {
+  const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || ''
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY || ''
+  const anonKey = process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || ''
+  return { url, key, anonKey }
+}
+
+function logSupabaseInsertEnv(batchId) {
+  const { url, key, anonKey } = resolveInsertSupabaseConfig()
+  const jwtRole = decodeJwtRole(key)
+  console.log('[入库] Supabase 环境变量检查', {
+    batchId,
+    supabaseUrlPrefix: url ? url.slice(0, 20) : '(missing)',
+    serviceRoleKeyPrefix: maskEnvValue(key, 10),
+    hasSupabaseUrl: Boolean(process.env.SUPABASE_URL),
+    hasViteSupabaseUrl: Boolean(process.env.VITE_SUPABASE_URL),
+    hasServiceRoleKey: Boolean(key),
+    jwtRole: jwtRole ?? '(无法解析)',
+    usingViteUrlFallback: !process.env.SUPABASE_URL && Boolean(process.env.VITE_SUPABASE_URL),
+    anonKeyMatchesServiceKey: Boolean(anonKey && key && anonKey === key),
+  })
+}
+
+function getBatchInsertSupabaseAdmin() {
+  const { url, key, anonKey } = resolveInsertSupabaseConfig()
   if (!url || !key) {
-    throw new Error('Supabase 未配置：请设置 SUPABASE_URL 与 SUPABASE_SERVICE_ROLE_KEY')
+    throw new Error('Supabase 未配置：请设置 SUPABASE_URL（或 VITE_SUPABASE_URL）与 SUPABASE_SERVICE_ROLE_KEY')
+  }
+  if (anonKey && key === anonKey) {
+    throw new Error('SUPABASE_SERVICE_ROLE_KEY 与 ANON_KEY 相同，请使用 Settings → API → service_role secret')
+  }
+  const jwtRole = decodeJwtRole(key)
+  if (jwtRole === 'anon') {
+    throw new Error('SUPABASE_SERVICE_ROLE_KEY 解析为 anon 角色，无法绕过 RLS，请更换为 service_role key')
+  }
+  if (jwtRole && jwtRole !== 'service_role') {
+    console.warn('[入库] JWT role 非 service_role', { jwtRole })
   }
   return createClient(url, key, {
     auth: { autoRefreshToken: false, persistSession: false },
@@ -341,6 +389,8 @@ export async function insertBatchQuestions(batchId, teacherId, itemId, questions
   const questionCount = Array.isArray(questions) ? questions.length : 0
   console.log(`[入库] batchId=${batchId}, 待写入题目数=${questionCount}`)
 
+  logSupabaseInsertEnv(batchId)
+
   if (!questionCount) {
     const detail = 'AI 拆题结果为空，无可入库题目'
     console.error(`[入库失败] ${detail}`, { batchId, itemId, teacherId })
@@ -352,25 +402,29 @@ export async function insertBatchQuestions(batchId, teacherId, itemId, questions
     admin = getBatchInsertSupabaseAdmin()
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err)
+    console.error('[入库失败] Supabase 客户端初始化失败', { batchId, detail })
     return failBatchInsert(batchId, itemId, 'Supabase 客户端初始化失败', detail)
   }
 
   const rows = questions.map((q, i) => normalizeBankInsertRow(q, batchId, teacherId, itemId, i, taskMeta))
 
+  console.log('[入库] 首条题目完整 JSON', JSON.stringify(rows[0], null, 2))
   console.log('[入库] 首条题目摘要', { batchId, itemId, ...summarizeBankRow(rows[0]) })
 
-  const { data: insertedRows, error } = await admin.from(BANK).insert(rows).select('id')
+  const { data: insertedRows, error, status, statusText } = await admin.from(BANK).insert(rows).select('id, batch_id, item_id')
   if (error) {
     console.error('[入库失败] batch_question_bank 写入错误（完整 Supabase 错误）', {
       batchId,
       itemId,
       teacherId,
       rowCount: rows.length,
+      httpStatus: status,
+      statusText,
       message: error.message,
       code: error.code,
       details: error.details,
       hint: error.hint,
-      sampleRow: rows[0],
+      fullError: error,
     })
     return failBatchInsert(
       batchId,
@@ -380,11 +434,41 @@ export async function insertBatchQuestions(batchId, teacherId, itemId, questions
     )
   }
 
-  const insertedCount = insertedRows?.length ?? rows.length
+  const insertedCount = insertedRows?.length ?? 0
   if (!insertedCount) {
-    const detail = 'batch_question_bank insert 未返回行数，可能写入被 RLS 或约束拦截'
-    console.error('[入库失败]', { batchId, itemId, detail })
-    return failBatchInsert(batchId, itemId, 'batch_question_bank 入库失败', detail)
+    console.warn('[入库失败] 数据被 RLS 或约束拦截：insert 无 error 但 select 返回空数组', {
+      batchId,
+      itemId,
+      teacherId,
+      attemptedRows: rows.length,
+      httpStatus: status,
+    })
+    return failBatchInsert(
+      batchId,
+      itemId,
+      'batch_question_bank 入库失败',
+      '数据被 RLS 或约束拦截：insert 成功但未返回行，请确认 SUPABASE_SERVICE_ROLE_KEY 为 service_role 而非 anon key',
+    )
+  }
+
+  // 二次校验：确认数据库中可读
+  const { count: verifyCount, error: verifyErr } = await admin
+    .from(BANK)
+    .select('id', { count: 'exact', head: true })
+    .eq('batch_id', batchId)
+    .eq('item_id', itemId)
+  if (verifyErr) {
+    console.warn('[入库] 写入后校验查询失败', { batchId, itemId, message: verifyErr.message })
+  } else if (!verifyCount) {
+    console.warn('[入库失败] 写入后校验 count=0，数据可能被 RLS 拦截', { batchId, itemId })
+    return failBatchInsert(
+      batchId,
+      itemId,
+      'batch_question_bank 入库校验失败',
+      'insert 返回成功但按 batch_id+item_id 查询 count=0，请检查 RLS 与 service_role key',
+    )
+  } else {
+    console.log('[入库] 写入后校验通过', { batchId, itemId, verifyCount })
   }
 
   // 同步写入教师主题库（失败不阻断 batch_question_bank 入库，仅记录警告）

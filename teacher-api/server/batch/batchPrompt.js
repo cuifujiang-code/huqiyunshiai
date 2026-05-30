@@ -34,22 +34,53 @@ ${chunkText}
 只输出 JSON 数组。`
 }
 
+export function extractQuestionsFromAiRaw(raw) {
+  if (Array.isArray(raw)) return raw.filter(Boolean)
+  if (!raw || typeof raw !== 'object') return []
+
+  const arrayKeys = ['questions', 'data', 'items', 'results', 'list', '题目', '试题', 'questions_list']
+  for (const key of arrayKeys) {
+    const val = raw[key]
+    if (Array.isArray(val) && val.length) return val.filter(Boolean)
+  }
+
+  // AI 有时返回 { "1": {...}, "2": {...} }
+  const values = Object.values(raw)
+  if (values.length > 0 && values.every((v) => v && typeof v === 'object' && !Array.isArray(v))) {
+    return values
+  }
+
+  // 单题对象
+  if (raw.content || raw.question || raw.题干 || raw.title) {
+    return [raw]
+  }
+
+  return []
+}
+
 export function normalizeBatchQuestions(raw, meta, startOrder = 0) {
-  const list = Array.isArray(raw) ? raw : raw?.questions ?? []
+  const list = extractQuestionsFromAiRaw(raw)
+  if (!list.length && raw && typeof raw === 'object' && !Array.isArray(raw)) {
+    console.warn('[batchPrompt] extractQuestionsFromAiRaw 未识别结构', {
+      keys: Object.keys(raw),
+      sample: JSON.stringify(raw).slice(0, 200),
+    })
+  }
   return list.map((q, i) => ({
     subject: q.subject || meta.subject || '数学',
     grade: q.grade || meta.grade || '八年级',
-    knowledge_point: q.knowledge_point || '',
-    question_type: q.question_type || '应用题',
+    knowledge_point: q.knowledge_point || q.knowledgePoint || '未分类',
+    question_type: q.question_type || q.type || '应用题',
     difficulty: q.difficulty || '中等',
-    content: String(q.content || `题目 ${startOrder + i + 1}`),
-    options: Array.isArray(q.options) ? q.options : [],
-    answer: String(q.answer || ''),
-    analysis: String(q.analysis || ''),
-    geometry_desc: String(q.geometry_desc || ''),
-    latex_blocks: Array.isArray(q.latex_blocks) ? q.latex_blocks : [],
+    content: String(q.content || q.question || q.题干 || q.title || `题目 ${startOrder + i + 1}`),
+    options: Array.isArray(q.options) ? q.options : Array.isArray(q.choices) ? q.choices : [],
+    answer: String(q.answer || q.correct_answer || q.答案 || ''),
+    analysis: String(q.analysis || q.explanation || q.解析 || ''),
+    geometry_desc: String(q.geometry_desc || q.geometryDesc || ''),
+    latex_blocks: Array.isArray(q.latex_blocks) ? q.latex_blocks : Array.isArray(q.latexBlocks) ? q.latexBlocks : [],
+    question_number: String(q.question_number ?? q.questionNumber ?? q.number ?? startOrder + i + 1),
     source: '批量拆题',
     tags: Array.isArray(q.tags) ? q.tags : [],
-    sort_order: startOrder + i,
+    sort_order: Number.isFinite(Number(q.sort_order)) ? Number(q.sort_order) : startOrder + i + 1,
   }))
 }
