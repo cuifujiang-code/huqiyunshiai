@@ -121,8 +121,10 @@ export async function fetchBatchProgress(teacherId: string, batchId: string, wit
   })
   return callBatch<{
     success: boolean
-    progress: BatchProgress
+    progress?: BatchProgress
     questions: BatchQuestion[]
+    error?: string
+    message?: string
   }>(
     `${batchApiUrl('batch/progress')}?${params}`,
     null,
@@ -131,6 +133,7 @@ export async function fetchBatchProgress(teacherId: string, batchId: string, wit
   ).then((data) => ({
     ...data,
     questions: normalizeBatchQuestions(data.questions),
+    error: data.error ?? (data.success === false ? data.message : undefined),
   }))
 }
 
@@ -157,6 +160,93 @@ export interface BatchAutoRetryReport {
     action: string
     reason: string
   }>
+}
+
+export interface BatchHealthCheckItem {
+  ok: boolean
+  error?: string
+  message?: string
+  exists?: boolean
+  table?: string
+  url?: string
+}
+
+export interface BatchHealthReport {
+  success: boolean
+  status: 'healthy' | 'degraded' | 'unhealthy'
+  error?: string
+  timestamp: string
+  checks: {
+    apiRoot?: BatchHealthCheckItem
+    supabase?: BatchHealthCheckItem
+    batch_decompose_tasks?: BatchHealthCheckItem
+    batch_question_bank?: BatchHealthCheckItem
+  }
+}
+
+/** 批量拆题系统健康检查 */
+export async function fetchBatchHealth() {
+  return callBatch<BatchHealthReport>(
+    batchApiUrl('batch/health'),
+    null,
+    '批量健康检查',
+    'GET',
+  )
+}
+
+/** 根据健康检查与任务状态，生成空题目列表的诊断提示 */
+export function diagnoseEmptyQuestions(
+  health: BatchHealthReport | null,
+  task: BatchProgress | undefined,
+  apiError?: string,
+): string {
+  if (apiError) {
+    if (/batch_question_bank|relation|does not exist|column/i.test(apiError)) {
+      return '题库表结构异常或未迁移，请联系管理员在 Supabase 执行迁移 SQL'
+    }
+    if (/Supabase|未配置|connection|connect/i.test(apiError)) {
+      return '数据库连接异常，请联系管理员'
+    }
+    return `查询失败：${apiError}`
+  }
+
+  if (!health) {
+    return '无法连接健康检查服务，请确认 API 域名配置正确'
+  }
+
+  if (!health.checks?.supabase?.ok) {
+    return '数据库连接异常，请联系管理员'
+  }
+
+  if (health.checks?.batch_question_bank && !health.checks.batch_question_bank.ok) {
+    return '题库表 batch_question_bank 不可用，请联系管理员执行数据库迁移'
+  }
+
+  if (!health.checks?.apiRoot?.ok) {
+    return 'Teacher API 根路径异常，请确认 Vercel Root Directory 为 teacher-api'
+  }
+
+  if (!task) {
+    return '批次未找到，请检查任务状态'
+  }
+
+  if (task.status === 'running' || task.pendingItems > 0 || task.processingItems > 0) {
+    return '题目正在处理中，请稍后重试'
+  }
+
+  if (task.status === 'pending') {
+    return '任务尚未启动，请点击「启动」开始拆题'
+  }
+
+  if (task.status === 'failed') {
+    return `拆题任务失败${task.errorMessage ? `：${task.errorMessage}` : '，请重新上传试卷'}`
+  }
+
+  if (task.importedQuestions === 0 && (task.status === 'completed' || task.status === 'partial')) {
+    return '拆题已完成但未检测到入库题目，请重新上传新试卷或联系管理员查看 API 日志'
+  }
+
+  return '该批次暂无题目记录，请重新上传新试卷'
 }
 
 /** 自动恢复卡住的批量任务（running/partial 超时未更新） */

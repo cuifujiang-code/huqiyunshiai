@@ -4,6 +4,8 @@ import DashboardHeader from '../components/layout/DashboardHeader'
 import { useAuth } from '../context/AuthContext'
 import { fileToBase64 } from '../lib/fileBase64'
 import {
+  diagnoseEmptyQuestions,
+  fetchBatchHealth,
   fetchBatchProgress,
   isTaskStuck,
   listBatchTasks,
@@ -59,6 +61,7 @@ export default function TeacherBatchDecomposePage() {
   const [message, setMessage] = useState<string | null>(null)
   const [preview, setPreview] = useState<BatchQuestion[] | null>(null)
   const [previewEmpty, setPreviewEmpty] = useState(false)
+  const [previewEmptyHint, setPreviewEmptyHint] = useState('')
   const [startingId, setStartingId] = useState<string | null>(null)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const autoRetryRef = useRef(false)
@@ -160,11 +163,41 @@ export default function TeacherBatchDecomposePage() {
     if (!teacherId) return
     setMessage(null)
     setPreviewEmpty(false)
+    setPreviewEmptyHint('')
     try {
-      const res = await fetchBatchProgress(teacherId, batchId, true)
+      const taskSnapshot = tasks.find((t) => t.batchId === batchId)
+      let res
+      try {
+        res = await fetchBatchProgress(teacherId, batchId, true)
+      } catch (progressErr) {
+        const progressMsg = progressErr instanceof Error ? progressErr.message : '获取进度失败'
+        let health = null
+        try {
+          health = await fetchBatchHealth()
+        } catch {
+          /* ignore */
+        }
+        setPreview(null)
+        setPreviewEmptyHint(diagnoseEmptyQuestions(health, taskSnapshot, progressMsg))
+        setPreviewEmpty(true)
+        return
+      }
+
       const questions = Array.isArray(res.questions) ? res.questions : []
       if (questions.length === 0) {
+        let health = null
+        try {
+          health = await fetchBatchHealth()
+        } catch {
+          /* ignore */
+        }
+        const hint = diagnoseEmptyQuestions(
+          health,
+          res.progress ?? taskSnapshot,
+          res.error,
+        )
         setPreview(null)
+        setPreviewEmptyHint(hint)
         setPreviewEmpty(true)
         return
       }
@@ -320,12 +353,9 @@ export default function TeacherBatchDecomposePage() {
       {previewEmpty && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
           <div className="w-full max-w-md rounded-2xl border border-slate-700 bg-slate-900 p-6 text-center">
-            <h3 className="mb-3 text-lg font-semibold text-amber-300">暂无题目记录</h3>
-            <p className="mb-2 text-sm text-slate-300">
-              该批次在数据库中没有拆题结果。旧任务数据可能已丢失，无法恢复。
-            </p>
-            <p className="mb-6 text-sm text-slate-400">
-              请重新上传一份新试卷进行批量拆题；部署修复后产生的新任务会正常入库并在此查看。
+            <h3 className="mb-3 text-lg font-semibold text-amber-300">无法显示题目</h3>
+            <p className="mb-6 text-sm leading-relaxed text-slate-300">
+              {previewEmptyHint || '暂无题目记录，请稍后重试或重新上传试卷'}
             </p>
             <button type="button" className={btnSecondary} onClick={() => setPreviewEmpty(false)}>
               关闭

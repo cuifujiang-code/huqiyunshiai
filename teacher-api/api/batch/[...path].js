@@ -1,8 +1,9 @@
 import '../../server/applyUrlShim.js'
 import { applyApiHeaders, handleOptions } from '../../server/apiResponse.js'
 import progressHandler from './progress.js'
+import healthHandler from './health.js'
 
-/** Vercel 嵌套路由兜底：/api/batch/progress → api/batch/[...path].js */
+/** Vercel 嵌套路由兜底：/api/batch/progress | /api/batch/health */
 export default async function handler(req, res) {
   if (handleOptions(req, res)) return
   applyApiHeaders(req, res)
@@ -11,6 +12,10 @@ export default async function handler(req, res) {
   const segment = Array.isArray(rawPath) ? rawPath[0] : rawPath
 
   console.log('[api/batch] 路由', { url: req.url, segment, method: req.method })
+
+  if (segment === 'health' || req.url?.includes('/health')) {
+    return healthHandler(req, res)
+  }
 
   if (segment === 'progress' || req.url?.includes('/progress')) {
     return progressHandler(req, res)

@@ -19,10 +19,13 @@ function jsonResponse(res, status, payload = {}) {
     payload.error
     ?? (payload.success === false && payload.message ? payload.message : undefined)
 
+  const questions = Array.isArray(payload.questions) ? payload.questions : []
+  const { questions: _drop, ...rest } = payload
+
   const body = {
     success: payload.success ?? (status >= 200 && status < 400),
-    questions: Array.isArray(payload.questions) ? payload.questions : [],
-    ...payload,
+    ...rest,
+    questions,
   }
 
   if (errorText && body.error == null) {
@@ -94,6 +97,7 @@ export default async function handler(req, res) {
     const counts = await countItemsByStatus(batchId)
     const progress = formatBatchProgress(task, counts)
     let questions = []
+    let queryError = null
 
     if (withQuestions) {
       console.log('[batch/progress] 查询 batch_question_bank', { batchId, teacherId })
@@ -102,17 +106,11 @@ export default async function handler(req, res) {
         questions = Array.isArray(rows) ? rows : []
       } catch (queryErr) {
         const errMsg = queryErr instanceof Error ? queryErr.message : String(queryErr)
+        queryError = `batch_question_bank 查询失败: ${errMsg}`
         console.error('[batch/progress] batch_question_bank 查询失败', {
           batchId,
           teacherId,
           error: errMsg,
-        })
-        return jsonResponse(res, 500, {
-          success: false,
-          error: `batch_question_bank 查询失败: ${errMsg}`,
-          message: '查询题目失败',
-          progress,
-          questions: [],
         })
       }
     }
@@ -123,7 +121,18 @@ export default async function handler(req, res) {
       withQuestions,
       taskStatus: task.status,
       questionCount: questions.length,
+      queryError,
     })
+
+    if (queryError) {
+      return jsonResponse(res, 500, {
+        success: false,
+        error: queryError,
+        message: '查询题目失败',
+        progress,
+        questions: [],
+      })
+    }
 
     return jsonResponse(res, 200, {
       success: true,
