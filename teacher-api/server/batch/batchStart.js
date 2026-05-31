@@ -8,7 +8,16 @@ import {
   markBatchFailed,
   markBatchRunning,
   resetBatchTaskToPending,
+  resetStuckProcessingItems,
 } from './batchTaskStore.js'
+
+const STALE_TASK_MINUTES = Number(process.env.BATCH_STALE_MINUTES || 3)
+
+function isTaskStale(task, staleMinutes = STALE_TASK_MINUTES) {
+  if (!task?.updated_at) return true
+  const ageMs = Date.now() - new Date(task.updated_at).getTime()
+  return ageMs > staleMinutes * 60 * 1000
+}
 
 async function runWorkerInBackground(batchId, source) {
   try {
@@ -73,9 +82,17 @@ export async function startBatchProcessing(batchId, teacherId, req) {
     }
   }
 
-  const counts = await countItemsByStatus(normalizedBatchId)
+  const resetCount = await resetStuckProcessingItems(normalizedBatchId, STALE_TASK_MINUTES)
+  let counts = await countItemsByStatus(normalizedBatchId)
+  if (resetCount > 0) {
+    console.log('[batchStart] 已重置卡住分块为 pending', { batchId: normalizedBatchId, resetCount })
+    counts = await countItemsByStatus(normalizedBatchId)
+  }
 
-  if (task.status === 'partial' && counts.pending === 0 && counts.processing === 0) {
+  const hasWorkRemaining = counts.pending > 0 || counts.processing > 0
+  const taskStale = isTaskStale(task)
+
+  if (task.status === 'partial' && !hasWorkRemaining) {
     console.log('[batchStart] 部分完成任务无待处理分块，跳过', { batchId: normalizedBatchId, counts })
     return {
       ok: true,
@@ -87,24 +104,12 @@ export async function startBatchProcessing(batchId, teacherId, req) {
     }
   }
 
-  const stuckRunning =
-    task.status === 'running'
-    && counts.processing === 0
-    && counts.pending > 0
-    && counts.completed === 0
-    && counts.failed === 0
-
-  const shouldTrigger =
-    task.status === 'pending'
-    || task.status === 'failed'
-    || task.status === 'partial'
-    || stuckRunning
-    || (task.status === 'running' && counts.processing === 0 && counts.pending > 0)
-
-  if (task.status === 'running' && !shouldTrigger) {
-    console.log('[batchStart] 任务已在处理中，跳过重复触发', {
+  // running 且近期有分块在 processing：视为活跃 worker，避免重复触发
+  if (task.status === 'running' && hasWorkRemaining && counts.processing > 0 && !taskStale && resetCount === 0) {
+    console.log('[batchStart] 任务活跃处理中，跳过重复触发', {
       batchId: normalizedBatchId,
       counts,
+      updatedAt: task.updated_at,
     })
     return {
       ok: true,
@@ -116,44 +121,46 @@ export async function startBatchProcessing(batchId, teacherId, req) {
     }
   }
 
+  // running 但无剩余分块且未超时：等待上一轮收尾
+  if (task.status === 'running' && !hasWorkRemaining && !taskStale) {
+    console.log('[batchStart] running 无剩余分块，跳过', { batchId: normalizedBatchId, counts })
+    return {
+      ok: true,
+      httpStatus: 200,
+      taskStatus: 'running',
+      batchId: normalizedBatchId,
+      message: '任务收尾中',
+      skipped: true,
+    }
+  }
+
+  const stuckRunning = task.status === 'running' && hasWorkRemaining && (taskStale || counts.processing === 0 || resetCount > 0)
+
   console.log('[batchStart] 准备调度 worker', {
     batchId: normalizedBatchId,
     taskStatus: task.status,
     counts,
     stuckRunning,
-    dispatch: process.env.BATCH_WORKER_DISPATCH || 'direct',
+    taskStale,
+    resetCount,
   })
 
+  console.log(`[启动] 正在触发 Worker，batchId=${normalizedBatchId}`)
   await markBatchRunning(normalizedBatchId)
 
-  const useHttpDispatch = process.env.BATCH_WORKER_DISPATCH === 'http'
+  // 双通道触发：waitUntil 直调 + HTTP 备用，避免 Worker 未被调度
+  waitUntil(runWorkerInBackground(normalizedBatchId, 'start-waitUntil'))
+  console.log('[batchStart] 已通过 waitUntil 调度 safeRunBatchWorker', { batchId: normalizedBatchId })
 
-  if (useHttpDispatch) {
-    console.log('[batchStart] 使用 HTTP triggerBatchWorker', { batchId: normalizedBatchId })
-    const triggered = await triggerBatchWorker(normalizedBatchId, req)
-    if (!triggered.ok) {
-      const errMsg = triggered.error || 'Worker 触发失败'
-      console.error('[batchStart] triggerBatchWorker 失败', {
-        batchId: normalizedBatchId,
-        errMsg,
-        httpStatus: triggered.status,
-      })
-      await markBatchFailed(normalizedBatchId, errMsg)
-      return {
-        ok: false,
-        httpStatus: 500,
-        taskStatus: 'failed',
-        batchId: normalizedBatchId,
-        message: errMsg,
-      }
-    }
-    console.log('[batchStart] triggerBatchWorker 成功', {
-      batchId: normalizedBatchId,
-      httpStatus: triggered.status,
-    })
+  const httpTriggered = await triggerBatchWorker(normalizedBatchId, req)
+  if (httpTriggered.ok) {
+    console.log('[batchStart] HTTP Worker 触发成功', { batchId: normalizedBatchId, httpStatus: httpTriggered.status })
   } else {
-    waitUntil(runWorkerInBackground(normalizedBatchId, 'start'))
-    console.log('[batchStart] 已通过 waitUntil 直接调度 worker', { batchId: normalizedBatchId })
+    console.warn('[batchStart] HTTP Worker 触发失败，已依赖 waitUntil 直调', {
+      batchId: normalizedBatchId,
+      error: httpTriggered.error,
+      httpStatus: httpTriggered.status,
+    })
   }
 
   return {

@@ -46,22 +46,20 @@ export default async function handler(req, res) {
 
   waitUntil(
     (async () => {
+      console.log(`[Worker] 开始处理 batchId=${batchId}`)
       try {
-        console.log('[batch/worker] waitUntil 后台任务开始', { batchId })
         const result = await safeRunBatchWorker(batchId)
-        console.log('[batch/worker] waitUntil 后台任务结束', { batchId, result })
-
-        if (result?.success === false && result.message) {
-          console.error('[batch/worker] safeRunBatchWorker 返回失败', { batchId, result })
-          await markBatchFailed(batchId, result.message)
-        } else if (result?.done && result.status === 'failed') {
-          console.error('[batch/worker] 任务最终失败', { batchId, result })
-          await markBatchFailed(batchId, result.message || '批量拆题失败')
+        const isFailed = result?.status === 'failed' || result?.success === false
+        if (isFailed) {
+          console.error(`[Worker] 处理失败 batchId=${batchId}`, { result })
+          const msg = result?.message || '批量拆题失败'
+          await markBatchFailed(batchId, msg)
+        } else {
+          console.log(`[Worker] 处理完成 batchId=${batchId}`, { result })
         }
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)
-        console.error('[batch/worker] waitUntil 未捕获异常', {
-          batchId,
+        console.error(`[Worker] 处理失败 batchId=${batchId}`, {
           msg,
           stack: err instanceof Error ? err.stack : undefined,
         })

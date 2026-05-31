@@ -165,7 +165,7 @@ export default async function handler(req, res) {
 
     let startResult = null
     if (autoStart !== false) {
-      console.log('[batch/upload] 自动启动 worker', { batchId, teacherId })
+      console.log(`[启动] 正在触发 Worker，batchId=${batchId}`)
       startResult = await startBatchProcessing(batchId, teacherId, req)
       console.log('[batch/upload] 自动启动结果', { batchId, startResult })
     }
