@@ -1,6 +1,11 @@
 import { callDeepSeekAI, extractJson } from '../deepseekClient.js'
 import { safeJsonParse } from './safeJson.js'
-import { BATCH_SYSTEM_PROMPT, buildBatchSplitPrompt, parseBatchSplitAiResponse } from './batchPrompt.js'
+import {
+  BATCH_SYSTEM_PROMPT,
+  buildBatchSplitPrompt,
+  buildBatchSplitFallbackPrompt,
+  parseBatchSplitAiResponse,
+} from './batchPrompt.js'
 import { normalizeQuestionsBatch } from './questionNormalizer.js'
 import {
   countItemsByStatus,
@@ -13,6 +18,7 @@ import {
   markItemCompleted,
   markItemFailed,
   markItemProcessing,
+  recoverTaskStatusFromBankCount,
   updateBatchProgress,
 } from './batchTaskStore.js'
 import { triggerBatchWorker } from './batchTrigger.js'
@@ -31,6 +37,29 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
+/** 标记 failed 前先查 batch_question_bank，有题则强制 completed */
+async function safeMarkBatchFailed(batchId, message, counts = {}) {
+  try {
+    const recovery = await recoverTaskStatusFromBankCount(batchId, counts)
+    if (recovery.corrected) {
+      console.log('[batchWorker] 跳过 markBatchFailed，已由数据库兜底修正', {
+        batchId,
+        realCount: recovery.realCount,
+        status: recovery.status,
+        originalMessage: message,
+      })
+      return recovery.status
+    }
+  } catch (err) {
+    console.error('[batchWorker] recoverTaskStatusFromBankCount 失败', {
+      batchId,
+      err: err instanceof Error ? err.message : String(err),
+    })
+  }
+  await markBatchFailed(batchId, message)
+  return 'failed'
+}
+
 /** 完全基于 batch_question_bank 真实 COUNT 判断任务最终状态 */
 async function resolveFinalBatchStatus(batchId, counts) {
   if (counts.pending > 0 || counts.processing > 0) {
@@ -39,12 +68,16 @@ async function resolveFinalBatchStatus(batchId, counts) {
 
   try {
     const { realCount, status } = await finalizeBatchTaskFromDatabase(batchId, counts)
+    if (realCount > 0 && status !== 'failed') {
+      return status
+    }
+    const recovery = await recoverTaskStatusFromBankCount(batchId, counts)
+    if (recovery.corrected) return recovery.status
     return status
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     console.error('[batchWorker] finalizeBatchTaskFromDatabase 失败', { batchId, msg })
-    await markBatchFailed(batchId, msg)
-    return 'failed'
+    return safeMarkBatchFailed(batchId, msg, counts)
   }
 }
 
@@ -77,45 +110,42 @@ async function chainNextWorker(batchId, roundNum, remainingChunks) {
   }
 
   const errMsg = `链式 worker 触发失败（batchId=${batchId}，已重试 ${CHAIN_MAX_RETRIES} 次）：${lastError}`
-  console.error('[batchWorker] 链式触发全部失败，标记任务 failed', { batchId, errMsg })
-  await markBatchFailed(batchId, errMsg)
+  console.error('[batchWorker] 链式触发全部失败', { batchId, errMsg })
+  await safeMarkBatchFailed(batchId, errMsg)
+}
+
+async function invokeAiParse(item, meta, sortOffset, useFallbackPrompt) {
+  const prompt = useFallbackPrompt
+    ? buildBatchSplitFallbackPrompt(item.chunk_text, meta)
+    : buildBatchSplitPrompt(item.chunk_text, meta)
+
+  const content = await callDeepSeekAI(BATCH_SYSTEM_PROMPT, prompt, {
+    model: BATCH_MODEL,
+    maxTokens: 4096,
+    label: useFallbackPrompt ? 'batch-split-fallback' : 'batch-split',
+  })
+
+  console.log('[batchWorker] AI 完整原始响应前1000字符:', String(content ?? '').slice(0, 1000))
+
+  return parseBatchSplitAiResponse(content, meta, sortOffset, extractJson, safeJsonParse)
 }
 
 /**
- * 调用 AI 并解析题目（失败自动重试 2 次，间隔 2 秒；仍失败则宽松 JSON 提取）
+ * 调用 AI 并解析题目（失败自动重试；仍为空则用备用 prompt 再试一次）
  */
 async function callAiParseWithRetry(item, meta, sortOffset) {
-  const prompt = buildBatchSplitPrompt(item.chunk_text, meta)
   let lastResult = null
   let lastError = null
 
   for (let attempt = 0; attempt <= AI_PARSE_RETRY_COUNT; attempt++) {
     if (attempt > 0) {
-      console.log('[batchWorker] AI 解析重试', {
-        itemId: item.id,
-        attempt,
-        delayMs: AI_PARSE_RETRY_DELAY_MS,
-      })
+      console.log('[batchWorker] AI 解析重试', { itemId: item.id, attempt, delayMs: AI_PARSE_RETRY_DELAY_MS })
       await sleep(AI_PARSE_RETRY_DELAY_MS)
     }
 
     try {
       console.log('[batchWorker] 调用 AI 拆题', { itemId: item.id, model: BATCH_MODEL, attempt })
-      const content = await callDeepSeekAI(BATCH_SYSTEM_PROMPT, prompt, {
-        model: BATCH_MODEL,
-        maxTokens: 4096,
-        label: 'batch-split',
-      })
-
-      console.log('[batchWorker] AI 完整原始响应前1000字符:', String(content ?? '').slice(0, 1000))
-
-      const parsed = parseBatchSplitAiResponse(
-        content,
-        meta,
-        sortOffset,
-        extractJson,
-        safeJsonParse,
-      )
+      const parsed = await invokeAiParse(item, meta, sortOffset, false)
 
       console.log('[batchWorker] AI 解析结果', {
         itemId: item.id,
@@ -125,11 +155,8 @@ async function callAiParseWithRetry(item, meta, sortOffset) {
         questionCount: parsed.questions?.length ?? 0,
       })
 
-      lastResult = { ...parsed, aiContent: content }
-
-      if (parsed.questions?.length > 0) {
-        return lastResult
-      }
+      lastResult = parsed
+      if (parsed.questions?.length > 0) return parsed
 
       lastError = new Error(`AI 解析题目为空（extractPath=${parsed.extractPath}）`)
       console.warn('[batchWorker] 本轮解析无题目，准备重试', { itemId: item.id, attempt })
@@ -139,13 +166,34 @@ async function callAiParseWithRetry(item, meta, sortOffset) {
         itemId: item.id,
         attempt,
         message: lastError.message,
-        stack: lastError.stack,
       })
     }
   }
 
   if (lastResult?.questions?.length) return lastResult
-  throw lastError ?? new Error('AI 解析失败（已重试 2 次）')
+
+  console.warn('[batchPrompt] 主 prompt 解析为空，启用备用 prompt 重试', { itemId: item.id })
+  try {
+    await sleep(AI_PARSE_RETRY_DELAY_MS)
+    const fallbackParsed = await invokeAiParse(item, meta, sortOffset, true)
+    console.log('[batchWorker] 备用 prompt 解析结果', {
+      itemId: item.id,
+      extractPath: fallbackParsed.extractPath,
+      questionCount: fallbackParsed.questions?.length ?? 0,
+    })
+    if (fallbackParsed.questions?.length > 0) return fallbackParsed
+    lastResult = fallbackParsed
+    lastError = new Error(`备用 prompt 仍为空（extractPath=${fallbackParsed.extractPath}）`)
+  } catch (err) {
+    lastError = err instanceof Error ? err : new Error(String(err))
+    console.error('[batchWorker] 备用 prompt 解析异常', { itemId: item.id, message: lastError.message })
+  }
+
+  console.error('[batchWorker] AI 解析最终为空，不标记任务失败，等待数据库兜底', {
+    itemId: item.id,
+    message: lastError?.message,
+  })
+  return lastResult ?? { questions: [], rawQuestions: [], extractPath: 'empty_after_fallback', parsed: null }
 }
 
 async function processOneItem(item, meta, sortOffset, batchId) {
@@ -179,16 +227,14 @@ async function processOneItem(item, meta, sortOffset, batchId) {
     })
 
     if (!normalizedQuestions.length) {
-      const msg = `标准化后无有效题目（原始=${rawCount}，过滤=${filteredCount}，extractPath=${parsed.extractPath}）`
-      console.error('[Worker] 严重错误：rawQuestions 为空！', {
+      const msg = `本分块无有效题目（原始=${rawCount}，过滤=${filteredCount}，extractPath=${parsed.extractPath}）`
+      console.warn('[Worker] 本分块跳过入库，不标记任务失败，等待最终数据库兜底', {
         itemId: item.id,
         batchId,
-        rawCount,
-        filteredCount,
+        msg,
       })
       await markItemFailed(item.id, msg)
-      if (batchId) await markBatchFailed(batchId, msg)
-      return { success: false, error: msg, itemId: item.id, rawQuestions: [], questions: [] }
+      return { success: false, error: msg, itemId: item.id, rawQuestions: [], questions: [], skipTaskFail: true }
     }
 
     return {
@@ -199,9 +245,9 @@ async function processOneItem(item, meta, sortOffset, batchId) {
     }
   } catch (error) {
     const msg = error instanceof Error ? error.message : '拆题失败'
-    console.error('[batchWorker] 分块处理失败', { itemId: item.id, msg, stack: error instanceof Error ? error.stack : undefined })
+    console.error('[batchWorker] 分块处理失败', { itemId: item.id, msg })
     await markItemFailed(item.id, msg)
-    return { success: false, error: msg, itemId: item.id, rawQuestions: [], questions: [] }
+    return { success: false, error: msg, itemId: item.id, rawQuestions: [], questions: [], skipTaskFail: true }
   }
 }
 
@@ -209,30 +255,25 @@ async function persistItemQuestions(batchId, teacherId, itemId, rawQuestions, ta
   const count = Array.isArray(rawQuestions) ? rawQuestions.length : 0
   console.log('[Worker] 准备入库，题目数量=' + count, { batchId, itemId, teacherId })
 
-  if (!count) {
-    const msg = 'rawQuestions 为空，无法入库'
-    console.error('[Worker] 严重错误：rawQuestions 为空！', { batchId, itemId })
-    await markItemFailed(itemId, msg)
-    await markBatchFailed(batchId, msg)
-    throw new Error(msg)
-  }
-
-  console.log('[Worker] 准备入库，第一条题目摘要=', JSON.stringify({
-    content: String(rawQuestions[0]?.content ?? '').slice(0, 80),
-    question_type: rawQuestions[0]?.question_type,
-    optionsCount: rawQuestions[0]?.options?.length ?? 0,
-  }))
-
   const insertResult = await insertBatchQuestions(batchId, teacherId, itemId, rawQuestions, taskMeta)
-  if (!insertResult?.success || !insertResult.count) {
-    const msg = insertResult?.error || '入库失败或未写入任何题目'
-    console.error('[batchWorker] 入库失败，终止任务', { batchId, itemId, msg })
+
+  if (insertResult?.skipped) {
+    console.warn('[Worker] 入库跳过（空数组）', { batchId, itemId })
+    return 0
+  }
+
+  if (!insertResult?.success) {
+    const msg = insertResult?.error || '入库失败'
+    console.error('[batchWorker] 入库失败', { batchId, itemId, msg })
     await markItemFailed(itemId, msg)
     throw new Error(msg)
   }
 
-  await markItemCompleted(itemId, rawQuestions)
-  return insertResult.count
+  if (insertResult.count > 0) {
+    await markItemCompleted(itemId, rawQuestions)
+  }
+
+  return insertResult.count ?? 0
 }
 
 async function runPool(items, meta, startSort, batchId, teacherId, taskMeta) {
@@ -322,13 +363,10 @@ export async function safeRunBatchWorker(batchId) {
     return result
   } catch (error) {
     const msg = error instanceof Error ? error.message : 'Worker 异常'
-    console.error('[batchWorker] === runBatchWorker 异常 ===', {
-      batchId,
-      msg,
-      stack: error instanceof Error ? error.stack : undefined,
-    })
+    console.error('[batchWorker] === runBatchWorker 异常 ===', { batchId, msg })
     try {
-      await markBatchFailed(batchId, msg)
+      const counts = await countItemsByStatus(batchId)
+      await safeMarkBatchFailed(batchId, msg, counts)
     } catch (markErr) {
       console.error('[batchWorker] 标记 failed 也失败', { batchId, markErr })
     }

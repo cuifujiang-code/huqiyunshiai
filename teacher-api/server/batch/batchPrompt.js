@@ -50,6 +50,26 @@ ${chunkText}
 每道题必须包含 content、answer、analysis。只输出 JSON 数组，不要任何其他文字。`
 }
 
+/** 备用 prompt：主 prompt 解析为空时使用，更强调逐题拆分与 JSON 数组 */
+export function buildBatchSplitFallbackPrompt(chunkText, meta) {
+  return `【备用拆题模式】请将下面试卷文本尽可能拆分为多道独立题目。即使格式不规范，也要尽量识别题号、题干、答案。
+
+学科：${meta.subject || '数学'}
+年级：${meta.grade || '八年级'}
+
+试卷文本：
+${chunkText}
+
+严格要求：
+1. 只输出 JSON 数组 [ {...}, {...} ]
+2. 每道题必须有 content、answer、analysis（字符串，不能为空）
+3. 能识别多少题就输出多少题，不要返回空数组
+4. 不要 markdown，不要解释文字
+
+示例：
+[{"content":"1+1=?","answer":"2","analysis":"基础加法","question_type":"计算题","difficulty":"基础","options":[],"knowledge_point":"算术","geometry_desc":"","latex_blocks":[],"tags":[]}]`
+}
+
 function isQuestionLike(obj) {
   if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return false
   return Boolean(

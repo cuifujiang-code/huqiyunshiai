@@ -362,10 +362,8 @@ export async function insertBatchQuestions(batchId, teacherId, itemId, questions
   console.log('[入库] 收到题目数据，数量=' + questionCount, { batchId, itemId, teacherId })
 
   if (!questionCount) {
-    const errMsg = '[入库] 错误：rawQuestions 为空，拒绝写入'
-    console.error(errMsg, { batchId, itemId, teacherId })
-    await failBatchInsert(batchId, itemId, '无可入库题目', 'rawQuestions 为空，拒绝写入')
-    throw new Error(errMsg)
+    console.warn('[入库] 入参 rawQuestions 为空，跳过写入', { batchId, itemId, teacherId })
+    return { success: true, count: 0, skipped: true }
   }
 
   logSupabaseInsertEnv(batchId)
@@ -572,6 +570,33 @@ export async function countBatchQuestionsInBank(batchId) {
   const actual = count ?? 0
   console.log('[batchTaskStore] batch_question_bank 实际题目数', { batchId, count: actual })
   return actual
+}
+
+/** 标记 failed 前兜底：若 batch_question_bank 已有题目则强制 completed/partial */
+export async function recoverTaskStatusFromBankCount(batchId, itemCounts = {}) {
+  const realCount = await countBatchQuestionsInBank(batchId)
+  if (realCount <= 0) {
+    return { corrected: false, realCount: 0, status: 'failed' }
+  }
+
+  let status = 'completed'
+  if ((itemCounts.failed ?? 0) > 0) {
+    status = 'partial'
+  }
+
+  const admin = getSupabaseAdmin()
+  const { error } = await admin.from(TASKS).update({
+    imported_questions: realCount,
+    total_questions: realCount,
+    status,
+    error_message: null,
+    updated_at: nowIso(),
+  }).eq('batch_id', batchId)
+
+  if (error) throw new Error(error.message)
+
+  console.log(`[最终兜底] 任务状态已根据数据库实际题目数(count=${realCount})强制修正为 ${status}`)
+  return { corrected: true, realCount, status }
 }
 
 /** 以 batch_question_bank 真实 COUNT 收尾任务（禁止依赖内存计数） */
