@@ -574,6 +574,37 @@ export async function countBatchQuestionsInBank(batchId) {
   return actual
 }
 
+/** 以 batch_question_bank 真实 COUNT 收尾任务（禁止依赖内存计数） */
+export async function finalizeBatchTaskFromDatabase(batchId, itemCounts = {}) {
+  const realCount = await countBatchQuestionsInBank(batchId)
+
+  let status = realCount > 0 ? 'completed' : 'failed'
+  if (realCount > 0 && (itemCounts.failed ?? 0) > 0) {
+    status = 'partial'
+  }
+
+  const admin = getSupabaseAdmin()
+  const patch = {
+    imported_questions: realCount,
+    total_questions: realCount,
+    status,
+    completed_items: (itemCounts.completed ?? 0) + (itemCounts.failed ?? 0),
+    updated_at: nowIso(),
+  }
+
+  if (status === 'failed') {
+    patch.error_message = '拆题流程结束但未检测到入库题目（batch_question_bank count=0）'
+  } else {
+    patch.error_message = null
+  }
+
+  const { error } = await admin.from(TASKS).update(patch).eq('batch_id', batchId)
+  if (error) throw new Error(error.message)
+
+  console.log(`[最终状态] batchId=${batchId}，真实入库数量=${realCount}，任务状态=${status}`)
+  return { realCount, status }
+}
+
 /** 以 batch_question_bank 实际数量同步 batch_decompose_tasks.imported_questions */
 export async function syncImportedQuestionsFromBank(batchId) {
   const actualCount = await countBatchQuestionsInBank(batchId)
