@@ -1,5 +1,7 @@
 /** 专业教育题库拆题 Prompt：LaTeX 公式、几何图形、空间图形全支持 */
 
+import { extractJsonFromAiText } from './safeJson.js'
+
 export const BATCH_SYSTEM_PROMPT = `你是 K12 专业题库拆题引擎。
 
 【输出格式 - 必须严格遵守】
@@ -220,7 +222,7 @@ export function normalizeBatchQuestions(raw, meta, startOrder = 0) {
 }
 
 /**
- * 从 AI 原始文本解析题目：打印前 500 字符，多路径尝试提取
+ * 从 AI 原始文本解析题目
  * @returns {{ questions: object[], rawQuestions: object[], extractPath: string, parsed: unknown }}
  */
 export function parseBatchSplitAiResponse(aiText, meta, sortOffset, extractJson, safeJsonParse) {
@@ -235,30 +237,41 @@ export function parseBatchSplitAiResponse(aiText, meta, sortOffset, extractJson,
   }
 
   const attempts = []
-  const jsonCandidates = [
-    extractJson(aiText),
-    rawText.trim(),
-  ]
 
-  // 若整体是字符串，先 JSON.parse 再提取
-  if (rawText.trim().startsWith('"') || rawText.trim().startsWith("'")) {
+  let parsed = null
+  let parseSource = ''
+
+  const jsonCandidates = [
+    { label: 'extractJsonFromAiText', text: extractJsonFromAiText(rawText) },
+  ]
+  if (typeof extractJson === 'function') {
+    jsonCandidates.push({ label: 'extractJson', text: extractJson(rawText) })
+  }
+  jsonCandidates.push({ label: 'raw_trim', text: rawText.trim() })
+
+  for (const { label, text } of jsonCandidates) {
+    if (!text) {
+      attempts.push(`${label}:empty`)
+      continue
+    }
     try {
-      const unquoted = JSON.parse(rawText.trim())
-      if (typeof unquoted === 'string') jsonCandidates.unshift(extractJson(unquoted))
-    } catch {
-      attempts.push('unquote_string_fail')
+      parsed = safeJsonParse(text)
+      parseSource = label
+      attempts.push(`${label}:ok`)
+      break
+    } catch (err) {
+      attempts.push(`${label}:${err instanceof Error ? err.message : String(err)}`)
     }
   }
 
-  let parsed = null
-  for (const candidate of jsonCandidates) {
-    if (!candidate) continue
+  // 最后一搏：对整个原始文本 safeJsonParse（内含清理链）
+  if (parsed == null) {
     try {
-      parsed = safeJsonParse(candidate)
-      attempts.push('json_parse_ok')
-      break
+      parsed = safeJsonParse(rawText)
+      parseSource = 'safeJsonParse_full'
+      attempts.push('safeJsonParse_full:ok')
     } catch (err) {
-      attempts.push(`json_parse_fail:${err instanceof Error ? err.message : String(err)}`)
+      attempts.push(`safeJsonParse_full:${err instanceof Error ? err.message : String(err)}`)
     }
   }
 
@@ -269,9 +282,11 @@ export function parseBatchSplitAiResponse(aiText, meta, sortOffset, extractJson,
 
   if (parsed == null) {
     console.warn(`[Prompt] 无法解析 AI 响应，原始内容前500字符=${rawPreview500}`)
-    console.warn('[batchWorker] JSON 解析全部失败', { attempts })
+    console.warn('[batchWorker] JSON 解析全部失败', { attempts, parseSource })
     return { questions: [], rawQuestions: [], extractPath: 'json_parse_failed', parsed: null, rawPreview1000 }
   }
+
+  console.log('[batchWorker] JSON 解析成功', { parseSource, attempts })
 
   let rawQuestions = extractQuestionsFromAiRaw(parsed)
   let extractPath = rawQuestions.length ? 'extractQuestionsFromAiRaw' : ''
