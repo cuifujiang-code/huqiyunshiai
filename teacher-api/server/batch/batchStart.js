@@ -3,9 +3,11 @@ import { triggerBatchWorker } from './batchTrigger.js'
 import { safeRunBatchWorker } from './batchWorker.js'
 import {
   countItemsByStatus,
+  emergencyRecover,
   getBatchTaskForTeacher,
   markBatchFailed,
   markBatchRunning,
+  resetBatchTaskToPending,
 } from './batchTaskStore.js'
 
 async function runWorkerInBackground(batchId, source) {
@@ -13,8 +15,8 @@ async function runWorkerInBackground(batchId, source) {
     console.log(`[batchStart] [${source}] waitUntil → safeRunBatchWorker 开始`, { batchId })
     const result = await safeRunBatchWorker(batchId)
     console.log(`[batchStart] [${source}] waitUntil → safeRunBatchWorker 结束`, { batchId, result })
-    if (result?.success === false && result.message) {
-      console.error(`[batchStart] [${source}] worker 返回失败`, { batchId, result })
+    if (result?.recovered === false && result?.status === 'failed') {
+      console.error(`[batchStart] [${source}] worker 恢复后仍为 failed`, { batchId, result })
     }
     return result
   } catch (err) {
@@ -24,8 +26,7 @@ async function runWorkerInBackground(batchId, source) {
       msg,
       stack: err instanceof Error ? err.stack : undefined,
     })
-    await markBatchFailed(batchId, msg)
-    return { success: false, message: msg }
+    return emergencyRecover(batchId, msg)
   }
 }
 
@@ -49,9 +50,15 @@ export async function startBatchProcessing(batchId, teacherId, req) {
     return { ok: false, httpStatus: 400, taskStatus: 'failed', message: '缺少 batchId 或 teacherId' }
   }
 
-  const task = await getBatchTaskForTeacher(normalizedBatchId, normalizedTeacherId)
+  let task = await getBatchTaskForTeacher(normalizedBatchId, normalizedTeacherId)
   if (!task) {
     return { ok: false, httpStatus: 404, taskStatus: 'failed', message: '任务不存在或无权访问' }
+  }
+
+  if (task.status === 'failed' || task.status === 'partial') {
+    console.log(`[启动前重置] batchId=${normalizedBatchId}，旧状态=${task.status}，已重置为 pending`)
+    await resetBatchTaskToPending(normalizedBatchId)
+    task = { ...task, status: 'pending', error_message: null }
   }
 
   if (task.status === 'completed') {

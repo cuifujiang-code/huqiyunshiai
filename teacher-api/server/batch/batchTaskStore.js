@@ -276,6 +276,17 @@ export async function markBatchRunning(batchId) {
   if (error) throw new Error(error.message)
 }
 
+/** 启动 worker 前将 failed/partial 重置为 pending，便于自愈重跑 */
+export async function resetBatchTaskToPending(batchId) {
+  const admin = getSupabaseAdmin()
+  const { error } = await admin.from(TASKS).update({
+    status: 'pending',
+    error_message: null,
+    updated_at: nowIso(),
+  }).eq('batch_id', batchId)
+  if (error) throw new Error(error.message)
+}
+
 export async function updateBatchProgress(batchId, { completedItems, totalQuestions, status }) {
   const admin = getSupabaseAdmin()
   const patch = { updated_at: nowIso() }
@@ -362,7 +373,7 @@ export async function insertBatchQuestions(batchId, teacherId, itemId, questions
   console.log('[入库] 收到题目数据，数量=' + questionCount, { batchId, itemId, teacherId })
 
   if (!questionCount) {
-    console.warn('[入库] 入参 rawQuestions 为空，跳过写入', { batchId, itemId, teacherId })
+    console.warn('[入库] 入参为空数组，跳过写入', { batchId, itemId, teacherId })
     return { success: true, count: 0, skipped: true }
   }
 
@@ -383,8 +394,9 @@ export async function insertBatchQuestions(batchId, teacherId, itemId, questions
   console.log('[入库] 首条题目完整 JSON', JSON.stringify(rows[0], null, 2))
   console.log('[入库] 首条题目摘要', { batchId, itemId, ...summarizeBankRow(rows[0]) })
 
-  const { data: insertedRows, error, status, statusText } = await admin.from(BANK).insert(rows).select('id, batch_id, item_id')
-  console.log('[入库] 插入结果，返回行数=' + (insertedRows?.length || 0), {
+  const { data: insertedRows, error, status, statusText } = await admin.from(BANK).insert(rows).select('id')
+  const insertedCount = insertedRows?.length ?? 0
+  console.log('[入库] 插入结果，返回行数=' + insertedCount, {
     batchId,
     itemId,
     attempted: rows.length,
@@ -412,9 +424,8 @@ export async function insertBatchQuestions(batchId, teacherId, itemId, questions
     )
   }
 
-  const insertedCount = insertedRows?.length ?? 0
   if (!insertedCount) {
-    console.warn('[入库失败] 数据被 RLS 或约束拦截：insert 无 error 但 select 返回空数组', {
+    console.warn('[入库] select(id) 验证失败：返回行数为 0，数据可能被 RLS 或约束拦截', {
       batchId,
       itemId,
       teacherId,
@@ -570,6 +581,46 @@ export async function countBatchQuestionsInBank(batchId) {
   const actual = count ?? 0
   console.log('[batchTaskStore] batch_question_bank 实际题目数', { batchId, count: actual })
   return actual
+}
+
+/**
+ * Worker 全局异常紧急恢复：以 batch_question_bank 真实 COUNT 决定最终状态
+ * @returns {Promise<{ recovered: boolean, status: string, realCount: number, message?: string, done?: boolean }>}
+ */
+export async function emergencyRecover(batchId, errorReason = 'Worker 异常') {
+  const reason = String(errorReason ?? 'Worker 异常').trim() || 'Worker 异常'
+  console.error('[batchTaskStore] emergencyRecover 触发', { batchId, errorReason: reason })
+
+  let realCount = 0
+  try {
+    realCount = await countBatchQuestionsInBank(batchId)
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    console.error('[batchTaskStore] emergencyRecover 查询题目数失败', { batchId, msg })
+    await markBatchFailed(batchId, `${reason}（且无法查询 batch_question_bank：${msg}）`)
+    return { recovered: false, status: 'failed', realCount: 0, message: reason, done: true }
+  }
+
+  if (realCount > 0) {
+    const admin = getSupabaseAdmin()
+    const { error } = await admin.from(TASKS).update({
+      imported_questions: realCount,
+      total_questions: realCount,
+      status: 'completed',
+      error_message: null,
+      updated_at: nowIso(),
+    }).eq('batch_id', batchId)
+    if (error) {
+      console.error('[batchTaskStore] emergencyRecover 更新任务状态失败', { batchId, message: error.message })
+      throw new Error(error.message)
+    }
+    console.log(`[紧急恢复] batchId=${batchId}，数据库实际题目数=${realCount}，已强制修正为 completed`)
+    return { recovered: true, status: 'completed', realCount, done: true }
+  }
+
+  await markBatchFailed(batchId, reason)
+  console.log(`[紧急恢复] batchId=${batchId}，数据库实际题目数=0，已标记为 failed`, { reason })
+  return { recovered: false, status: 'failed', realCount: 0, message: reason, done: true }
 }
 
 /** 标记 failed 前兜底：若 batch_question_bank 已有题目则强制 completed/partial */

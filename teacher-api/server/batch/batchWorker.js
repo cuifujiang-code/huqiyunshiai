@@ -9,6 +9,7 @@ import {
 import { normalizeQuestionsBatch } from './questionNormalizer.js'
 import {
   countItemsByStatus,
+  emergencyRecover,
   fetchPendingItems,
   finalizeBatchTaskFromDatabase,
   getBatchTask,
@@ -127,7 +128,7 @@ async function invokeAiParse(item, meta, sortOffset, useFallbackPrompt) {
 
   console.log('[batchWorker] AI 完整原始响应前1000字符:', String(content ?? '').slice(0, 1000))
 
-  return parseBatchSplitAiResponse(content, meta, sortOffset, extractJson, safeJsonParse)
+  return await parseBatchSplitAiResponse(content, meta, sortOffset, extractJson, safeJsonParse)
 }
 
 /**
@@ -298,6 +299,20 @@ async function runPool(items, meta, startSort, batchId, teacherId, taskMeta) {
  * 核心 Worker：每轮处理 ITEMS_PER_INVOCATION 个 pending 分块，并发 AI 拆题并入库
  */
 export async function runBatchWorker(batchId) {
+  try {
+    return await runBatchWorkerCore(batchId)
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error)
+    console.error('[batchWorker] === 全局异常捕获 ===', {
+      batchId,
+      msg,
+      stack: error instanceof Error ? error.stack : undefined,
+    })
+    return emergencyRecover(batchId, msg)
+  }
+}
+
+async function runBatchWorkerCore(batchId) {
   console.log('[batchWorker] === 开始 runBatchWorker ===', { batchId })
 
   const task = await getBatchTask(batchId)
@@ -363,13 +378,15 @@ export async function safeRunBatchWorker(batchId) {
     return result
   } catch (error) {
     const msg = error instanceof Error ? error.message : 'Worker 异常'
-    console.error('[batchWorker] === runBatchWorker 异常 ===', { batchId, msg })
+    console.error('[batchWorker] === safeRunBatchWorker 外层异常 ===', { batchId, msg })
     try {
-      const counts = await countItemsByStatus(batchId)
-      await safeMarkBatchFailed(batchId, msg, counts)
-    } catch (markErr) {
-      console.error('[batchWorker] 标记 failed 也失败', { batchId, markErr })
+      return await emergencyRecover(batchId, msg)
+    } catch (recoverErr) {
+      console.error('[batchWorker] emergencyRecover 也失败', {
+        batchId,
+        msg: recoverErr instanceof Error ? recoverErr.message : String(recoverErr),
+      })
+      return { success: false, message: msg, status: 'failed', recovered: false }
     }
-    return { success: false, message: msg, status: 'failed' }
   }
 }

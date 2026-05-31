@@ -2,6 +2,72 @@
 
 import { extractJsonFromAiText } from './safeJson.js'
 
+const JSON_PARSE_RETRY_DELAY_MS = 2000
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+/**
+ * 预处理 AI 原始字符串：移除 Markdown 标记，提取第一个 '[' 到最后一个 ']' 的 JSON 片段
+ */
+export function preprocessAiJsonString(rawText) {
+  let s = String(rawText ?? '').replace(/^\uFEFF/, '').trim()
+  if (!s) return ''
+
+  // 去掉 markdown 代码块围栏（保留块内内容）
+  s = s.replace(/```(?:json|JSON)?\s*([\s\S]*?)```/gi, '$1')
+  s = s.replace(/^```[^\n]*\n?/gm, '').replace(/\n?```\s*$/gm, '').trim()
+
+  const arrStart = s.indexOf('[')
+  const arrEnd = s.lastIndexOf(']')
+  if (arrStart >= 0 && arrEnd > arrStart) {
+    return s.slice(arrStart, arrEnd + 1).trim()
+  }
+
+  const extracted = extractJsonFromAiText(s)
+  return extracted || s
+}
+
+/**
+ * 对预处理后的 JSON 字符串解析；失败则等待 2 秒重试一次，仍失败则记录原始内容并抛出
+ */
+export async function parseJsonFromAiTextWithRetry(rawText, safeJsonParseFn) {
+  const fullRaw = String(rawText ?? '')
+  let lastError = null
+
+  for (let attempt = 0; attempt < 2; attempt++) {
+    if (attempt > 0) {
+      console.warn('[batchPrompt] JSON.parse 失败，2秒后重试', { attempt })
+      await sleep(JSON_PARSE_RETRY_DELAY_MS)
+    }
+
+    const cleaned = preprocessAiJsonString(fullRaw)
+    if (!cleaned) {
+      lastError = new Error('JSON 内容为空')
+      continue
+    }
+
+    try {
+      const parsed = safeJsonParseFn(cleaned)
+      if (attempt > 0) {
+        console.log('[batchPrompt] JSON.parse 重试成功', { attempt, cleanedLength: cleaned.length })
+      }
+      return parsed
+    } catch (err) {
+      lastError = err instanceof Error ? err : new Error(String(err))
+      console.warn('[batchPrompt] JSON.parse 失败', {
+        attempt,
+        message: lastError.message,
+        cleanedPreview: cleaned.slice(0, 300),
+      })
+    }
+  }
+
+  console.error('[batchPrompt] JSON.parse 最终失败，原始内容前2000字符=', fullRaw.slice(0, 2000))
+  throw lastError instanceof Error ? lastError : new Error('JSON 解析失败')
+}
+
 export const BATCH_SYSTEM_PROMPT = `你是 K12 专业题库拆题引擎。
 
 【输出格式 - 必须严格遵守】
@@ -243,9 +309,9 @@ export function normalizeBatchQuestions(raw, meta, startOrder = 0) {
 
 /**
  * 从 AI 原始文本解析题目
- * @returns {{ questions: object[], rawQuestions: object[], extractPath: string, parsed: unknown }}
+ * @returns {Promise<{ questions: object[], rawQuestions: object[], extractPath: string, parsed: unknown }>}
  */
-export function parseBatchSplitAiResponse(aiText, meta, sortOffset, extractJson, safeJsonParse) {
+export async function parseBatchSplitAiResponse(aiText, meta, sortOffset, extractJson, safeJsonParse) {
   const rawText = String(aiText ?? '')
   const rawPreview500 = rawText.slice(0, 500)
   const rawPreview1000 = rawText.slice(0, 1000)
@@ -257,11 +323,11 @@ export function parseBatchSplitAiResponse(aiText, meta, sortOffset, extractJson,
   }
 
   const attempts = []
-
   let parsed = null
   let parseSource = ''
 
   const jsonCandidates = [
+    { label: 'preprocessAiJsonString', text: preprocessAiJsonString(rawText) },
     { label: 'extractJsonFromAiText', text: extractJsonFromAiText(rawText) },
   ]
   if (typeof extractJson === 'function') {
@@ -275,7 +341,7 @@ export function parseBatchSplitAiResponse(aiText, meta, sortOffset, extractJson,
       continue
     }
     try {
-      parsed = safeJsonParse(text)
+      parsed = await parseJsonFromAiTextWithRetry(text, safeJsonParse)
       parseSource = label
       attempts.push(`${label}:ok`)
       break
@@ -284,14 +350,14 @@ export function parseBatchSplitAiResponse(aiText, meta, sortOffset, extractJson,
     }
   }
 
-  // 最后一搏：对整个原始文本 safeJsonParse（内含清理链）
+  // 最后一搏：对整个原始文本带重试解析
   if (parsed == null) {
     try {
-      parsed = safeJsonParse(rawText)
-      parseSource = 'safeJsonParse_full'
-      attempts.push('safeJsonParse_full:ok')
+      parsed = await parseJsonFromAiTextWithRetry(rawText, safeJsonParse)
+      parseSource = 'parseJsonFromAiTextWithRetry_full'
+      attempts.push('parseJsonFromAiTextWithRetry_full:ok')
     } catch (err) {
-      attempts.push(`safeJsonParse_full:${err instanceof Error ? err.message : String(err)}`)
+      attempts.push(`parseJsonFromAiTextWithRetry_full:${err instanceof Error ? err.message : String(err)}`)
     }
   }
 
@@ -302,8 +368,8 @@ export function parseBatchSplitAiResponse(aiText, meta, sortOffset, extractJson,
 
   if (parsed == null) {
     console.warn(`[Prompt] 无法解析 AI 响应，原始内容前500字符=${rawPreview500}`)
-    console.warn('[batchWorker] JSON 解析全部失败', { attempts, parseSource })
-    return { questions: [], rawQuestions: [], extractPath: 'json_parse_failed', parsed: null, rawPreview1000 }
+    console.warn('[batchWorker] JSON 解析全部失败', { attempts, parseSource, rawPreview1000 })
+    throw new Error(`AI 响应 JSON 解析失败（attempts=${attempts.join('; ')}）`)
   }
 
   console.log('[batchWorker] JSON 解析成功', { parseSource, attempts })
