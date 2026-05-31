@@ -554,6 +554,40 @@ export function normalizeBatchQuestionRow(row) {
   }
 }
 
+/** 从 batch_question_bank 统计批次实际入库题目数 */
+export async function countBatchQuestionsInBank(batchId) {
+  const admin = getBatchQuestionBankClient()
+  const { count, error } = await admin
+    .from(BANK)
+    .select('id', { count: 'exact', head: true })
+    .eq('batch_id', batchId)
+  if (error) {
+    console.error('[batchTaskStore] countBatchQuestionsInBank 失败', {
+      batchId,
+      message: error.message,
+      code: error.code,
+    })
+    throw new Error(error.message)
+  }
+  const actual = count ?? 0
+  console.log('[batchTaskStore] batch_question_bank 实际题目数', { batchId, count: actual })
+  return actual
+}
+
+/** 以 batch_question_bank 实际数量同步 batch_decompose_tasks.imported_questions */
+export async function syncImportedQuestionsFromBank(batchId) {
+  const actualCount = await countBatchQuestionsInBank(batchId)
+  const admin = getSupabaseAdmin()
+  const { error } = await admin.from(TASKS).update({
+    imported_questions: actualCount,
+    total_questions: actualCount,
+    updated_at: nowIso(),
+  }).eq('batch_id', batchId)
+  if (error) throw new Error(error.message)
+  console.log('[batchTaskStore] 已同步 imported_questions', { batchId, imported_questions: actualCount })
+  return actualCount
+}
+
 /** 从 batch_question_bank 查询批次题目（service_role 绕过 RLS） */
 export async function listBatchQuestions(batchId, teacherId) {
   const admin = getBatchQuestionBankClient()

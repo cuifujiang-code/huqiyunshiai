@@ -12,6 +12,7 @@ import {
   markItemCompleted,
   markItemFailed,
   markItemProcessing,
+  syncImportedQuestionsFromBank,
   updateBatchProgress,
 } from './batchTaskStore.js'
 import { triggerBatchWorker } from './batchTrigger.js'
@@ -28,17 +29,26 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
-/** 入库失败或 imported_questions=0 时不得标记 completed */
+/** 入库失败或 imported_questions=0 时不得标记 completed（以 batch_question_bank 实际统计为准） */
 async function resolveFinalBatchStatus(batchId, counts) {
-  const task = await getBatchTask(batchId)
-  const imported = task?.imported_questions ?? 0
-
   if (counts.pending > 0 || counts.processing > 0) {
     return null
   }
 
+  let imported = 0
+  try {
+    imported = await syncImportedQuestionsFromBank(batchId)
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    console.error('[batchWorker] 从 batch_question_bank 统计题目失败，回退任务表字段', { batchId, msg })
+    const task = await getBatchTask(batchId)
+    imported = task?.imported_questions ?? 0
+  }
+
+  console.log('[batchWorker] 收尾状态判断（DB 实际入库数）', { batchId, imported, counts })
+
   if (imported <= 0) {
-    const msg = '拆题流程结束但未检测到入库题目（imported_questions=0），请检查 batch_question_bank 表结构与 Supabase 环境变量'
+    const msg = '拆题流程结束但未检测到入库题目（batch_question_bank count=0）'
     console.error('[batchWorker] 无入库题目，标记 failed', { batchId, counts, imported })
     await markBatchFailed(batchId, msg)
     return 'failed'
