@@ -14,10 +14,12 @@ function resolveBatchId(req) {
 }
 
 export default async function handler(req, res) {
-  if (handleOptions(req, res)) return
-  applyApiHeaders(req, res)
+  // 最外层 try-catch：捕获所有未处理的同步/异步异常
+  try {
+    if (handleOptions(req, res)) return
+    applyApiHeaders(req, res)
 
-  const batchId = resolveBatchId(req)
+    const batchId = resolveBatchId(req)
 
   console.log('[batch/worker] === 收到请求 ===', {
     method: req.method,
@@ -79,6 +81,25 @@ export default async function handler(req, res) {
     batchId,
     message: 'Worker 已受理，正在后台并发处理',
   })
+  } catch (fatalErr) {
+    // 最外层兜底：捕获所有未处理的异常（包括 waitUntil 外的同步错误）
+    const msg = fatalErr instanceof Error ? fatalErr.message : String(fatalErr)
+    console.error('[batch/worker] 致命错误（最外层 catch）', {
+      batchId,
+      msg,
+      stack: fatalErr instanceof Error ? fatalErr.stack : undefined,
+    })
+    // 如果还没返回响应，返回 500
+    if (!res.headersSent) {
+      try {
+        res.status(500).json({ success: false, message: msg })
+      } catch {}
+    }
+    // 尝试标记任务失败
+    if (batchId) {
+      try { await markBatchFailed(String(batchId).trim(), `[worker.handler 致命错误] ${msg}`) } catch {}
+    }
+  }
 }
 
 export const config = {

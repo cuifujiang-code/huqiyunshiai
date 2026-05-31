@@ -1,39 +1,59 @@
 import { buildServerUrl } from '../urlUtil.js'
+import { markBatchFailed } from './batchTaskStore.js'
 
 export function getBatchWorkerSecret() {
-  return process.env.BATCH_WORKER_SECRET || process.env.SUPABASE_SERVICE_ROLE_KEY || ''
+  return process.env.BATCH_WORKER_SECRET || ''
 }
 
+/**
+ * 验证 Batch Worker 请求鉴权
+ * - 未配置 BATCH_WORKER_SECRET：拒绝请求（生产环境不允许跳过鉴权）
+ * - 配置了：比对请求头 x-batch-worker-secret
+ */
 export function verifyBatchWorkerSecret(req) {
   const secret = getBatchWorkerSecret()
-  if (!secret) return true
-  return req.headers?.['x-batch-worker-secret'] === secret
+  if (!secret) {
+    console.error('[batchTrigger] BATCH_WORKER_SECRET 未配置，拒绝请求')
+    return false
+  }
+  const headerVal =
+    req.headers?.['x-batch-worker-secret'] ||
+    req.headers?.['X-Batch-Worker-Secret'] ||
+    ''
+  if (headerVal !== secret) {
+    console.error('[batchTrigger] 鉴权失败：secret 不匹配', { hasHeader: Boolean(headerVal) })
+    return false
+  }
+  return true
 }
 
-/** 解析 worker 绝对 URL（独立 API 域名必须使用 /api/batch/worker） */
+/**
+ * 解析 worker 绝对 URL
+ * 优先级：BATCH_WORKER_URL > TEACHER_API_URL / VITE_TEACHER_API_URL > 默认值
+ * 路径强制使用 /api/batch/worker（Vercle 路由要求）
+ */
 export function resolveBatchWorkerUrl(req) {
   if (process.env.BATCH_WORKER_URL) {
     return process.env.BATCH_WORKER_URL.replace(/\/$/, '')
   }
 
-  let path = process.env.BATCH_WORKER_PATH || '/api/batch/worker'
-  if (!path.startsWith('/')) path = `/${path}`
-
-  // vercel.json 仅 /api/* 直达 Function；/batch/worker 会落到 health check
-  if (!path.startsWith('/api/')) {
-    path = path.startsWith('/batch/') ? `/api${path}` : '/api/batch/worker'
-  }
+  const path = '/api/batch/worker'  // 强制使用 /api/ 前缀，确保 Vercel 路由到 Function
 
   const apiBase = (
-    process.env.TEACHER_API_URL
-    || process.env.VITE_TEACHER_API_URL
-    || 'https://api.huqiyunshiai.online'
+    process.env.TEACHER_API_URL ||
+    process.env.VITE_TEACHER_API_URL ||
+    'https://api.huqiyunshiai.online'
   ).replace(/\/$/, '')
-  if (apiBase) return `${apiBase}${path}`
 
-  return buildServerUrl(path, req)
+  return `${apiBase}${path}`
 }
 
+/**
+ * 触发 Batch Worker（HTTP 调用，用于在 Serverless 环境中链式续跑）
+ * @param {string} batchId
+ * @param {object} [req] - 可选，用于获取请求头（waitUntil 场景中通常不需要）
+ * @returns {Promise<{ok: boolean, status?: number, error?: string}>}
+ */
 export async function triggerBatchWorker(batchId, req) {
   const url = resolveBatchWorkerUrl(req)
   const secret = getBatchWorkerSecret()
@@ -71,20 +91,27 @@ export async function triggerBatchWorker(batchId, req) {
   }
 }
 
-import { markBatchFailed } from './batchTaskStore.js'
-
-/** 链式触发下一批 worker（新 Serverless 实例，走 HTTP） */
+/**
+ * 链式触发下一批 worker（新 Serverless 实例，走 HTTP）
+ * 不在这里 markBatchFailed，交给 emergencyRecover 兜底
+ */
 export function chainBatchWorker(batchId) {
   console.log('[batchTrigger] 链式续跑 triggerBatchWorker', { batchId })
-  triggerBatchWorker(batchId).then(async (result) => {
+  triggerBatchWorker(batchId).then((result) => {
     if (!result.ok) {
       const errMsg = result.error || '链式 worker 触发失败'
-      console.error('[batchTrigger] 链式触发失败', { batchId, errMsg, httpStatus: result.status })
-      try {
-        await markBatchFailed(batchId, errMsg)
-      } catch (markErr) {
-        console.error('[batchTrigger] 链式 markBatchFailed 失败', { batchId, markErr })
-      }
+      console.error('[batchTrigger] 链式触发失败（等待 emergencyRecover 恢复）', {
+        batchId,
+        errMsg,
+        httpStatus: result.status,
+      })
+    } else {
+      console.log('[batchTrigger] 链式触发成功', { batchId, status: result.status })
     }
+  }).catch(err => {
+    console.error('[batchTrigger] 链式触发异常（等待 emergencyRecover 恢复）', {
+      batchId,
+      error: err instanceof Error ? err.message : String(err),
+    })
   })
 }

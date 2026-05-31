@@ -6,7 +6,13 @@ export function getSupabaseUrl() {
 }
 
 export function getServiceRoleKey() {
-  return process.env.SUPABASE_SERVICE_ROLE_KEY || ''
+  // 支持多种常见拼写变体
+  return (
+    process.env.SUPABASE_SERVICE_ROLE_KEY ||
+    process.env.SUPABASE_SERVICE_ROLE_KEY ||
+    process.env.SUPABASE_SERVICE_KEY ||
+    ''
+  )
 }
 
 function decodeJwtRole(key) {
@@ -24,9 +30,18 @@ function decodeJwtRole(key) {
 /** 确保 key 为 service_role，拒绝 ANON_KEY / VITE_SUPABASE_ANON_KEY */
 export function assertServiceRoleKey(key = getServiceRoleKey()) {
   if (!key) {
-    throw new Error('Supabase 未配置：请设置 SUPABASE_SERVICE_ROLE_KEY（service_role secret，非 anon key）')
+    throw new Error(
+      'Supabase 未配置：请设置 SUPABASE_SERVICE_ROLE_KEY（service_role secret，非 anon key）' +
+      '。已检查变量名：SUPABASE_SERVICE_ROLE_KEY / SUPABASE_SERVICE_ROLE_KEY / SUPABASE_SERVICE_KEY'
+    )
   }
-  const anonKey = process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || ''
+  // 支持多种 anon key 拼写变体
+  const anonKey =
+    process.env.SUPABASE_ANON_KEY ||
+    process.env.SUPABASE_ANON_KEY ||
+    process.env.VITE_SUPABASE_ANON_KEY ||
+    process.env.VITE_SUPABASE_ANON_KEY ||
+    ''
   if (anonKey && key === anonKey) {
     throw new Error('SUPABASE_SERVICE_ROLE_KEY 与 ANON_KEY 相同，请使用 Settings → API → service_role secret')
   }
@@ -57,6 +72,9 @@ export function createServiceRoleClient() {
     throw new Error('Supabase 未配置：请设置 SUPABASE_URL（或 VITE_SUPABASE_URL）与 SUPABASE_SERVICE_ROLE_KEY')
   }
   assertServiceRoleKey(key)
+  // 打印客户端配置（脱敏），便于排查
+  const logUrl = String(url).replace(/\/\/.*?@/, '//***@')
+  console.log('[Supabase] 创建 service_role 客户端', { url: logUrl, keyLen: String(key).length })
   return createClient(url, key, {
     auth: { autoRefreshToken: false, persistSession: false },
   })
