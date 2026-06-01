@@ -228,14 +228,14 @@ export async function getBatchTaskForTeacher(batchId, teacherId) {
   return task
 }
 
-/** 任务级 status：running=处理中，partial=部分完成；超过 staleMinutes 未更新视为卡住 */
+/** 任务级 status：running=处理中，partial=部分完成，failed=失败待重试；超过 staleMinutes 未更新视为卡住 */
 export async function listStuckBatchTasks(staleMinutes = 10) {
   const admin = getSupabaseAdmin()
   const cutoff = staleCutoffIso(staleMinutes)
   const { data, error } = await admin
     .from(TASKS)
     .select('*')
-    .in('status', ['running', 'partial'])
+    .in('status', ['running', 'partial', 'failed'])
     .lt('updated_at', cutoff)
     .order('updated_at', { ascending: true })
     .limit(30)

@@ -158,6 +158,7 @@ async function processOneItem(item, meta, batchId, teacherId) {
     })
 
     if (!result.success || result.insertedCount === 0) {
+      // 如果 AI 层面已经重试过但失败了，不再重复
       const detailMsg = result.error || '稳健拆题未返回有效题目'
       await markItemFailed(item.id, detailMsg)
       return {
@@ -187,14 +188,27 @@ async function processOneItem(item, meta, batchId, teacherId) {
       msg,
       detail,
     })
-    await markItemFailed(item.id, msg)
+    // 不立即 markItemFailed，而是将其保持 processing 状态
+    // 让 auto-retry cron 在下一轮扫描时重置并重试
+    // 仅当明确是数据问题（如文本为空）时才直接标记 failed
+    const isDataIssue = /文本为空|缺少 batchId|缺少 teacherId|chunk_text/i.test(msg)
+    if (isDataIssue) {
+      await markItemFailed(item.id, msg)
+    } else {
+      // 保持 processing 状态，等待 auto-retry cron 超时后重置重试
+      console.warn('[batchWorker] 分块保持 processing 状态，等待 auto-retry 恢复', {
+        itemId: item.id,
+        batchId,
+        msg,
+      })
+    }
     return {
       success: false,
       error: msg,
       itemId: item.id,
       insertedCount: 0,
       questions: [],
-      skipTaskFail: true,
+      skipTaskFail: !isDataIssue, // 非数据问题：跳过任务级 failed
     }
   }
 }

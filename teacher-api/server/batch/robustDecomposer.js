@@ -146,6 +146,8 @@ async function callDecomposeAi(text, model, label) {
   return rawResponse
 }
 
+const DECOMPOSE_MAX_RETRIES = Number(process.env.BATCH_DECOMPOSE_RETRIES || 2)
+
 async function decomposeWithModels(text) {
   const models = [
     { model: PRIMARY_MODEL, label: 'robust-decompose-primary' },
@@ -158,57 +160,80 @@ async function decomposeWithModels(text) {
   let lastError = null
   let lastRaw = ''
 
-  for (let i = 0; i < uniqueModels.length; i++) {
-    const { model, label } = uniqueModels[i]
-    if (i > 0) {
-      console.warn('[robustDecomposer] 首次调用失败或空数组，切换备用模型重试', {
-        backupModel: model,
-        delayMs: 2000,
+  // 外层重试循环：整个模型链重试 DECOMPOSE_MAX_RETRIES 次
+  for (let retry = 0; retry < DECOMPOSE_MAX_RETRIES; retry++) {
+    if (retry > 0) {
+      const delayMs = 3000 + retry * 2000
+      console.warn('[robustDecomposer] 第' + (retry + 1) + '次完整重试', {
+        delayMs,
+        textLength: text.length,
+        previousError: lastError?.message ?? '无',
       })
-      await sleep(2000)
+      await sleep(delayMs)
     }
 
-    try {
-      const rawResponse = await callDecomposeAi(text, model, label)
-      lastRaw = rawResponse
-
-      const { cleaned, arraySlice } = cleanAiResponseString(rawResponse)
-      console.log('[robustDecomposer] 清洗后字符串', {
-        model,
-        cleanedLength: cleaned.length,
-        arraySliceLength: arraySlice?.length ?? 0,
-        arrayPreview: arraySlice?.slice(0, 500) ?? cleaned.slice(0, 500),
-      })
-
-      if (!arraySlice) {
-        lastError = new Error('清洗后未找到 JSON 数组边界')
-        continue
+    for (let i = 0; i < uniqueModels.length; i++) {
+      const { model, label } = uniqueModels[i]
+      if (i > 0) {
+        console.warn('[robustDecomposer] 模型切换重试', {
+          backupModel: model,
+          delayMs: 2000,
+          retry,
+        })
+        await sleep(2000)
       }
 
-      const rawArray = parseJsonArrayWithFallback(arraySlice)
-      console.log('[robustDecomposer] 解析后题目数', {
-        model,
-        parsedCount: rawArray.length,
-        firstQuestionPreview: rawArray[0] ? JSON.stringify(rawArray[0]).slice(0, 300) : '(空)',
-      })
+      try {
+        const rawResponse = await callDecomposeAi(text, model, label)
+        lastRaw = rawResponse
 
-      if (rawArray.length > 0) {
-        return { rawArray, rawResponse, model, arraySlice }
+        const { cleaned, arraySlice } = cleanAiResponseString(rawResponse)
+        console.log('[robustDecomposer] 清洗后字符串', {
+          model,
+          retry,
+          cleanedLength: cleaned.length,
+          arraySliceLength: arraySlice?.length ?? 0,
+          arrayPreview: arraySlice?.slice(0, 500) ?? cleaned.slice(0, 500),
+        })
+
+        if (!arraySlice) {
+          lastError = new Error('清洗后未找到 JSON 数组边界')
+          continue
+        }
+
+        const rawArray = parseJsonArrayWithFallback(arraySlice)
+        console.log('[robustDecomposer] 解析后题目数', {
+          model,
+          retry,
+          parsedCount: rawArray.length,
+          firstQuestionPreview: rawArray[0] ? JSON.stringify(rawArray[0]).slice(0, 300) : '(空)',
+        })
+
+        if (rawArray.length > 0) {
+          return { rawArray, rawResponse, model, arraySlice }
+        }
+
+        lastError = new Error('AI 返回空数组')
+      } catch (err) {
+        lastError = err instanceof Error ? err : new Error(String(err))
+        console.error('[robustDecomposer] 模型调用/解析失败', {
+          model,
+          retry,
+          message: lastError.message,
+          isDeepSeek: err instanceof DeepSeekApiError,
+        })
+        // 不在内层 throw，继续尝试下一个模型或下一轮重试
       }
-
-      lastError = new Error('AI 返回空数组')
-    } catch (err) {
-      lastError = err instanceof Error ? err : new Error(String(err))
-      console.error('[robustDecomposer] 模型调用/解析失败', {
-        model,
-        message: lastError.message,
-        isDeepSeek: err instanceof DeepSeekApiError,
-      })
-      if (i === uniqueModels.length - 1) throw lastError
     }
+
+    // 本轮所有模型都失败，记录后进入下一轮重试
+    console.warn('[robustDecomposer] 第' + (retry + 1) + '轮全部模型失败', {
+      lastError: lastError?.message ?? '未知',
+      remainingRetries: DECOMPOSE_MAX_RETRIES - retry - 1,
+    })
   }
 
-  throw lastError || new Error('拆题失败：所有模型均未返回有效题目')
+  throw lastError || new Error('拆题失败：经 ' + DECOMPOSE_MAX_RETRIES + ' 轮重试，所有模型均未返回有效题目')
 }
 
 async function insertQuestionsToBank(batchId, teacherId, itemId, questions, taskMeta) {
