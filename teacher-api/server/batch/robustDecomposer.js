@@ -5,6 +5,11 @@
 import { callDeepSeekAI, DeepSeekApiError } from '../deepseekClient.js'
 import { createServiceRoleClient, getSupabaseAdmin } from '../supabaseAdmin.js'
 import { countQuestionMarkers } from './batchChunker.js'
+import {
+  IMAGE_PLACEHOLDER_RULE,
+  JSON_EXAMPLE_WITH_LATEX,
+  LATEX_STRICT_RULE,
+} from './batchQualityPrompts.js'
 import { normalizeQuestionsBatch } from './questionNormalizer.js'
 import { countBatchQuestionsInBank } from './batchTaskStore.js'
 
@@ -22,19 +27,39 @@ const AI_TIMEOUT_MS = Number(process.env.DEEPSEEK_BATCH_TIMEOUT_MS || 55000)
 const MIN_MEANINGFUL_CHUNK = Number(process.env.BATCH_MIN_CHUNK_LEN || 150)
 const DECOMPOSE_MAX_RETRIES = Number(process.env.BATCH_DECOMPOSE_RETRIES || 2)
 
-const ROBUST_SYSTEM_PROMPT = '你是一个专业的题目解析器。只输出 JSON 数组，不输出任何其它内容。'
+const ROBUST_SYSTEM_PROMPT = `你是一个专业的题目解析器。只输出 JSON 数组，不输出任何其它内容。
+${LATEX_STRICT_RULE}
+${IMAGE_PLACEHOLDER_RULE}`
 
 function buildRobustUserPrompt(text) {
-  return `你是一个专业的题目解析器。请将以下文本中的题目逐题提取出来，返回一个严格的JSON数组。每道题必须包含以下字段：content(题目内容), answer(答案), analysis(解析), question_type(题型), difficulty(难度), knowledge_point(知识点)。不要输出任何其他文字，不要用markdown代码块包裹。如果无法提取，返回空数组[]。
+  return `你是一个专业的题目解析器。请将以下文本中的题目逐题提取出来，返回一个严格的JSON数组。
 
+${LATEX_STRICT_RULE}
+
+${IMAGE_PLACEHOLDER_RULE}
+
+每道题必须包含以下字段：content(题目内容), answer(答案), analysis(解析), question_type(题型), difficulty(难度), knowledge_point(知识点)。
+不要输出任何其他文字，不要用markdown代码块包裹。如果无法提取，返回空数组[]。
+
+JSON 格式示例：
+${JSON_EXAMPLE_WITH_LATEX}
+
+待处理文本：
 ${text}`
 }
 
 function buildFragmentUserPrompt(text) {
-  return `你是一个专业的题目解析器。以下文本是试卷 OCR/PDF 提取后的**片段**，可能只有半道题、续篇、页眉页脚或答案区。请尽可能从中提取题目；若确实无任何题目信息，返回空数组[]。
+  return `你是一个专业的题目解析器。以下文本是试卷 OCR/PDF 提取后的**片段**，可能只有半道题、续篇、页眉页脚或答案区。请尽可能从中提取完整题目；若确实无任何题目信息，返回空数组[]。
+
+${LATEX_STRICT_RULE}
+
+${IMAGE_PLACEHOLDER_RULE}
 
 每道题必须包含：content, answer, analysis, question_type, difficulty, knowledge_point。
 只输出 JSON 数组，不要 markdown 代码块。
+
+JSON 格式示例：
+${JSON_EXAMPLE_WITH_LATEX}
 
 文本片段：
 ${text}`

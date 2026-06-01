@@ -53,6 +53,16 @@ export interface BatchQuestion {
   grade: string
   sort_order?: number
   question_number?: string
+  tags?: string[]
+  has_image_placeholder?: boolean
+}
+
+export const BATCH_IMAGE_PLACEHOLDER = '[图片占位符]'
+
+export function questionHasImagePlaceholder(q: Pick<BatchQuestion, 'content' | 'tags' | 'has_image_placeholder'>) {
+  if (q.has_image_placeholder) return true
+  if (q.tags?.includes('含图片占位符')) return true
+  return q.content.includes(BATCH_IMAGE_PLACEHOLDER) || /\[图片占位符\]/.test(q.content)
 }
 
 export function normalizeBatchQuestions(raw: unknown): BatchQuestion[] {
@@ -60,9 +70,14 @@ export function normalizeBatchQuestions(raw: unknown): BatchQuestion[] {
   return raw.map((q, index) => {
     const row = q as Record<string, unknown>
     const sortOrder = Number(row.sort_order)
+    const content = String(row.content ?? '').trim() || `题目 ${index + 1}`
+    const tags = Array.isArray(row.tags) ? row.tags.map(String) : []
+    const hasImagePlaceholder = Boolean(row.has_image_placeholder)
+      || tags.includes('含图片占位符')
+      || content.includes(BATCH_IMAGE_PLACEHOLDER)
     return {
       id: String(row.id ?? `batch-q-${index}`),
-      content: String(row.content ?? '').trim() || `题目 ${index + 1}`,
+      content,
       options: Array.isArray(row.options) ? row.options.map(String) : [],
       answer: String(row.answer ?? '').trim() || '暂无',
       analysis: String(row.analysis ?? '').trim() || '暂无',
@@ -75,6 +90,8 @@ export function normalizeBatchQuestions(raw: unknown): BatchQuestion[] {
       grade: String(row.grade ?? '八年级'),
       sort_order: Number.isFinite(sortOrder) ? sortOrder : index + 1,
       question_number: String(row.question_number ?? sortOrder ?? index + 1),
+      tags,
+      has_image_placeholder: hasImagePlaceholder,
     }
   })
 }

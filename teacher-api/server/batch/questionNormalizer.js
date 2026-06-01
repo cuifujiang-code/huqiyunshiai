@@ -3,6 +3,8 @@
  * 将 AI 任意格式输出强制转换为可入库的标准结构
  */
 
+import { IMAGE_PLACEHOLDER } from './batchQualityPrompts.js'
+
 const VALID_TYPES = new Set(['选择题', '填空题', '计算题', '证明题', '实验题', '应用题'])
 const VALID_DIFFICULTY = new Set(['基础', '中等', '拔高'])
 const DEFAULT_OPTIONS = ['A. ', 'B. ', 'C. ', 'D. ']
@@ -163,6 +165,16 @@ export function normalizeQuestion(raw, index, taskMeta = {}) {
   if (!answer) answer = '暂无'
   if (!analysis) analysis = '暂无'
 
+  const hasImagePlaceholder = content.includes(IMAGE_PLACEHOLDER)
+    || /\[图片占位符\]/.test(content)
+    || /\[图(?:片|形)占位\]/.test(content)
+
+  if (hasImagePlaceholder && !/此题包含图片/.test(analysis)) {
+    analysis = analysis === '暂无'
+      ? '此题包含图片，需手动处理'
+      : `${analysis}\n此题包含图片，需手动处理`
+  }
+
   const options = normalizeOptions(raw, questionType)
 
   const latexFromFields = [
@@ -186,6 +198,9 @@ export function normalizeQuestion(raw, index, taskMeta = {}) {
   const tags = Array.isArray(tagsRaw)
     ? tagsRaw.map((t) => cleanText(t)).filter(Boolean)
     : []
+  if (hasImagePlaceholder && !tags.includes('含图片占位符')) {
+    tags.push('含图片占位符')
+  }
 
   const normalized = {
     subject: cleanText(raw.subject ?? taskMeta.subject ?? '') || '数学',
@@ -203,6 +218,7 @@ export function normalizeQuestion(raw, index, taskMeta = {}) {
     sort_order: sortOrder,
     source: cleanText(raw.source ?? '') || '批量拆题',
     tags,
+    has_image_placeholder: hasImagePlaceholder,
   }
 
   return isValidQuestion(normalized) ? normalized : null

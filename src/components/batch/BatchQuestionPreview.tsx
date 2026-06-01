@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import type { BatchQuestion } from '../../lib/batchApi'
+import { questionHasImagePlaceholder } from '../../lib/batchApi'
 import { useQuestionBasket } from '../../context/QuestionBasketContext'
 import MathRenderer from '../common/MathRenderer'
 
@@ -50,6 +51,7 @@ function QuestionCard({ question, index }: { question: BatchQuestion; index: num
   const num = question.sort_order ?? index
   const showKnowledge = question.knowledge_point && !isPlaceholderKnowledge(question.knowledge_point)
   const inBasket = isInBasket(question.id)
+  const hasImagePlaceholder = questionHasImagePlaceholder(question)
 
   const handleToggleBasket = () => {
     if (inBasket) {
@@ -101,6 +103,12 @@ function QuestionCard({ question, index }: { question: BatchQuestion; index: num
           </span>
         )}
 
+        {hasImagePlaceholder && (
+          <span className="rounded-md border border-rose-500/40 bg-rose-500/15 px-2 py-0.5 text-xs font-medium text-rose-300">
+            含图片 · 需手动补图
+          </span>
+        )}
+
         {/* 学科/年级 */}
         <span className="text-xs text-slate-500">
           {question.subject} · {question.grade}
@@ -108,6 +116,16 @@ function QuestionCard({ question, index }: { question: BatchQuestion; index: num
       </div>
 
       {/* 题目内容（LaTeX 渲染） */}
+      {hasImagePlaceholder && (
+        <div className="mb-3 flex items-start gap-2 rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2">
+          <svg className="mt-0.5 h-4 w-4 shrink-0 text-rose-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+          </svg>
+          <p className="text-xs leading-relaxed text-rose-200/90">
+            题干中含 <strong className="text-rose-300">[图片占位符]</strong>，原文图片未自动提取，请手动上传或替换图片后使用。
+          </p>
+        </div>
+      )}
       <div className="mb-4 text-sm leading-relaxed text-slate-100">
         <MathRenderer text={question.content} className="text-slate-100" />
       </div>

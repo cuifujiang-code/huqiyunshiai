@@ -1,6 +1,7 @@
 /** 专业教育题库拆题 Prompt：LaTeX 公式、几何图形、空间图形全支持 */
 
 import { extractJsonFromAiText } from './safeJson.js'
+import { IMAGE_PLACEHOLDER, IMAGE_PLACEHOLDER_RULE, JSON_EXAMPLE_WITH_LATEX, LATEX_STRICT_RULE } from './batchQualityPrompts.js'
 
 const JSON_PARSE_RETRY_DELAY_MS = 2000
 
@@ -106,10 +107,12 @@ export const BATCH_SYSTEM_PROMPT = `你是 K12 专业题库拆题引擎，对标
 
 【核心要求 - 公式与图形零丢失】
 1. 数学公式必须使用 LaTeX 格式：行内公式用 $...$，独立公式用 $$...$$
-2. 禁止遗漏、简化、改写任何公式符号（包括上下标、根号、分数、积分、矩阵等）
-3. 几何图形、函数图像用 geometry_desc 字段详细描述（形状、标记、坐标、标注）
-4. 表格内容完整保留，用 Markdown 表格或 geometry_desc 描述
-5. 图片中的公式必须准确识别为 LaTeX，禁止将公式转为文字描述
+2. 对于题目中出现的所有数学、物理、化学公式，你必须原样保留其 LaTeX 格式（例如 $$...$$ 或 $...$），不得转换为纯文本或乱码
+3. 禁止遗漏、简化、改写任何公式符号（包括上下标、根号、分数、积分、矩阵等）
+4. 几何图形、函数图像用 geometry_desc 字段详细描述（形状、标记、坐标、标注）
+5. 无法识别的图片在 content 中插入 [图片占位符]，analysis 说明「此题包含图片，需手动处理」
+6. 表格内容完整保留，用 Markdown 表格或 geometry_desc 描述
+7. 图片中的公式必须准确识别为 LaTeX，禁止将公式转为文字描述
 
 【输出格式 - 必须严格遵守】
 1. 只输出一个 JSON 数组，以 [ 开头、以 ] 结尾
@@ -143,6 +146,10 @@ ${countHint}
 学科：${meta.subject || '数学'}
 年级：${meta.grade || '八年级'}
 
+${LATEX_STRICT_RULE}
+
+${IMAGE_PLACEHOLDER_RULE}
+
 【公式处理要求 - 零丢失】
 - 所有数学公式必须转换为 LaTeX 格式
 - 行内公式：$公式内容$
@@ -158,29 +165,15 @@ ${countHint}
 
 【图形处理要求】
 - 如有几何图形、函数图像，在 geometry_desc 字段中详细描述
+- 无法识别的图片使用 ${IMAGE_PLACEHOLDER} 插入 content，并在 analysis 注明需手动处理
 - 描述内容：图形类型、标记条件、角度/边长数值、坐标位置
 - 示例："图：直角三角形 ABC，∠C=90°，AC=3，BC=4，求 AB"
 
 试卷片段：
 ${chunkText}
 
-【输出要求】直接输出 JSON 数组，格式示例（仅示意结构，题目数量按实际文本）：
-[
-  {
-    "subject": "数学",
-    "grade": "八年级",
-    "knowledge_point": "一元一次方程",
-    "question_type": "应用题",
-    "difficulty": "中等",
-    "content": "题干文字（含 $公式$）",
-    "options": [],
-    "answer": "答案（含 $公式$）",
-    "analysis": "解析过程（含 $推导步骤$）",
-    "geometry_desc": "图形描述（无则为空字符串）",
-    "latex_blocks": ["公式片段1", "公式片段2"],
-    "tags": ["知识点标签1", "知识点标签2"]
-  }
-]
+【输出要求】直接输出 JSON 数组，格式示例（含 LaTeX 与图片占位符）：
+${JSON_EXAMPLE_WITH_LATEX}
 
 每道题必须包含 content、answer、analysis。只输出 JSON 数组，不要任何其他文字。`
 }
@@ -199,10 +192,15 @@ ${countHint}
 禁止用对象包装（禁止 {"questions":[...]}、禁止 {"data":{...}}、禁止 {"result":{...}}）。
 禁止输出任何 JSON 以外的文字、说明、注释。
 
+${LATEX_STRICT_RULE}
+
+${IMAGE_PLACEHOLDER_RULE}
+
 【公式保留 - 最高优先级】
 - 所有数学公式必须完整保留为 LaTeX 格式
 - 行内公式：$...$
 - 独立公式：$$...$$
+- 对于题目中出现的所有数学、物理、化学公式，你必须原样保留其 LaTeX 格式（例如 $$...$$ 或 $...$），不得转换为纯文本或乱码
 - 禁止遗漏任何公式符号，禁止将公式转为文字描述
 - 即使 AI 无法识别的公式，也要用描述性 LaTeX 占位（如 $\\text{公式图像}$）
 
@@ -219,8 +217,8 @@ ${chunkText}
 
 可选字段：question_type、difficulty、options、knowledge_point、geometry_desc、latex_blocks、tags
 
-【唯一合法输出格式示例】：
-[{"content":"题干1（含 $公式$）","answer":"答案1（含 $公式$）","analysis":"解析1（含 $推导$）","question_type":"应用题","difficulty":"中等","options":[]}]
+【唯一合法输出格式示例（含 LaTeX 与图片占位符）】：
+${JSON_EXAMPLE_WITH_LATEX}
 `
 }
 
