@@ -1,4 +1,4 @@
-import { waitUntil } from '@vercel/functions'
+﻿import { waitUntil } from '@vercel/functions'
 import { triggerBatchWorker } from './batchTrigger.js'
 import { safeRunBatchWorker } from './batchWorker.js'
 import {
@@ -10,9 +10,9 @@ import {
 
 async function runWorkerInBackground(batchId, source) {
   try {
-    console.log(`[batchStart] [${source}] waitUntil → safeRunBatchWorker 开始`, { batchId })
+    console.log(`[batchStart] [${source}] waitUntil -> safeRunBatchWorker 开始`, { batchId })
     const result = await safeRunBatchWorker(batchId)
-    console.log(`[batchStart] [${source}] waitUntil → safeRunBatchWorker 结束`, { batchId, result })
+    console.log(`[batchStart] [${source}] waitUntil -> safeRunBatchWorker 结束`, { batchId, result })
     if (result?.success === false && result.message) {
       console.error(`[batchStart] [${source}] worker 返回失败`, { batchId, result })
     }
@@ -123,7 +123,7 @@ export async function startBatchProcessing(batchId, teacherId, req) {
 
   if (useHttpDispatch) {
     console.log('[batchStart] 使用 HTTP triggerBatchWorker', { batchId: normalizedBatchId })
-    const triggered = await triggerBatchWorker(normalizedBatchId, req)
+    const triggered = await triggerBatchWorker(normalizedBatchId)
     if (!triggered.ok) {
       const errMsg = triggered.error || 'Worker 触发失败'
       console.error('[batchStart] triggerBatchWorker 失败', {

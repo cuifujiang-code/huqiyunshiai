@@ -288,35 +288,43 @@ export async function insertBatchQuestions(batchId, teacherId, itemId, questions
     return failBatchInsert(batchId, itemId, 'batch_question_bank 入库失败', detail)
   }
 
-  // 同步写入教师主题库
-  const tqbRows = rows.map((q) => ({
-    teacher_id: teacherId,
-    subject: q.subject,
-    grade: q.grade,
-    knowledge_point: q.knowledge_point,
-    question_type: q.question_type,
-    difficulty: q.difficulty,
-    content: q.content,
-    options: q.options,
-    answer: q.answer,
-    analysis: q.analysis,
-    source: '批量拆题',
-    tags: q.tags,
-    updated_at: nowIso(),
-  }))
-  const { error: tqbErr } = await admin.from('teacher_question_bank').insert(tqbRows)
-  if (tqbErr) {
-    const detail = formatSupabaseError(tqbErr)
-    console.error('[入库失败] teacher_question_bank 同步错误', {
-      batchId,
-      itemId,
-      message: tqbErr.message,
-      code: tqbErr.code,
-      details: tqbErr.details,
-      hint: tqbErr.hint,
-    })
-    return failBatchInsert(batchId, itemId, 'teacher_question_bank 同步失败', detail)
-  }
+  // 同步写入教师主题库（后台静默，失败不阻断主流程）
+  Promise.resolve().then(async () => {
+    try {
+      const tqbRows = rows.map((q) => ({
+        teacher_id: teacherId,
+        subject: q.subject,
+        grade: q.grade,
+        knowledge_point: q.knowledge_point,
+        question_type: q.question_type,
+        difficulty: q.difficulty,
+        content: q.content,
+        options: q.options,
+        answer: q.answer,
+        analysis: q.analysis,
+        source: '批量拆题',
+        tags: q.tags,
+        updated_at: nowIso(),
+      }))
+      const { error: tqbErr } = await admin.from('teacher_question_bank').insert(tqbRows)
+      if (tqbErr) {
+        console.warn('[入库] teacher_question_bank 同步失败（不影响主流程）', {
+          batchId,
+          itemId,
+          message: tqbErr.message,
+          code: tqbErr.code,
+        })
+      } else {
+        console.log(`[入库] teacher_question_bank 同步成功: ${tqbRows.length} 条`)
+      }
+    } catch (tqbCatchErr) {
+      console.warn('[入库] teacher_question_bank 同步异常（不影响主流程）', {
+        batchId,
+        itemId,
+        error: tqbCatchErr instanceof Error ? tqbCatchErr.message : String(tqbCatchErr),
+      })
+    }
+  })
 
   const task = await getBatchTask(batchId)
   await admin.from(TASKS).update({

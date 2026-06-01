@@ -79,7 +79,7 @@ async function executeDeepSeekRequest(body, { label = 'DeepSeek', model } = {}) 
         'Content-Type': 'application/json',
       },
       body: requestBody,
-      signal: AbortSignal.timeout(120000),
+      signal: AbortSignal.timeout(45000),
     })
   } catch (fetchErr) {
     const message = fetchErr instanceof Error ? fetchErr.message : String(fetchErr)

@@ -16,8 +16,8 @@ import {
 } from './batchTaskStore.js'
 import { triggerBatchWorker } from './batchTrigger.js'
 
-const CONCURRENCY = Number(process.env.BATCH_AI_CONCURRENCY || 5)
-const ITEMS_PER_INVOCATION = Number(process.env.BATCH_ITEMS_PER_RUN || 8)
+const CONCURRENCY = Number(process.env.BATCH_AI_CONCURRENCY || 3)
+const ITEMS_PER_INVOCATION = Number(process.env.BATCH_ITEMS_PER_RUN || 5)
 const BATCH_MODEL = process.env.DEEPSEEK_BATCH_MODEL || process.env.DEEPSEEK_MODEL || 'deepseek-chat'
 
 const CHAIN_INITIAL_DELAY_MS = 2000
