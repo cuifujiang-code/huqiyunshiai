@@ -2,9 +2,9 @@
  * 智能分块：仅按主题号切分，整卷优先，绝不在题目中间截断
  */
 
-const DEFAULT_CHUNK = Number(process.env.BATCH_CHUNK_MAX_LEN || 4000)
-const QUESTIONS_PER_CHUNK = Number(process.env.BATCH_QUESTIONS_PER_CHUNK || 3)
-const WHOLE_PAPER_MAX_LEN = Number(process.env.BATCH_WHOLE_PAPER_MAX || 20000)
+const DEFAULT_CHUNK = Number(process.env.BATCH_CHUNK_MAX_LEN || 8000)
+const QUESTIONS_PER_CHUNK = Number(process.env.BATCH_QUESTIONS_PER_CHUNK || 10)
+const WHOLE_PAPER_MAX_LEN = Number(process.env.BATCH_WHOLE_PAPER_MAX || 60000)
 
 /**
  * 主题号行首（仅 1. 2. 12. 等，不含 A. B. 或 (1) 小题号）

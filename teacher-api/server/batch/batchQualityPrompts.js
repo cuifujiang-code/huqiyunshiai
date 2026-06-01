@@ -7,7 +7,8 @@ export const COMPLETE_EXTRACTION_RULE = `【完整提取 - 最高优先级】
 - 必须逐字完整复制原文中的题干、条件、数据、选项，禁止省略、概括或用 {...}、{...}、▲、省略号代替任何内容
 - 禁止在 analysis 中写「信息不完整」「无法提供解析」「内容缺失」——若原文片段确实无法构成完整题目，则不要输出该题
 - 选择题的 options 必须是含完整文字的字符串数组，如 ["A. 选项内容", "B. 选项内容"]，禁止只有 "A." "B." 空标签
-- 集合、向量、复数等数学对象必须保留原文中的全部元素与条件，禁止简化为 {...}`
+- 集合、向量、复数等数学对象必须保留原文中的全部元素与条件，禁止简化为 {...}
+- 大题含多子问题时：所有 (1)(2)(3)... 子问题必须在同一个 content 字段中，禁止拆成多个独立题目对象`
 
 export const LATEX_STRICT_RULE = `【LaTeX 公式 - 极其严格】
 文本中的 ${FORMULA_PLACEHOLDER} 标记代表原始文档中此处有一个数学公式（MathType/OMML）。
@@ -29,15 +30,15 @@ export const IMAGE_PLACEHOLDER_RULE = `【图片占位 - 必须遵守】
 
 export const JSON_EXAMPLE_WITH_LATEX = `[
   {
-    "content": "已知数列 ${FORMULA_PLACEHOLDER} 满足 ${FORMULA_PLACEHOLDER}，${FORMULA_PLACEHOLDER}，求 ${FORMULA_PLACEHOLDER} 的通项公式。",
-    "answer": "$a_n = 2n - 1$",
-    "analysis": "由 $a_1 = 1$，$a_{n+1} = a_n + 2$ 可知，数列 $\\{a_n\\}$ 是首项为 1、公差为 2 的等差数列，故 $a_n = 1 + 2(n-1) = 2n - 1$。",
+    "content": "已知数列 ${FORMULA_PLACEHOLDER} 满足 ${FORMULA_PLACEHOLDER}，${FORMULA_PLACEHOLDER}。 (1)求 ${FORMULA_PLACEHOLDER} 的通项公式 (2)求 ${FORMULA_PLACEHOLDER} 的前 n 项和 ${FORMULA_PLACEHOLDER}。",
+    "answer": "(1) $a_n = 2n - 1$ (2) $S_n = n^2$",
+    "analysis": "(1) 由 $a_1 = 1$，$a_{n+1} = a_n + 2$ 可知，数列 $\\{a_n\\}$ 是首项为 1、公差为 2 的等差数列，故 $a_n = 1 + 2(n-1) = 2n - 1$。(2) 前 n 项和 $S_n = \\\\frac{n(a_1 + a_n)}{2} = \\\\frac{n(1 + 2n - 1)}{2} = n^2$。",
     "question_type": "计算题",
     "difficulty": "中等",
     "knowledge_point": "等差数列",
     "options": [],
     "geometry_desc": "",
-    "latex_blocks": ["a_n = 2n - 1", "a_{n+1} = a_n + 2", "a_1 = 1"]
+    "latex_blocks": ["a_n = 2n - 1", "a_{n+1} = a_n + 2", "a_1 = 1", "S_n = n^2"]
   },
   {
     "content": "已知函数 $f(x)=ax^2+bx+c$，图像如 ${IMAGE_PLACEHOLDER} 所示，求顶点坐标。",

@@ -32,6 +32,12 @@ const DECOMPOSE_MAX_RETRIES = Number(process.env.BATCH_DECOMPOSE_RETRIES || 2)
 
 const ROBUST_SYSTEM_PROMPT = `你是一个专业的题目解析器。只输出 JSON 数组，不输出任何其它内容。
 
+【最高优先级：题目完整性】
+- 一道大题 = 一个 JSON 对象，无论包含多少子问题(1)(2)(3)…都不拆分
+- 独立大题编号：1. 2. 3. …（"数字+."开头是新大题）
+- 大题内子问题：(1) (2) (3) 或 ① ② ③ — 这些属于同一道大题
+- 示例：「1. 已知… (1)求… (2)证明…」→ 1个对象，不要拆成2个
+
 ${COMPLETE_EXTRACTION_RULE}
 
 ${LATEX_STRICT_RULE}
@@ -42,8 +48,8 @@ ${IMAGE_PLACEHOLDER_RULE}`
 
 function buildRobustUserPrompt(text, expectedCount = 0) {
   const countHint = expectedCount > 0
-    ? `\n本片段约含 ${expectedCount} 道主题（题号 1. 2. 3. …）。JSON 数组长度必须等于实际完整题目数，禁止拆分一题为多条，禁止输出残次题。\n`
-    : ''
+    ? `\n本片段约含 ${expectedCount} 道大题（题号 1. 2. 3. …）。注意：每道大题可能有多个子问题(1)(2)(3)，这些子问题必须放在同一个JSON对象中，不要拆分。JSON数组长度应等于独立大题数量（${expectedCount}个），禁止将子问题拆成多道题。\n`
+    : '\n注意：每道大题可能包含多个子问题(1)(2)(3)，这些子问题属于同一道大题，必须放在同一个JSON对象中。禁止按子问题编号拆分。\n'
 
   return `你是一个专业的题目解析器。请将以下文本中的题目逐题完整提取，返回一个严格的JSON数组。
 ${countHint}
@@ -55,9 +61,11 @@ ${LATEX_STRICT_RULE}
 
 ${IMAGE_PLACEHOLDER_RULE}
 
-每道题必须包含：content(完整题干), answer(答案), analysis(解析), question_type, difficulty, knowledge_point。
+每道题必须包含：content(完整题干，含所有子问题), answer(答案), analysis(解析), question_type, difficulty, knowledge_point。
 选择题必须包含 options 数组，每项为 "A. 完整选项文字" 格式。
 不要输出任何其他文字，不要用markdown代码块包裹。无法构成完整题目时不要输出该题。
+
+【重要】如果文本中一道大题包含(1)(2)(3)子问题，所有子问题必须在同一个对象的content字段中，不要拆成多个对象。
 
 JSON 格式示例：
 ${JSON_EXAMPLE_WITH_LATEX}

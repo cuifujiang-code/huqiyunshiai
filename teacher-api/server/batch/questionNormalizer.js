@@ -174,6 +174,9 @@ export function normalizeQuestion(raw, index, taskMeta = {}) {
     || /\[图片占位符\]/.test(content)
     || /\[图(?:片|形)占位\]/.test(content)
 
+  const hasFormulaPlaceholder = content.includes(FORMULA_PLACEHOLDER)
+    || /【公式】/.test(content)
+
   if (hasImagePlaceholder && !/此题包含图片/.test(analysis)) {
     analysis = analysis === '暂无'
       ? '此题包含图片，需手动处理'
