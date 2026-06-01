@@ -298,6 +298,37 @@ export async function updateBatchProgress(batchId, { completedItems, totalQuesti
 }
 
 export async function markBatchFailed(batchId, message) {
+  let realCount = 0
+  try {
+    realCount = await countBatchQuestionsInBank(batchId)
+  } catch (err) {
+    console.warn('[markBatchFailed] 查询 batch_question_bank 失败，继续标记 failed', {
+      batchId,
+      message: err instanceof Error ? err.message : String(err),
+    })
+  }
+
+  if (realCount > 0) {
+    const counts = await countItemsByStatus(batchId).catch(() => ({}))
+    const status = (counts.failed ?? 0) > 0 ? 'partial' : 'completed'
+    const admin = getSupabaseAdmin()
+    const { error } = await admin.from(TASKS).update({
+      status,
+      imported_questions: realCount,
+      total_questions: realCount,
+      error_message: null,
+      updated_at: nowIso(),
+    }).eq('batch_id', batchId)
+    if (error) throw new Error(error.message)
+    console.log('[markBatchFailed] 库中已有题目，跳过 failed 并修正为', {
+      batchId,
+      realCount,
+      status,
+      originalMessage: message,
+    })
+    return
+  }
+
   const admin = getSupabaseAdmin()
   const { error } = await admin.from(TASKS).update({
     status: 'failed',
@@ -305,6 +336,60 @@ export async function markBatchFailed(batchId, message) {
     updated_at: nowIso(),
   }).eq('batch_id', batchId)
   if (error) throw new Error(error.message)
+}
+
+/** 列表/进度查询前：按 batch_question_bank 真实数量修正任务状态与计数 */
+export async function reconcileBatchTaskFromBank(batchId) {
+  const task = await getBatchTask(batchId)
+  if (!task) return null
+
+  let realCount = 0
+  try {
+    realCount = await countBatchQuestionsInBank(batchId)
+  } catch {
+    return task
+  }
+
+  const counts = await countItemsByStatus(batchId)
+  const hasWorkRemaining = (counts.pending ?? 0) > 0 || (counts.processing ?? 0) > 0
+  if (hasWorkRemaining) return task
+
+  let nextStatus = task.status
+  if (realCount > 0) {
+    nextStatus = (counts.failed ?? 0) > 0 ? 'partial' : 'completed'
+  } else if (['running', 'pending'].includes(task.status)) {
+    nextStatus = 'failed'
+  }
+
+  const needsUpdate =
+    task.imported_questions !== realCount
+    || task.total_questions !== realCount
+    || (realCount > 0 && (task.status === 'failed' || task.status === 'running'))
+    || (realCount > 0 && nextStatus !== task.status)
+
+  if (!needsUpdate) return task
+
+  const admin = getSupabaseAdmin()
+  const patch = {
+    imported_questions: realCount,
+    total_questions: realCount,
+    updated_at: nowIso(),
+  }
+  if (!hasWorkRemaining) {
+    patch.status = nextStatus
+    patch.error_message = realCount > 0 ? null : task.error_message
+  }
+
+  const { error } = await admin.from(TASKS).update(patch).eq('batch_id', batchId)
+  if (error) throw new Error(error.message)
+
+  console.log('[batchTaskStore] reconcileBatchTaskFromBank', {
+    batchId,
+    realCount,
+    previousStatus: task.status,
+    nextStatus: patch.status ?? task.status,
+  })
+  return getBatchTask(batchId)
 }
 
 export async function markBatchCompleted(batchId) {

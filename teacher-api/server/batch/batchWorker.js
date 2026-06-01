@@ -247,8 +247,7 @@ async function callAiParseWithRetry(item, meta, sortOffset, batchId) {
     aiResponsePreview: String(lastResult?.aiResponse ?? '').slice(0, 1000),
     parsedPreview: lastResult?.parsed ? JSON.stringify(lastResult.parsed).slice(0, 500) : null,
   }
-  console.error('[batchWorker] AI 解析两次均为空，标记任务失败', detail)
-  await markBatchFailed(batchId, AI_PARSE_FAIL_MESSAGE)
+  console.error('[batchWorker] AI 解析两次均为空，标记本分块失败', detail)
   throw new Error(AI_PARSE_FAIL_MESSAGE)
 }
 
@@ -305,8 +304,7 @@ async function processOneItem(item, meta, sortOffset, batchId) {
       ].join(' | ')
       console.error('[Worker] 本分块题目归一化后为空', { itemId: item.id, batchId, detailMsg })
       await markItemFailed(item.id, detailMsg)
-      await markBatchFailed(batchId, AI_PARSE_FAIL_MESSAGE)
-      return { success: false, error: detailMsg, itemId: item.id, rawQuestions: [], questions: [], failTask: true }
+      return { success: false, error: detailMsg, itemId: item.id, rawQuestions: [], questions: [], skipTaskFail: true }
     }
 
     return {
@@ -470,12 +468,6 @@ async function runBatchWorkerCore(batchId) {
   const startSort = task.total_questions ?? 0
   const roundResults = await runPool(pending, meta, startSort, batchId, task.teacher_id, meta)
 
-  if (roundResults.some((r) => r.failTask)) {
-    const counts = await countItemsByStatus(batchId)
-    console.error('[batchWorker] AI 解析失败，终止后续分块处理', { batchId, counts })
-    return { done: true, status: 'failed', counts, message: AI_PARSE_FAIL_MESSAGE }
-  }
-
   const counts = await countItemsByStatus(batchId)
   const doneChunks = counts.completed + counts.failed
   const roundNum = Math.max(1, Math.ceil(doneChunks / ITEMS_PER_INVOCATION))
@@ -507,7 +499,10 @@ export async function safeRunBatchWorker(batchId) {
     if (isFailed) {
       const msg = result?.message || 'Worker 处理失败'
       console.error(`[Worker] 处理失败 batchId=${batchId}`, { result, msg })
-      await safeMarkBatchFailed(batchId, msg, result?.counts ?? {})
+      const correctedStatus = await safeMarkBatchFailed(batchId, msg, result?.counts ?? {})
+      if (correctedStatus !== 'failed') {
+        return { ...result, status: correctedStatus, recovered: true }
+      }
     } else {
       console.log(`[Worker] 处理完成 batchId=${batchId}`, { result })
     }

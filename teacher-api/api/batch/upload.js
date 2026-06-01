@@ -9,6 +9,7 @@ import {
   listBatchTasksByTeacher,
   formatBatchProgress,
   countItemsByStatus,
+  reconcileBatchTaskFromBank,
 } from '../../server/batch/batchTaskStore.js'
 import { startBatchProcessing } from '../../server/batch/batchStart.js'
 
@@ -100,8 +101,10 @@ export default async function handler(req, res) {
       console.log('[batch/upload] 任务列表', { teacherId, count: tasks.length })
       const summaries = await Promise.all(
         tasks.map(async (t) => {
+          const reconciled = await reconcileBatchTaskFromBank(t.batch_id)
+          const taskRow = reconciled ?? t
           const counts = await countItemsByStatus(t.batch_id)
-          return formatBatchProgress(t, counts)
+          return formatBatchProgress(taskRow, counts)
         }),
       )
       return res.status(200).json({ success: true, tasks: summaries })

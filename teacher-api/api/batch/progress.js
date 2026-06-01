@@ -6,6 +6,7 @@ import {
   getBatchTaskForTeacher,
   isBatchStoreConfigured,
   listBatchQuestions,
+  reconcileBatchTaskFromBank,
 } from '../../server/batch/batchTaskStore.js'
 
 /** 保证所有分支都返回 JSON，且 questions 恒为数组 */
@@ -94,8 +95,11 @@ export default async function handler(req, res) {
       })
     }
 
+    const reconciled = await reconcileBatchTaskFromBank(batchId)
+    const taskRow = reconciled ?? task
+
     const counts = await countItemsByStatus(batchId)
-    const progress = formatBatchProgress(task, counts)
+    const progress = formatBatchProgress(taskRow, counts)
     let questions = []
     let queryError = null
 
@@ -119,7 +123,7 @@ export default async function handler(req, res) {
       batchId,
       teacherId,
       withQuestions,
-      taskStatus: task.status,
+      taskStatus: taskRow.status,
       questionCount: questions.length,
       queryError,
     })
