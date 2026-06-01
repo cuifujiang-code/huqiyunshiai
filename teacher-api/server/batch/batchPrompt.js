@@ -116,9 +116,14 @@ ${chunkText}
 每道题必须包含 content、answer、analysis。只输出 JSON 数组，不要任何其他文字。`
 }
 
-/** 备用 prompt：主 prompt 解析为空时使用，更强调逐题拆分与 JSON 数组 */
-export function buildBatchSplitFallbackPrompt(chunkText, meta) {
-  return `【备用拆题模式】请将下面试卷文本尽可能拆分为多道独立题目。即使格式不规范，也要尽量识别题号、题干、答案。
+/** 备用 prompt（backupPrompt）：极度明确，必须且只能返回纯 JSON 数组 */
+export function backupPrompt(chunkText, meta) {
+  return `【强制 JSON 数组模式 - 违反任何一条均视为失败】
+
+你的输出必须且只能是一个 JSON 数组，以字符 [ 开头、以字符 ] 结尾。
+禁止输出 markdown（禁止 \`\`\`json）。
+禁止用对象包装（禁止 {"questions":[...]}、禁止 {"data":{...}}、禁止 {"result":{...}}）。
+禁止输出任何 JSON 以外的文字、说明、注释。
 
 学科：${meta.subject || '数学'}
 年级：${meta.grade || '八年级'}
@@ -126,14 +131,22 @@ export function buildBatchSplitFallbackPrompt(chunkText, meta) {
 试卷文本：
 ${chunkText}
 
-严格要求：
-1. 只输出 JSON 数组 [ {...}, {...} ]
-2. 每道题必须有 content、answer、analysis（字符串，不能为空）
-3. 能识别多少题就输出多少题，不要返回空数组
-4. 不要 markdown，不要解释文字
+每道题必须是 JSON 对象，且必须包含以下字符串字段（均不能为空）：
+- content（题干）
+- answer（答案）
+- analysis（解析）
 
-示例：
-[{"content":"1+1=?","answer":"2","analysis":"基础加法","question_type":"计算题","difficulty":"基础","options":[],"knowledge_point":"算术","geometry_desc":"","latex_blocks":[],"tags":[]}]`
+可选字段：question_type、difficulty、options、knowledge_point、geometry_desc、latex_blocks、tags
+
+【唯一合法输出格式示例】：
+[{"content":"题干1","answer":"答案1","analysis":"解析1","question_type":"应用题","difficulty":"中等","options":[]},{"content":"题干2","answer":"答案2","analysis":"解析2","question_type":"应用题","difficulty":"中等","options":[]}]
+
+请从试卷文本中识别所有题目并输出 JSON 数组，至少输出 1 道题，禁止返回空数组 []。`
+}
+
+/** @deprecated 使用 backupPrompt */
+export function buildBatchSplitFallbackPrompt(chunkText, meta) {
+  return backupPrompt(chunkText, meta)
 }
 
 function isQuestionLike(obj) {
@@ -198,17 +211,27 @@ export function deepFindQuestionArrays(node, depth = 0, maxDepth = 8) {
 
 export function extractQuestionsFromAiRaw(raw, { logWarnings = true } = {}) {
   if (typeof raw === 'string' && raw.trim()) {
-    try {
-      const inner = JSON.parse(raw.trim())
-      const extracted = extractQuestionsFromAiRaw(inner, { logWarnings: false })
-      if (extracted.length) {
-        if (logWarnings) console.log('[batchPrompt] 题目提取路径', { path: 'string_json_parse', count: extracted.length })
-        return extracted
+    const cleaned = preprocessAiJsonString(raw)
+    const candidates = [cleaned, raw.trim()].filter(Boolean)
+    const seen = new Set()
+    for (const candidate of candidates) {
+      if (seen.has(candidate)) continue
+      seen.add(candidate)
+      try {
+        const inner = JSON.parse(candidate)
+        const extracted = extractQuestionsFromAiRaw(inner, { logWarnings: false })
+        if (extracted.length) {
+          if (logWarnings) {
+            console.log('[batchPrompt] 题目提取路径', { path: 'string_json_parse_cleaned', count: extracted.length })
+          }
+          return extracted
+        }
+      } catch {
+        // 尝试下一个候选
       }
-    } catch {
-      if (logWarnings) {
-        console.warn(`[Prompt] 无法解析 AI 响应，原始内容前500字符=${raw.slice(0, 500)}`)
-      }
+    }
+    if (logWarnings) {
+      console.warn(`[Prompt] 无法解析 AI 响应，原始内容前500字符=${raw.slice(0, 500)}`)
     }
     return []
   }
@@ -440,5 +463,5 @@ export async function parseBatchSplitAiResponse(aiText, meta, sortOffset, extrac
 
   const questions = normalizeBatchQuestions(rawQuestions, meta, sortOffset)
   console.log('[batchWorker] 题目提取成功', { extractPath, rawCount: rawQuestions.length, normalizedCount: questions.length })
-  return { questions, rawQuestions, extractPath, parsed, rawPreview1000 }
+  return { questions, rawQuestions, extractPath, parsed, rawPreview1000, attempts }
 }

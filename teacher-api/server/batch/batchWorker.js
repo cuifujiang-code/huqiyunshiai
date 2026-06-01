@@ -3,8 +3,8 @@ import { callDeepSeekAI, extractJson } from '../deepseekClient.js'
 import { safeJsonParse } from './safeJson.js'
 import {
   BATCH_SYSTEM_PROMPT,
+  backupPrompt,
   buildBatchSplitPrompt,
-  buildBatchSplitFallbackPrompt,
   parseBatchSplitAiResponse,
 } from './batchPrompt.js'
 import { normalizeQuestionsBatch } from './questionNormalizer.js'
@@ -33,7 +33,6 @@ const BATCH_MODEL = process.env.DEEPSEEK_BATCH_MODEL || process.env.DEEPSEEK_MOD
 const CHAIN_INITIAL_DELAY_MS = 2000
 const CHAIN_RETRY_DELAY_STEP_MS = 2000
 const CHAIN_MAX_RETRIES = 2
-const AI_PARSE_RETRY_COUNT = 2
 const AI_PARSE_RETRY_DELAY_MS = 2000
 
 function sleep(ms) {
@@ -136,95 +135,92 @@ async function chainNextWorker(batchId, roundNum, remainingChunks, roundItems = 
   )
 }
 
-async function invokeAiParse(item, meta, sortOffset, useFallbackPrompt) {
-  const prompt = useFallbackPrompt
-    ? buildBatchSplitFallbackPrompt(item.chunk_text, meta)
+const AI_PARSE_FAIL_MESSAGE = 'AI 解析未返回有效题目'
+
+async function invokeAiParse(item, meta, sortOffset, useBackupPrompt) {
+  const prompt = useBackupPrompt
+    ? backupPrompt(item.chunk_text, meta)
     : buildBatchSplitPrompt(item.chunk_text, meta)
 
-  const content = await callDeepSeekAI(BATCH_SYSTEM_PROMPT, prompt, {
+  const aiResponse = await callDeepSeekAI(BATCH_SYSTEM_PROMPT, prompt, {
     model: BATCH_MODEL,
     maxTokens: 4096,
-    label: useFallbackPrompt ? 'batch-split-fallback' : 'batch-split',
+    label: useBackupPrompt ? 'batch-split-backup' : 'batch-split',
   })
 
-  const rawText = String(content ?? '')
-  const respLen = rawText.length
-  console.log('[batchWorker] AI 响应', {
-    label: useFallbackPrompt ? 'fallback' : 'primary',
-    model: BATCH_MODEL,
-    responseLength: respLen,
-    first200: rawText.slice(0, 200),
-    last200: respLen > 200 ? rawText.slice(-200) : '',
-    containsJsonArray: rawText.includes('[') && rawText.includes(']'),
-  })
+  console.log('[AI解析] 原始返回数据: ' + JSON.stringify(aiResponse))
 
-  return await parseBatchSplitAiResponse(content, meta, sortOffset, extractJson, safeJsonParse)
+  const parsed = await parseBatchSplitAiResponse(aiResponse, meta, sortOffset, extractJson, safeJsonParse)
+  return { ...parsed, aiResponse }
 }
 
 /**
- * 调用 AI 并解析题目（失败自动重试；仍为空则用备用 prompt 再试一次）
+ * 调用 AI 并解析题目：主 prompt 一次 + backupPrompt 重试一次；仍为空则 markBatchFailed
  */
-async function callAiParseWithRetry(item, meta, sortOffset) {
+async function callAiParseWithRetry(item, meta, sortOffset, batchId) {
   let lastResult = null
-  let lastError = null
 
-  for (let attempt = 0; attempt <= AI_PARSE_RETRY_COUNT; attempt++) {
-    if (attempt > 0) {
-      console.log('[batchWorker] AI 解析重试', { itemId: item.id, attempt, delayMs: AI_PARSE_RETRY_DELAY_MS })
+  for (const [attemptIndex, useBackup] of [[0, false], [1, true]]) {
+    if (attemptIndex > 0) {
+      console.warn('[batchWorker] 主 prompt 无有效题目，启用 backupPrompt 重试', {
+        batchId,
+        itemId: item.id,
+        itemIndex: item.item_index,
+        delayMs: AI_PARSE_RETRY_DELAY_MS,
+      })
       await sleep(AI_PARSE_RETRY_DELAY_MS)
     }
 
     try {
-      console.log('[batchWorker] 调用 AI 拆题', { itemId: item.id, model: BATCH_MODEL, attempt })
-      const parsed = await invokeAiParse(item, meta, sortOffset, false)
+      console.log('[batchWorker] 调用 AI 拆题', {
+        batchId,
+        itemId: item.id,
+        itemIndex: item.item_index,
+        model: BATCH_MODEL,
+        attempt: attemptIndex,
+        prompt: useBackup ? 'backupPrompt' : 'primary',
+      })
+
+      const parsed = await invokeAiParse(item, meta, sortOffset, useBackup)
+      lastResult = parsed
 
       console.log('[batchWorker] AI 解析结果', {
+        batchId,
         itemId: item.id,
-        attempt,
+        attempt: attemptIndex,
         extractPath: parsed.extractPath,
         rawQuestionsCount: parsed.rawQuestions?.length ?? 0,
         questionCount: parsed.questions?.length ?? 0,
+        parsedKeys: parsed.parsed && typeof parsed.parsed === 'object' && !Array.isArray(parsed.parsed)
+          ? Object.keys(parsed.parsed)
+          : Array.isArray(parsed.parsed) ? [`array(${parsed.parsed.length})`] : [],
       })
 
-      lastResult = parsed
       if (parsed.questions?.length > 0) return parsed
-
-      lastError = new Error(`AI 解析题目为空（extractPath=${parsed.extractPath}）`)
-      console.warn('[batchWorker] 本轮解析无题目，准备重试', { itemId: item.id, attempt })
     } catch (err) {
-      lastError = err instanceof Error ? err : new Error(String(err))
+      const msg = err instanceof Error ? err.message : String(err)
       console.error('[batchWorker] AI 调用/解析异常', {
+        batchId,
         itemId: item.id,
-        attempt,
-        message: lastError.message,
+        attempt: attemptIndex,
+        message: msg,
       })
+      if (attemptIndex === 1) throw err
     }
   }
 
-  if (lastResult?.questions?.length) return lastResult
-
-  console.warn('[batchPrompt] 主 prompt 解析为空，启用备用 prompt 重试', { itemId: item.id })
-  try {
-    await sleep(AI_PARSE_RETRY_DELAY_MS)
-    const fallbackParsed = await invokeAiParse(item, meta, sortOffset, true)
-    console.log('[batchWorker] 备用 prompt 解析结果', {
-      itemId: item.id,
-      extractPath: fallbackParsed.extractPath,
-      questionCount: fallbackParsed.questions?.length ?? 0,
-    })
-    if (fallbackParsed.questions?.length > 0) return fallbackParsed
-    lastResult = fallbackParsed
-    lastError = new Error(`备用 prompt 仍为空（extractPath=${fallbackParsed.extractPath}）`)
-  } catch (err) {
-    lastError = err instanceof Error ? err : new Error(String(err))
-    console.error('[batchWorker] 备用 prompt 解析异常', { itemId: item.id, message: lastError.message })
-  }
-
-  console.error('[batchWorker] AI 解析最终为空，不标记任务失败，等待数据库兜底', {
+  const detail = {
+    batchId,
     itemId: item.id,
-    message: lastError?.message,
-  })
-  return lastResult ?? { questions: [], rawQuestions: [], extractPath: 'empty_after_fallback', parsed: null }
+    itemIndex: item.item_index,
+    extractPath: lastResult?.extractPath,
+    attempts: lastResult?.attempts,
+    aiResponsePreview: String(lastResult?.aiResponse ?? '').slice(0, 1000),
+    parsedPreview: lastResult?.parsed ? JSON.stringify(lastResult.parsed).slice(0, 500) : null,
+  }
+  console.error('[batchWorker] AI 解析两次均为空，标记任务失败', detail)
+  await markBatchFailed(batchId, AI_PARSE_FAIL_MESSAGE)
+  throw new Error(AI_PARSE_FAIL_MESSAGE)
 }
 
 async function processOneItem(item, meta, sortOffset, batchId) {
@@ -236,7 +232,7 @@ async function processOneItem(item, meta, sortOffset, batchId) {
   await markItemProcessing(item.id)
 
   try {
-    const parsed = await callAiParseWithRetry(item, meta, sortOffset)
+    const parsed = await callAiParseWithRetry(item, meta, sortOffset, batchId)
     const rawQuestions = parsed.questions ?? []
 
     console.log('[Worker] 提取题目，原始数据字段=questions', {
@@ -258,25 +254,12 @@ async function processOneItem(item, meta, sortOffset, batchId) {
     })
 
     if (!normalizedQuestions.length) {
-      // 收集 AI 响应摘要用于排查
       const rawPreview = parsed.rawPreview1000 || (parsed.parsed ? JSON.stringify(parsed.parsed).slice(0, 500) : '无')
-      const attemptsInfo = parsed.attempts ? parsed.attempts.join('; ') : '无'
-      const detailMsg = [
-        `本分块无有效题目（原始=${rawCount}，过滤=${filteredCount}，extractPath=${parsed.extractPath}）`,
-        `AI解析尝试: ${attemptsInfo}`,
-        `AI响应预览: ${rawPreview.slice(0, 300)}`,
-      ].join(' | ')
-      console.warn('[Worker] 本分块跳过入库，不标记任务失败，等待最终数据库兜底', {
-        itemId: item.id,
-        batchId,
-        rawCount,
-        filteredCount,
-        extractPath: parsed.extractPath,
-        attempts: parsed.attempts,
-        rawPreview: rawPreview.slice(0, 200),
-      })
+      const detailMsg = `本分块无有效题目（原始=${rawCount}，过滤=${filteredCount}，extractPath=${parsed.extractPath}）| AI响应预览: ${rawPreview.slice(0, 300)}`
+      console.error('[Worker] 本分块题目归一化后为空', { itemId: item.id, batchId, detailMsg })
       await markItemFailed(item.id, detailMsg)
-      return { success: false, error: detailMsg, itemId: item.id, rawQuestions: [], questions: [], skipTaskFail: true, debug: { extractPath: parsed.extractPath, attempts: parsed.attempts, rawPreview } }
+      await markBatchFailed(batchId, AI_PARSE_FAIL_MESSAGE)
+      return { success: false, error: detailMsg, itemId: item.id, rawQuestions: [], questions: [], failTask: true }
     }
 
     return {
@@ -287,13 +270,12 @@ async function processOneItem(item, meta, sortOffset, batchId) {
     }
   } catch (error) {
     const msg = error instanceof Error ? error.message : '拆题失败'
-    const detailMsg = [
-      msg,
-      `chunk_text前100字符: ${String(item.chunk_text ?? '').slice(0, 100)}`,
-    ].join(' | ')
-    console.error('[batchWorker] 分块处理失败', { itemId: item.id, msg, chunkPreview: String(item.chunk_text ?? '').slice(0, 200) })
-    await markItemFailed(item.id, detailMsg)
-    return { success: false, error: detailMsg, itemId: item.id, rawQuestions: [], questions: [], skipTaskFail: true, debug: { chunkPreview: String(item.chunk_text ?? '').slice(0, 200) } }
+    console.error('[batchWorker] 分块处理失败', { itemId: item.id, batchId, msg })
+    await markItemFailed(item.id, msg)
+    if (msg === AI_PARSE_FAIL_MESSAGE) {
+      return { success: false, error: msg, itemId: item.id, rawQuestions: [], questions: [], failTask: true }
+    }
+    return { success: false, error: msg, itemId: item.id, rawQuestions: [], questions: [], skipTaskFail: true }
   }
 }
 
@@ -303,9 +285,11 @@ async function persistItemQuestions(batchId, teacherId, itemId, rawQuestions, ta
 
   const insertResult = await insertBatchQuestions(batchId, teacherId, itemId, rawQuestions, taskMeta)
 
-  if (insertResult?.skipped) {
-    console.warn('[Worker] 入库跳过（空数组）', { batchId, itemId })
-    return 0
+  if (insertResult?.skipped || (!insertResult?.success && insertResult?.count === 0)) {
+    const msg = insertResult?.error || '入库题目为空'
+    console.warn('[Worker] 入库失败（空数组）', { batchId, itemId, msg })
+    await markItemFailed(itemId, msg)
+    throw new Error(msg)
   }
 
   if (!insertResult?.success) {
@@ -414,6 +398,12 @@ async function runBatchWorkerCore(batchId) {
 
   const startSort = task.total_questions ?? 0
   const roundResults = await runPool(pending, meta, startSort, batchId, task.teacher_id, meta)
+
+  if (roundResults.some((r) => r.failTask)) {
+    const counts = await countItemsByStatus(batchId)
+    console.error('[batchWorker] AI 解析失败，终止后续分块处理', { batchId, counts })
+    return { done: true, status: 'failed', counts, message: AI_PARSE_FAIL_MESSAGE }
+  }
 
   const counts = await countItemsByStatus(batchId)
   const doneChunks = counts.completed + counts.failed

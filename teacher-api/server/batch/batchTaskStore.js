@@ -373,8 +373,8 @@ export async function insertBatchQuestions(batchId, teacherId, itemId, questions
   console.log('[入库] 收到题目数据，数量=' + questionCount, { batchId, itemId, teacherId })
 
   if (!questionCount) {
-    console.warn('[入库] 入参为空数组，跳过写入', { batchId, itemId, teacherId })
-    return { success: true, count: 0, skipped: true }
+    console.warn('[入库] 入参为空数组，拒绝写入', { batchId, itemId, teacherId })
+    return { success: false, count: 0, error: '入参 rawQuestions 为空数组，无法入库' }
   }
 
   logSupabaseInsertEnv(batchId)
@@ -479,22 +479,40 @@ export async function insertBatchQuestions(batchId, teacherId, itemId, questions
   }
 
   const finalCount = insertedCount > 0 ? insertedCount : rows.length
-  const task = await getBatchTask(batchId)
-  const { error: progressErr } = await admin.from(TASKS).update({
-    imported_questions: (task?.imported_questions ?? 0) + finalCount,
-    total_questions: (task?.total_questions ?? 0) + finalCount,
+
+  // 以 batch_question_bank 实际 COUNT 同步任务表题目数
+  let actualTotal = finalCount
+  try {
+    actualTotal = await countBatchQuestionsInBank(batchId)
+  } catch (countErr) {
+    console.warn('[入库] countBatchQuestionsInBank 失败，使用本次写入数', {
+      batchId,
+      finalCount,
+      message: countErr instanceof Error ? countErr.message : String(countErr),
+    })
+    const task = await getBatchTask(batchId)
+    actualTotal = (task?.imported_questions ?? 0) + finalCount
+  }
+
+  const taskAdmin = getSupabaseAdmin()
+  const { error: progressErr } = await taskAdmin.from(TASKS).update({
+    imported_questions: actualTotal,
+    total_questions: actualTotal,
     updated_at: nowIso(),
   }).eq('batch_id', batchId)
   if (progressErr) {
-    console.error('[入库] 更新 imported_questions 失败', {
+    console.error('[入库] 更新 imported_questions/total_questions 失败', {
       batchId,
+      actualTotal,
       message: progressErr.message,
       code: progressErr.code,
     })
+  } else {
+    console.log('[入库] 已同步任务题目数', { batchId, imported_questions: actualTotal, total_questions: actualTotal })
   }
 
-  console.log(`[入库成功] 共写入 ${finalCount} 题`, { batchId, itemId, teacherId })
-  return { success: true, count: finalCount }
+  console.log(`[入库成功] 共写入 ${finalCount} 题`, { batchId, itemId, teacherId, actualTotal })
+  return { success: true, count: finalCount, actualTotal }
 }
 
 const BANK_SELECT_FIELDS = [
