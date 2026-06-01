@@ -282,8 +282,26 @@ async function processOneItem(item, meta, sortOffset, batchId) {
     })
 
     if (!normalizedQuestions.length) {
+      // 详细诊断：序列化完整 AI 返回数据
+      const parsedSummary = {
+        extractPath: parsed.extractPath,
+        rawCount,
+        filteredCount,
+        attempts: parsed.attempts || '(无)',
+        firstRawQuestion: rawQuestions[0] ? JSON.stringify(rawQuestions[0]).slice(0, 500) : '(空)',
+        allRawKeys: rawQuestions.length > 0 ? Object.keys(rawQuestions[0] || {}).join(',') : '(空)',
+        parsedKeys: parsed.parsed ? (Array.isArray(parsed.parsed) ? `Array[${parsed.parsed.length}]` : Object.keys(parsed.parsed).join(',')) : '(空)',
+        parsedPreview: parsed.parsed ? JSON.stringify(parsed.parsed).slice(0, 800) : '(空)',
+      }
       const rawPreview = parsed.rawPreview1000 || (parsed.parsed ? JSON.stringify(parsed.parsed).slice(0, 500) : '无')
-      const detailMsg = `本分块无有效题目（原始=${rawCount}，过滤=${filteredCount}，extractPath=${parsed.extractPath}）| AI响应预览: ${rawPreview.slice(0, 300)}`
+      const detailMsg = [
+        `本分块无有效题目`,
+        `原始=${rawCount}，过滤=${filteredCount}`,
+        `extractPath=${parsed.extractPath}`,
+        `attempts=${JSON.stringify(parsed.attempts || [])}`,
+        `parsedSummary=${JSON.stringify(parsedSummary)}`,
+        `AI响应预览: ${rawPreview.slice(0, 500)}`,
+      ].join(' | ')
       console.error('[Worker] 本分块题目归一化后为空', { itemId: item.id, batchId, detailMsg })
       await markItemFailed(item.id, detailMsg)
       await markBatchFailed(batchId, AI_PARSE_FAIL_MESSAGE)
