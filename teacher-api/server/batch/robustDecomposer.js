@@ -26,7 +26,7 @@ if (BACKUP_MODEL === PRIMARY_MODEL) {
 }
 
 const MAX_TOKENS = Number(process.env.DEEPSEEK_BATCH_MAX_TOKENS || 8192)
-const AI_TIMEOUT_MS = Number(process.env.DEEPSEEK_BATCH_TIMEOUT_MS || 55000)
+const AI_TIMEOUT_MS = Number(process.env.DEEPSEEK_BATCH_TIMEOUT_MS || 120000)
 const MIN_MEANINGFUL_CHUNK = Number(process.env.BATCH_MIN_CHUNK_LEN || 150)
 const DECOMPOSE_MAX_RETRIES = Number(process.env.BATCH_DECOMPOSE_RETRIES || 2)
 

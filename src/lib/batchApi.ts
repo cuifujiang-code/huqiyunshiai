@@ -353,7 +353,7 @@ export async function triggerBatchAutoRetry() {
   )
 }
 
-function isTaskStuck(task: BatchProgress, staleMinutes = 10) {
+function isTaskStuck(task: BatchProgress, staleMinutes = 3) {
   if (task.status !== 'running' && task.status !== 'partial') return false
   if (task.pendingItems <= 0 && task.processingItems <= 0) return false
   const ageMs = Date.now() - new Date(task.updatedAt).getTime()

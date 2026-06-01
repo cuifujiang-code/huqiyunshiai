@@ -11,7 +11,8 @@ import {
   resetStuckProcessingItems,
 } from './batchTaskStore.js'
 
-const STALE_TASK_MINUTES = Number(process.env.BATCH_STALE_MINUTES || 3)
+const STALE_TASK_MINUTES = Number(process.env.BATCH_STALE_MINUTES || 2)
+const ZOMBIE_RUNNING_MS = Number(process.env.BATCH_ZOMBIE_MS || 90000)
 
 function isTaskStale(task, staleMinutes = STALE_TASK_MINUTES) {
   if (!task?.updated_at) return true
@@ -76,8 +77,26 @@ export async function startBatchProcessing(batchId, teacherId, req) {
     counts = await countItemsByStatus(normalizedBatchId)
   }
 
-  const hasWorkRemaining = counts.pending > 0 || counts.processing > 0
+  let hasWorkRemaining = counts.pending > 0 || counts.processing > 0
   const taskStale = isTaskStale(task)
+  const taskAgeMs = task.updated_at ? Date.now() - new Date(task.updated_at).getTime() : Infinity
+  let zombieRunning = task.status === 'running'
+    && counts.processing > 0
+    && counts.completed === 0
+    && counts.failed === 0
+    && taskAgeMs > ZOMBIE_RUNNING_MS
+
+  if (zombieRunning) {
+    console.warn('[batchStart] 检测到僵尸 running（0 进度长时间 processing），强制重置分块', {
+      batchId: normalizedBatchId,
+      taskAgeMs,
+      counts,
+    })
+    await resetStuckProcessingItems(normalizedBatchId, 1)
+    counts = await countItemsByStatus(normalizedBatchId)
+    hasWorkRemaining = counts.pending > 0 || counts.processing > 0
+    zombieRunning = false
+  }
 
   if (task.status === 'partial' && !hasWorkRemaining) {
     console.log('[batchStart] 部分完成任务无待处理分块，跳过', { batchId: normalizedBatchId, counts })
@@ -92,7 +111,7 @@ export async function startBatchProcessing(batchId, teacherId, req) {
   }
 
   // running 且近期有分块在 processing：视为活跃 worker，避免重复触发
-  if (task.status === 'running' && hasWorkRemaining && counts.processing > 0 && !taskStale && resetCount === 0) {
+  if (task.status === 'running' && hasWorkRemaining && counts.processing > 0 && !taskStale && resetCount === 0 && !zombieRunning) {
     console.log('[batchStart] 任务活跃处理中，跳过重复触发', {
       batchId: normalizedBatchId,
       counts,
@@ -121,7 +140,7 @@ export async function startBatchProcessing(batchId, teacherId, req) {
     }
   }
 
-  const stuckRunning = task.status === 'running' && hasWorkRemaining && (taskStale || counts.processing === 0 || resetCount > 0)
+  const stuckRunning = task.status === 'running' && hasWorkRemaining && (taskStale || counts.processing === 0 || resetCount > 0 || zombieRunning)
 
   console.log('[batchStart] 准备调度 worker', {
     batchId: normalizedBatchId,
