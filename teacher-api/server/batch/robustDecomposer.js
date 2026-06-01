@@ -2,8 +2,14 @@
  * 批量拆题 · 稳健拆题核心
  * 单一入口 forceDecomposeAndInsert：DeepSeek 拆题 → 清洗解析 → 标准化 → SERVICE_ROLE 入库
  */
-import { callDeepSeekAI, DeepSeekApiError } from '../deepseekClient.js'
+import { callDeepSeekAI, DeepSeekApiError, extractJson } from '../deepseekClient.js'
 import { createServiceRoleClient, getSupabaseAdmin } from '../supabaseAdmin.js'
+import {
+  backupPrompt,
+  BATCH_SYSTEM_PROMPT,
+  buildBatchSplitPrompt,
+  parseBatchSplitAiResponse,
+} from './batchPrompt.js'
 import { countQuestionMarkers } from './batchChunker.js'
 import {
   COMPLETE_EXTRACTION_RULE,
@@ -14,12 +20,14 @@ import {
 } from './batchQualityPrompts.js'
 import { filterCompleteQuestions } from './questionCompleteness.js'
 import { normalizeQuestionsBatch } from './questionNormalizer.js'
+import { safeJsonParse } from './safeJson.js'
 import { countBatchQuestionsInBank } from './batchTaskStore.js'
 
 const BANK = 'batch_question_bank'
 const TASKS = 'batch_decompose_tasks'
 
-const PRIMARY_MODEL = process.env.DEEPSEEK_MODEL || 'deepseek-chat'
+const PRIMARY_MODEL = process.env.DEEPSEEK_BATCH_PRIMARY_MODEL
+  || (String(process.env.DEEPSEEK_MODEL || '').includes('flash') ? 'deepseek-chat' : (process.env.DEEPSEEK_MODEL || 'deepseek-chat'))
 let BACKUP_MODEL = process.env.DEEPSEEK_BATCH_MODEL || 'deepseek-v4-flash'
 if (BACKUP_MODEL === PRIMARY_MODEL) {
   BACKUP_MODEL = PRIMARY_MODEL.includes('flash') ? 'deepseek-chat' : 'deepseek-v4-flash'
@@ -28,7 +36,8 @@ if (BACKUP_MODEL === PRIMARY_MODEL) {
 const MAX_TOKENS = Number(process.env.DEEPSEEK_BATCH_MAX_TOKENS || 8192)
 const AI_TIMEOUT_MS = Number(process.env.DEEPSEEK_BATCH_TIMEOUT_MS || 120000)
 const MIN_MEANINGFUL_CHUNK = Number(process.env.BATCH_MIN_CHUNK_LEN || 150)
-const DECOMPOSE_MAX_RETRIES = Number(process.env.BATCH_DECOMPOSE_RETRIES || 2)
+const DECOMPOSE_MAX_RETRIES = Number(process.env.BATCH_DECOMPOSE_RETRIES || 3)
+const EXTRACT_TEMPERATURE = Number(process.env.DEEPSEEK_BATCH_TEMPERATURE || 0.15)
 
 const ROBUST_SYSTEM_PROMPT = `你是一个专业的题目解析器。只输出 JSON 数组，不输出任何其它内容。
 
@@ -63,7 +72,8 @@ ${IMAGE_PLACEHOLDER_RULE}
 
 每道题必须包含：content(完整题干，含所有子问题), answer(答案), analysis(解析), question_type, difficulty, knowledge_point。
 选择题必须包含 options 数组，每项为 "A. 完整选项文字" 格式。
-不要输出任何其他文字，不要用markdown代码块包裹。无法构成完整题目时不要输出该题。
+不要输出任何其他文字，不要用markdown代码块包裹。
+文本中只要有题号或题干内容，禁止返回空数组 []。
 
 【重要】如果文本中一道大题包含(1)(2)(3)子问题，所有子问题必须在同一个对象的content字段中，不要拆成多个对象。
 
@@ -71,6 +81,16 @@ JSON 格式示例：
 ${JSON_EXAMPLE_WITH_LATEX}
 
 待处理文本：
+${text}`
+}
+
+function buildMandatoryUserPrompt(text, expectedCount = 0) {
+  return `【强制提取模式 - 禁止返回空数组】
+以下文本来自试卷，一定包含题目。你必须输出至少 ${Math.max(1, expectedCount || 1)} 道题的 JSON 数组。
+禁止返回 []。即使含 ${FORMULA_PLACEHOLDER} 占位符，也必须输出完整题目并用 LaTeX 推断公式。
+每道题含 content、answer、analysis、question_type、difficulty、knowledge_point；选择题含 options。
+
+文本：
 ${text}`
 }
 
@@ -210,16 +230,23 @@ function normalizeBankInsertRow(q, batchId, teacherId, itemId, fallbackIndex, ta
   }
 }
 
-async function callDecomposeAi(text, model, label, useFragmentPrompt = false) {
+async function callDecomposeAi(text, model, label, promptMode = 'primary') {
   const expectedCount = countQuestionMarkers(text)
-  const userPrompt = useFragmentPrompt
-    ? buildFragmentUserPrompt(text)
-    : buildRobustUserPrompt(text, expectedCount)
+  let userPrompt
+  if (promptMode === 'fragment') {
+    userPrompt = buildFragmentUserPrompt(text)
+  } else if (promptMode === 'mandatory') {
+    userPrompt = buildMandatoryUserPrompt(text, expectedCount)
+  } else {
+    userPrompt = buildRobustUserPrompt(text, expectedCount)
+  }
+
   console.log('[robustDecomposer] 调用 DeepSeek', {
     model,
     label,
     textLength: text.length,
-    fragmentMode: useFragmentPrompt,
+    promptMode,
+    expectedCount,
     timeoutMs: AI_TIMEOUT_MS,
   })
 
@@ -227,13 +254,14 @@ async function callDecomposeAi(text, model, label, useFragmentPrompt = false) {
     model,
     maxTokens: MAX_TOKENS,
     timeoutMs: AI_TIMEOUT_MS,
+    temperature: EXTRACT_TEMPERATURE,
     label,
   })
 
   console.log('[robustDecomposer] 原始 AI 返回', {
     model,
     label,
-    fragmentMode: useFragmentPrompt,
+    promptMode,
     length: String(rawResponse ?? '').length,
     preview: String(rawResponse ?? '').slice(0, 500),
     full: rawResponse,
@@ -242,12 +270,12 @@ async function callDecomposeAi(text, model, label, useFragmentPrompt = false) {
   return rawResponse
 }
 
-function parseAiResponse(rawResponse, model, retry, fragmentMode) {
+function parseAiResponse(rawResponse, model, retry, promptMode) {
   const { cleaned, arraySlice } = cleanAiResponseString(rawResponse)
   console.log('[robustDecomposer] 清洗后字符串', {
     model,
     retry,
-    fragmentMode,
+    promptMode,
     cleanedLength: cleaned.length,
     arraySliceLength: arraySlice?.length ?? 0,
     arrayPreview: arraySlice?.slice(0, 500) ?? cleaned.slice(0, 500),
@@ -261,7 +289,7 @@ function parseAiResponse(rawResponse, model, retry, fragmentMode) {
   console.log('[robustDecomposer] 解析后题目数', {
     model,
     retry,
-    fragmentMode,
+    promptMode,
     parsedCount: rawArray.length,
     firstQuestionPreview: rawArray[0] ? JSON.stringify(rawArray[0]).slice(0, 300) : '(空)',
   })
@@ -269,15 +297,71 @@ function parseAiResponse(rawResponse, model, retry, fragmentMode) {
   return { rawArray }
 }
 
-async function decomposeWithModels(text) {
+/** 空数组时的备用：legacy batchPrompt 解析链路 */
+async function decomposeWithLegacyPrompt(text, taskMeta) {
+  const meta = {
+    subject: taskMeta.subject || '数学',
+    grade: taskMeta.grade || '八年级',
+    estimatedQuestions: countQuestionMarkers(text),
+  }
+  const models = [PRIMARY_MODEL, BACKUP_MODEL].filter((m, i, a) => a.indexOf(m) === i)
+
+  for (const model of models) {
+    for (const useBackup of [false, true]) {
+      const prompt = useBackup ? backupPrompt(text, meta) : buildBatchSplitPrompt(text, meta)
+      const label = useBackup ? 'legacy-backup' : 'legacy-primary'
+      try {
+        console.log('[robustDecomposer] legacy prompt 回退', { model, label, textLength: text.length })
+        const aiResponse = await callDeepSeekAI(BATCH_SYSTEM_PROMPT, prompt, {
+          model,
+          maxTokens: MAX_TOKENS,
+          timeoutMs: AI_TIMEOUT_MS,
+          temperature: EXTRACT_TEMPERATURE,
+          label: `robust-${label}`,
+        })
+        const parsed = await parseBatchSplitAiResponse(aiResponse, meta, 0, extractJson, safeJsonParse)
+        if (parsed.questions?.length) {
+          return { rawArray: parsed.questions, model, fragmentMode: label }
+        }
+      } catch (err) {
+        console.warn('[robustDecomposer] legacy prompt 失败', {
+          model,
+          label,
+          message: err instanceof Error ? err.message : String(err),
+        })
+      }
+      await sleep(1000)
+    }
+  }
+
+  return { rawArray: [], model: null, fragmentMode: 'legacy-failed' }
+}
+
+async function tryDecomposeOnce(text, model, label, promptMode, retry) {
+  const rawResponse = await callDecomposeAi(text, model, label, promptMode)
+  const { rawArray, error } = parseAiResponse(rawResponse, model, retry, promptMode)
+  if (error) return { ok: false, error }
+  if (rawArray.length > 0) {
+    return { ok: true, rawArray, model, promptMode }
+  }
+  return { ok: false, error: new Error('AI 返回空数组') }
+}
+
+async function decomposeWithModels(text, taskMeta = {}) {
   const models = [
     { model: PRIMARY_MODEL, label: 'robust-decompose-primary' },
     { model: BACKUP_MODEL, label: 'robust-decompose-backup' },
   ]
   const uniqueModels = models.filter((m, i, arr) => arr.findIndex((x) => x.model === m.model) === i)
+  const markerCount = countQuestionMarkers(text)
+  const hasQuestions = markerCount >= 1 || text.length >= 300
 
   let lastError = null
-  const tryFragmentPrompt = isLikelyNonQuestionFragment(text) || text.length < 300
+
+  // prompt 模式顺序：标准 → 强制（有题号时）→ 片段（仅噪声块）
+  const promptModes = hasQuestions
+    ? ['primary', 'mandatory']
+    : (isLikelyNonQuestionFragment(text) ? ['primary', 'fragment'] : ['primary', 'mandatory'])
 
   for (let retry = 0; retry < DECOMPOSE_MAX_RETRIES; retry++) {
     if (retry > 0) {
@@ -285,40 +369,46 @@ async function decomposeWithModels(text) {
       console.warn('[robustDecomposer] 第' + (retry + 1) + '次完整重试', {
         delayMs,
         textLength: text.length,
+        markerCount,
         previousError: lastError?.message ?? '无',
       })
       await sleep(delayMs)
     }
 
-    const promptModes = tryFragmentPrompt ? [false, true] : [false]
-
-    for (const fragmentMode of promptModes) {
+    for (const promptMode of promptModes) {
       for (let i = 0; i < uniqueModels.length; i++) {
         const { model, label } = uniqueModels[i]
-        if (i > 0 || fragmentMode) {
-          await sleep(1500)
-        }
+        if (i > 0) await sleep(1500)
 
         try {
-          const rawResponse = await callDecomposeAi(text, model, label, fragmentMode)
-          const { rawArray, error } = parseAiResponse(rawResponse, model, retry, fragmentMode)
-
-          if (error) {
-            lastError = error
-            continue
+          const result = await tryDecomposeOnce(text, model, label, promptMode, retry)
+          if (result.ok) {
+            return {
+              rawArray: result.rawArray,
+              model: result.model,
+              promptMode: result.promptMode,
+            }
           }
+          lastError = result.error ?? new Error('未知错误')
 
-          if (rawArray.length > 0) {
-            return { rawArray, model, fragmentMode }
+          // 空数组且仍有题号：同模型立即试 mandatory
+          if (promptMode === 'primary' && markerCount >= 1) {
+            const mandatory = await tryDecomposeOnce(text, model, label, 'mandatory', retry)
+            if (mandatory.ok) {
+              return {
+                rawArray: mandatory.rawArray,
+                model: mandatory.model,
+                promptMode: 'mandatory',
+              }
+            }
+            lastError = mandatory.error ?? lastError
           }
-
-          lastError = new Error('AI 返回空数组')
         } catch (err) {
           lastError = err instanceof Error ? err : new Error(String(err))
           console.error('[robustDecomposer] 模型调用/解析失败', {
             model,
             retry,
-            fragmentMode,
+            promptMode,
             message: lastError.message,
             isDeepSeek: err instanceof DeepSeekApiError,
           })
@@ -330,6 +420,15 @@ async function decomposeWithModels(text) {
       lastError: lastError?.message ?? '未知',
       remainingRetries: DECOMPOSE_MAX_RETRIES - retry - 1,
     })
+  }
+
+  // legacy batchPrompt 最后兜底
+  if (hasQuestions) {
+    console.warn('[robustDecomposer] 启用 legacy batchPrompt 兜底', { markerCount, textLength: text.length })
+    const legacy = await decomposeWithLegacyPrompt(text, taskMeta)
+    if (legacy.rawArray.length > 0) {
+      return legacy
+    }
   }
 
   if (isLikelyNonQuestionFragment(text)) {
@@ -445,7 +544,7 @@ export async function forceDecomposeAndInsert(batchId, teacherId, text, subject,
   }
 
   try {
-    const decomposeResult = await decomposeWithModels(chunkText)
+    const decomposeResult = await decomposeWithModels(chunkText, taskMeta)
 
     if (decomposeResult.skippedFragment) {
       const realCount = await syncImportedQuestionsOnly(normalizedBatchId).catch(() => 0)
