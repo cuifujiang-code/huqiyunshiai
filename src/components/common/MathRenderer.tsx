@@ -80,12 +80,10 @@ function renderInlineLatex(text: string): string {
   let lastIndex = 0
   let match: RegExpExecArray | null
   while ((match = inlineRegex.exec(remaining)) !== null) {
-    // 前面的纯文本
     const before = remaining.slice(lastIndex, match.index)
     if (before) {
-      parts.push(escapeHtml(before))
+      parts.push(renderWithHtmlTags(before))
     }
-    // 行内公式
     const latex = match[1].trim()
     if (latex) {
       try {
@@ -103,10 +101,9 @@ function renderInlineLatex(text: string): string {
     lastIndex = match.index + match[0].length
   }
 
-  // 剩余纯文本
   const after = remaining.slice(lastIndex)
   if (after) {
-    parts.push(escapeHtml(after))
+    parts.push(renderWithHtmlTags(after))
   }
 
   return parts.join('')
@@ -119,6 +116,29 @@ function escapeHtml(text: string): string {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/\n/g, '<br/>')
+}
+
+/**
+ * 渲染含 HTML 标签的文本（img 等保留标签直接输出，其余转义）
+ */
+function renderWithHtmlTags(text: string): string {
+  if (!/<img\s[^>]*\/?>|<br\s*\/?>|<hr\s*\/?>/.test(text)) {
+    return escapeHtml(text)
+  }
+  const parts: string[] = []
+  let remaining = text
+  const tagRegex = /(<img\s[^>]*\/?>|<br\s*\/?>|<hr\s*\/?>)/gi
+  let lastIndex = 0
+  let match: RegExpExecArray | null
+  while ((match = tagRegex.exec(remaining)) !== null) {
+    const before = remaining.slice(lastIndex, match.index)
+    if (before) parts.push(escapeHtml(before))
+    parts.push(match[1])
+    lastIndex = match.index + match[0].length
+  }
+  const after = remaining.slice(lastIndex)
+  if (after) parts.push(escapeHtml(after))
+  return parts.join('')
 }
 
 export default function MathRenderer({ text, className = '', displayMode = true }: MathRendererProps) {

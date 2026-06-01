@@ -515,7 +515,13 @@ export async function forceDecomposeAndInsert(batchId, teacherId, text, subject,
   const normalizedTeacherId = String(teacherId ?? '').trim()
   const chunkText = String(text ?? '').trim()
   const itemId = options.itemId ?? null
-  const taskMeta = { subject: subject || '数学', grade: grade || '八年级' }
+  const taskMeta = {
+    subject: subject || '数学',
+    grade: grade || '八年级',
+    // 预提取的图片映射
+    formulaImages: options.formulaImages || options.formula_images || [],
+    images: options.images || options.extracted_images || [],
+  }
 
   console.log('[robustDecomposer] === forceDecomposeAndInsert 开始 ===', {
     batchId: normalizedBatchId,

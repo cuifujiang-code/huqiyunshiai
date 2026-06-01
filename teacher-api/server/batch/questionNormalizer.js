@@ -21,7 +21,7 @@ export function cleanText(text) {
     .replace(/\r/g, '\n')
 
   const fullToHalf = {
-    '（': '(', '）': ')', '【': '[', '】': ']', '「': '"', '」': '"',
+    '（': '(', '）': ')', '「': '"', '」': '"',
     '『': '"', '』': '"', '，': ',', '。': '.', '；': ';', '：': ':',
     '？': '?', '！': '!', '％': '%', '＋': '+', '－': '-', '＝': '=',
     '　': ' ',
@@ -142,10 +142,68 @@ export function isValidQuestion(q) {
 }
 
 /**
+ * 用预提取的公式渲染图替换 content 中的【公式】占位符
+ * @param {string} text 文本内容
+ * @param {Array} formulaImages 预提取的公式图 [{png_base64, width, height}]
+ * @param {number} startIndex 公式图索引起始偏移
+ * @returns {{ text: string, replacedCount: number, nextIndex: number }}
+ */
+function replaceFormulaPlaceholders(text, formulaImages, startIndex = 0) {
+  if (!formulaImages || !formulaImages.length) return { text, replacedCount: 0, nextIndex: startIndex }
+  if (!text || !text.includes('【公式】')) return { text, replacedCount: 0, nextIndex: startIndex }
+
+  let replaced = 0
+  let idx = startIndex
+
+  text = text.replace(/【公式】/g, () => {
+    if (idx >= formulaImages.length) return '【公式待补】'
+    const fi = formulaImages[idx]
+    idx++
+    if (fi && fi.png_base64) {
+      replaced++
+      const w = fi.width || 'auto'
+      const h = fi.height || 'auto'
+      return `<img src="data:image/png;base64,${fi.png_base64}" alt="公式" style="display:inline-block;vertical-align:middle;max-width:100%;height:auto;" width="${w}" height="${h}" />`
+    }
+    return '【公式待补】'
+  })
+
+  return { text, replacedCount: replaced, nextIndex: idx }
+}
+
+/**
+ * 用预提取的图片替换 content 中的 [图片占位符]
+ * @param {string} text 文本内容
+ * @param {Array} images 预提取的图片 [{base64, mime}]
+ * @param {number} startIndex 图片索引起始偏移
+ */
+function replaceImagePlaceholders(text, images, startIndex = 0) {
+  if (!images || !images.length) return { text, replacedCount: 0, nextIndex: startIndex }
+  if (!text || !text.includes('[图片占位符]')) return { text, replacedCount: 0, nextIndex: startIndex }
+
+  let replaced = 0
+  let idx = startIndex
+
+  text = text.replace(/\[图片占位符\]/g, () => {
+    if (idx >= images.length) return '[图片占位符]'
+    const img = images[idx]
+    idx++
+    if (img && img.base64) {
+      replaced++
+      const mime = img.mime || 'image/png'
+      return `<img src="data:${mime};base64,${img.base64}" alt="插图" style="display:block;max-width:100%;height:auto;margin:8px 0;" />`
+    }
+    return '[图片占位符]'
+  })
+
+  return { text, replacedCount: replaced, nextIndex: idx }
+}
+
+/**
  * 将 AI 原始题目强制转换为标准结构
  * @param {object} raw AI 返回的单题对象
  * @param {number} index 题目序号（从 0 开始）
- * @param {object} [taskMeta] 批次学科/年级默认值
+ * @param {object} [taskMeta] 批次学科/年级默认值 + formulaImages + images
  */
 export function normalizeQuestion(raw, index, taskMeta = {}) {
   if (!raw || typeof raw !== 'object') return null
@@ -169,6 +227,28 @@ export function normalizeQuestion(raw, index, taskMeta = {}) {
   if (!content) content = `题目 ${sortOrder}`
   if (!answer) answer = '暂无'
   if (!analysis) analysis = '暂无'
+
+  // ── 用预提取的图片替换占位符 ──
+  const formulaImages = taskMeta.formulaImages || taskMeta.formula_images || []
+  const extractedImages = taskMeta.images || taskMeta.extracted_images || []
+  let formulaIdx = taskMeta._formulaIdx || 0
+  let imageIdx = taskMeta._imageIdx || 0
+
+  if (formulaImages.length > 0) {
+    const result = replaceFormulaPlaceholders(content, formulaImages, formulaIdx)
+    content = result.text
+    formulaIdx = result.nextIndex
+    if (result.replacedCount > 0) {
+      answer = replaceFormulaPlaceholders(answer, formulaImages, formulaIdx).text
+      analysis = replaceFormulaPlaceholders(analysis, formulaImages, formulaIdx).text
+    }
+  }
+
+  if (extractedImages.length > 0) {
+    const imgResult = replaceImagePlaceholders(content, extractedImages, imageIdx)
+    content = imgResult.text
+    imageIdx = imgResult.nextIndex
+  }
 
   const hasImagePlaceholder = content.includes(IMAGE_PLACEHOLDER)
     || /\[图片占位符\]/.test(content)
@@ -243,6 +323,10 @@ export function normalizeQuestionsBatch(rawQuestions, taskMeta = {}, startIndex 
   const list = Array.isArray(rawQuestions) ? rawQuestions : []
   const rawCount = list.length
   const valid = []
+
+  // 初始化图片索引追踪（跨题目共享）
+  if (!taskMeta._formulaIdx) taskMeta._formulaIdx = 0
+  if (!taskMeta._imageIdx) taskMeta._imageIdx = 0
 
   for (let i = 0; i < list.length; i++) {
     let normalized = normalizeQuestion(list[i], startIndex + i, taskMeta)

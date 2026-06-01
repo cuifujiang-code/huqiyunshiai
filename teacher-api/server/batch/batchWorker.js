@@ -141,7 +141,11 @@ async function processOneItem(item, meta, batchId, teacherId) {
       item.chunk_text,
       meta.subject,
       meta.grade,
-      { itemId: item.id },
+      {
+        itemId: item.id,
+        formulaImages: meta.formulaImages,
+        images: meta.images,
+      },
     )
 
     console.log('[batchWorker] forceDecomposeAndInsert 结果', {
@@ -296,7 +300,13 @@ async function runBatchWorkerCore(batchId) {
     return { skipped: true, status: 'completed' }
   }
 
-  const meta = { subject: task.subject, grade: task.grade }
+  const meta = {
+    subject: task.subject,
+    grade: task.grade,
+    // 从 task.meta 读取预提取的图片映射
+    formulaImages: (task.meta?.formulaImages || task.meta?.formula_images || []),
+    images: (task.meta?.images || task.meta?.extracted_images || []),
+  }
 
   if (task.status === 'pending') {
     console.log('[batchWorker] 标记任务 running', { batchId })

@@ -128,7 +128,7 @@ export default async function handler(req, res) {
   }
 
   const body = req.body ?? {}
-  const { teacherId, subject, grade, autoStart = true } = body
+  const { teacherId, subject, grade, autoStart = true, imagesJson } = body
 
   console.log('[batch/upload] POST 收到上传', {
     teacherId,
@@ -137,6 +137,7 @@ export default async function handler(req, res) {
     autoStart,
     hasFile: Boolean(body.examFileBase64),
     fileName: body.examFileName,
+    hasImages: Boolean(imagesJson),
   })
 
   if (!teacherId) {
@@ -164,7 +165,14 @@ export default async function handler(req, res) {
       subject: subject || '数学',
       grade: grade || '八年级',
       chunks,
-      meta: { chunkCount, textLength: text.length },
+      meta: {
+        chunkCount,
+        textLength: text.length,
+        ...(imagesJson ? {
+          formulaImages: imagesJson.formulas || [],
+          images: imagesJson.images || [],
+        } : {}),
+      },
     })
 
     console.log('[batch/upload] 任务已入库', { batchId, teacherId, ...created })
