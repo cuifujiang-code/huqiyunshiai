@@ -11,6 +11,18 @@ body {
   min-height: 100vh;
 }
 
+/* KaTeX 公式在深色题目预览中的可读性 */
+.question-content .katex {
+  color: inherit;
+  font-size: 1.05em;
+}
+
+.question-content .katex-display {
+  margin: 0.5em 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
 @keyframes fadeIn {
   from { opacity: 0; transform: translateY(8px); }
   to { opacity: 1; transform: translateY(0); }
