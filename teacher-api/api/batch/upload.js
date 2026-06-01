@@ -1,7 +1,7 @@
 import '../../server/applyUrlShim.js'
 import { randomUUID } from 'crypto'
 import { applyApiHeaders, handleOptions } from '../../server/apiResponse.js'
-import { parseExamText } from '../../server/teacher/questionImportService.js'
+import { parseExamFile } from '../../server/examParser.js'
 import { splitTextIntoChunks } from '../../server/batch/batchChunker.js'
 import {
   createBatchTask,
@@ -58,10 +58,10 @@ function sendUploadResponse(res, statusCode, payload) {
 }
 
 async function parseUploadToText(body) {
-  const { examFileBase64, examFileName, rawText } = body ?? {}
+  const { examFileBase64, examFileName, rawText, subject, grade } = body ?? {}
 
   if (rawText && typeof rawText === 'string' && rawText.trim()) {
-    return { text: rawText.trim(), fileName: examFileName || 'paste.txt' }
+    return { text: rawText.trim(), fileName: examFileName || 'paste.txt', type: 'text' }
   }
 
   if (!examFileBase64 || !examFileName) {
@@ -69,13 +69,16 @@ async function parseUploadToText(body) {
   }
 
   const buffer = Buffer.from(examFileBase64, 'base64')
+  const meta = { subject: subject || '数学', grade: grade || '八年级' }
   console.log('[batch/upload] 解析文件', {
     examFileName,
     bufferBytes: buffer.length,
+    subject: meta.subject,
+    grade: meta.grade,
   })
-  const text = await parseExamText(buffer, examFileName)
-  console.log('[batch/upload] 解析完成', { examFileName, textLength: text.length })
-  return { text, fileName: examFileName }
+  const result = await parseExamFile(buffer, examFileName, meta)
+  console.log('[batch/upload] 解析完成', { examFileName, textLength: result.text.length, type: result.type })
+  return { text: result.text, fileName: examFileName, type: result.type }
 }
 
 export default async function handler(req, res) {

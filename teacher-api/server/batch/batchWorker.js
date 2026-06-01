@@ -22,12 +22,13 @@ import {
   markItemProcessing,
   recoverTaskStatusFromBankCount,
   resetStuckProcessingItems,
+  syncImportedQuestionsFromBank,
   updateBatchProgress,
 } from './batchTaskStore.js'
 import { triggerBatchWorker } from './batchTrigger.js'
 
-const CONCURRENCY = Number(process.env.BATCH_AI_CONCURRENCY || 5)
-const ITEMS_PER_INVOCATION = Number(process.env.BATCH_ITEMS_PER_RUN || 8)
+const CONCURRENCY = Number(process.env.BATCH_AI_CONCURRENCY || 2)
+const ITEMS_PER_INVOCATION = Number(process.env.BATCH_ITEMS_PER_RUN || 3)
 const BATCH_MODEL = process.env.DEEPSEEK_BATCH_MODEL || process.env.DEEPSEEK_MODEL || 'deepseek-chat'
 
 const CHAIN_INITIAL_DELAY_MS = 2000
@@ -283,14 +284,14 @@ async function persistItemQuestions(batchId, teacherId, itemId, rawQuestions, ta
   const count = Array.isArray(rawQuestions) ? rawQuestions.length : 0
   console.log('[Worker] 准备入库，题目数量=' + count, { batchId, itemId, teacherId })
 
-  const insertResult = await insertBatchQuestions(batchId, teacherId, itemId, rawQuestions, taskMeta)
-
-  if (insertResult?.skipped || (!insertResult?.success && insertResult?.count === 0)) {
-    const msg = insertResult?.error || '入库题目为空'
-    console.warn('[Worker] 入库失败（空数组）', { batchId, itemId, msg })
-    await markItemFailed(itemId, msg)
-    throw new Error(msg)
-  }
+  const insertResult = await insertBatchQuestions(
+    batchId,
+    teacherId,
+    itemId,
+    rawQuestions,
+    taskMeta,
+    { syncTaskCounts: false, syncTeacherBank: false },
+  )
 
   if (!insertResult?.success) {
     const msg = insertResult?.error || '入库失败'
@@ -307,24 +308,19 @@ async function persistItemQuestions(batchId, teacherId, itemId, rawQuestions, ta
 }
 
 async function runPool(items, meta, startSort, batchId, teacherId, taskMeta) {
-  let sort = startSort
   const results = []
+
+  // Phase 1: 并发 AI（不穿插入库，控制单轮耗时）
   for (let i = 0; i < items.length; i += CONCURRENCY) {
     const slice = items.slice(i, i + CONCURRENCY)
-    console.log('[batchWorker] 并发批次', {
+    console.log('[batchWorker] 并发批次 AI 调用', {
       batchFrom: i,
       batchSize: slice.length,
       itemIndexes: slice.map((it) => it.item_index),
     })
-    const settled = await Promise.all(slice.map((item) => processOneItem(item, meta, sort, batchId)))
-    for (const r of settled) {
-      results.push(r)
-      if (r.success && r.rawQuestions?.length) {
-        const written = await persistItemQuestions(batchId, teacherId, r.itemId, r.rawQuestions, taskMeta)
-        sort += written
-      }
-    }
-    console.log('[batchWorker] 并发批次完成', {
+    const settled = await Promise.all(slice.map((item) => processOneItem(item, meta, startSort, batchId)))
+    results.push(...settled)
+    console.log('[batchWorker] 并发批次 AI 调用完成', {
       batchId,
       batchFrom: i,
       outcomes: settled.map((r, j) => ({
@@ -334,7 +330,26 @@ async function runPool(items, meta, startSort, batchId, teacherId, taskMeta) {
         error: r.error ?? null,
       })),
     })
+    if (settled.some((r) => r.failTask)) break
   }
+
+  if (results.some((r) => r.failTask)) return results
+
+  // Phase 2: 本轮全部 AI 完成后统一入库（每轮仅一次 COUNT 同步）
+  const successItems = results.filter((r) => r.success && r.rawQuestions?.length)
+  if (successItems.length) {
+    console.log('[batchWorker] 本轮统一入库', {
+      batchId,
+      itemCount: successItems.length,
+      totalQuestions: successItems.reduce((n, r) => n + r.rawQuestions.length, 0),
+    })
+    for (const item of successItems) {
+      await persistItemQuestions(batchId, teacherId, item.itemId, item.rawQuestions, taskMeta)
+    }
+    await syncImportedQuestionsFromBank(batchId)
+    console.log('[batchWorker] 本轮入库完成，已同步任务题目数', { batchId })
+  }
+
   return results
 }
 

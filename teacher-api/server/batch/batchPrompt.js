@@ -68,7 +68,14 @@ export async function parseJsonFromAiTextWithRetry(rawText, safeJsonParseFn) {
   throw lastError instanceof Error ? lastError : new Error('JSON 解析失败')
 }
 
-export const BATCH_SYSTEM_PROMPT = `你是 K12 专业题库拆题引擎。
+export const BATCH_SYSTEM_PROMPT = `你是 K12 专业题库拆题引擎，对标学科网组卷网的 AI 识别标准。
+
+【核心要求 - 公式与图形零丢失】
+1. 数学公式必须使用 LaTeX 格式：行内公式用 $...$，独立公式用 $$...$$
+2. 禁止遗漏、简化、改写任何公式符号（包括上下标、根号、分数、积分、矩阵等）
+3. 几何图形、函数图像用 geometry_desc 字段详细描述（形状、标记、坐标、标注）
+4. 表格内容完整保留，用 Markdown 表格或 geometry_desc 描述
+5. 图片中的公式必须准确识别为 LaTeX，禁止将公式转为文字描述
 
 【输出格式 - 必须严格遵守】
 1. 只输出一个 JSON 数组，以 [ 开头、以 ] 结尾
@@ -76,21 +83,44 @@ export const BATCH_SYSTEM_PROMPT = `你是 K12 专业题库拆题引擎。
 3. 禁止用对象包装（禁止 {"questions":[...]} 或 {"data":{...}}）
 4. 每道题必须是对象，且必须包含字符串字段：content、answer、analysis
 5. 无题目时输出空数组 []
+6. 禁止在 JSON 外输出任何说明文字
 
 【内容规则】
-1. 数学公式使用 LaTeX，行内 $...$，独立公式 $$...$$
-2. geometry_desc 描述图形要素；无图形则为 ""
-3. latex_blocks 为 LaTeX 片段数组（不含 $）
-4. 选择题 options 为字符串数组；非选择题 options 为 []
-5. question_type：选择题/填空题/计算题/证明题/实验题/应用题
-6. difficulty：基础/中等/拔高
-7. 一题一条，不要合并多道小题`
+1. content：题干全文（含公式、图形描述、表格），禁止省略
+2. answer：标准答案（含公式，禁止"略"或"见解析"）
+3. analysis：详细解析（含公式推导步骤）
+4. options：选择题为字符串数组；非选择题为 []
+5. geometry_desc：图形描述（无图形则为 ""）
+6. latex_blocks：本题涉及的所有 LaTeX 片段数组（不含 $ 分隔符）
+7. question_type：选择题/填空题/计算题/证明题/实验题/应用题
+8. difficulty：基础/中等/拔高
+9. knowledge_point：知识点名称（如"一元二次方程"）
+10. tags：相关标签数组（如 ["二次函数", "最值问题"]）
+11. 一题一条，禁止合并多道小题`
 
 export function buildBatchSplitPrompt(chunkText, meta) {
   return `将以下试卷文本拆分为独立题目，完整保留数学表达式与图形信息。
 
 学科：${meta.subject || '数学'}
 年级：${meta.grade || '八年级'}
+
+【公式处理要求 - 零丢失】
+- 所有数学公式必须转换为 LaTeX 格式
+- 行内公式：$公式内容$
+- 独立公式（单独成行）：$$公式内容$$
+- 常见公式示例：
+  - 分数：$\\frac{a}{b}$
+  - 二次方程：$ax^2+bx+c=0$
+  - 根号：$\\sqrt{x}$
+  - 积分：$\\int_a^b f(x)dx$
+  - 矩阵：$\\begin{pmatrix} a & b \\\\ c & d \\end{pmatrix}$
+- 禁止将公式简化为文字描述
+- 如无法识别公式，用描述性 LaTeX 占位（如 $\\text{公式图像}$）
+
+【图形处理要求】
+- 如有几何图形、函数图像，在 geometry_desc 字段中详细描述
+- 描述内容：图形类型、标记条件、角度/边长数值、坐标位置
+- 示例："图：直角三角形 ABC，∠C=90°，AC=3，BC=4，求 AB"
 
 试卷片段：
 ${chunkText}
@@ -103,13 +133,13 @@ ${chunkText}
     "knowledge_point": "一元一次方程",
     "question_type": "应用题",
     "difficulty": "中等",
-    "content": "题干文字…",
+    "content": "题干文字（含 $公式$）",
     "options": [],
-    "answer": "答案…",
-    "analysis": "解析…",
-    "geometry_desc": "",
-    "latex_blocks": [],
-    "tags": []
+    "answer": "答案（含 $公式$）",
+    "analysis": "解析过程（含 $推导步骤$）",
+    "geometry_desc": "图形描述（无则为空字符串）",
+    "latex_blocks": ["公式片段1", "公式片段2"],
+    "tags": ["知识点标签1", "知识点标签2"]
   }
 ]
 
@@ -125,23 +155,29 @@ export function backupPrompt(chunkText, meta) {
 禁止用对象包装（禁止 {"questions":[...]}、禁止 {"data":{...}}、禁止 {"result":{...}}）。
 禁止输出任何 JSON 以外的文字、说明、注释。
 
+【公式保留 - 最高优先级】
+- 所有数学公式必须完整保留为 LaTeX 格式
+- 行内公式：$...$
+- 独立公式：$$...$$
+- 禁止遗漏任何公式符号，禁止将公式转为文字描述
+- 即使 AI 无法识别的公式，也要用描述性 LaTeX 占位（如 $\\text{公式图像}$）
+
 学科：${meta.subject || '数学'}
-年级：${meta.grade || '八年级'}
+年级：${meta.grade || '八年级'}}
 
 试卷文本：
-${chunkText}
+${chunkText}}
 
 每道题必须是 JSON 对象，且必须包含以下字符串字段（均不能为空）：
-- content（题干）
-- answer（答案）
-- analysis（解析）
+- content（题干，含完整公式）
+- answer（答案，含完整公式）
+- analysis（解析，含完整公式推导）
 
 可选字段：question_type、difficulty、options、knowledge_point、geometry_desc、latex_blocks、tags
 
 【唯一合法输出格式示例】：
-[{"content":"题干1","answer":"答案1","analysis":"解析1","question_type":"应用题","difficulty":"中等","options":[]},{"content":"题干2","answer":"答案2","analysis":"解析2","question_type":"应用题","difficulty":"中等","options":[]}]
-
-请从试卷文本中识别所有题目并输出 JSON 数组，至少输出 1 道题，禁止返回空数组 []。`
+[{"content":"题干1（含 $公式$）","answer":"答案1（含 $公式$）","analysis":"解析1（含 $推导$）","question_type":"应用题","difficulty":"中等","options":[]}]
+`
 }
 
 /** @deprecated 使用 backupPrompt */

@@ -1,9 +1,6 @@
-import { waitUntil } from '@vercel/functions'
 import { triggerBatchWorker } from './batchTrigger.js'
-import { safeRunBatchWorker } from './batchWorker.js'
 import {
   countItemsByStatus,
-  emergencyRecover,
   getBatchTaskForTeacher,
   markBatchFailed,
   markBatchRunning,
@@ -19,30 +16,8 @@ function isTaskStale(task, staleMinutes = STALE_TASK_MINUTES) {
   return ageMs > staleMinutes * 60 * 1000
 }
 
-async function runWorkerInBackground(batchId, source) {
-  try {
-    console.log(`[batchStart] [${source}] waitUntil → safeRunBatchWorker 开始`, { batchId })
-    const result = await safeRunBatchWorker(batchId)
-    console.log(`[batchStart] [${source}] waitUntil → safeRunBatchWorker 结束`, { batchId, result })
-    if (result?.recovered === false && result?.status === 'failed') {
-      console.error(`[batchStart] [${source}] worker 恢复后仍为 failed`, { batchId, result })
-    }
-    return result
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err)
-    console.error(`[batchStart] [${source}] waitUntil 未捕获异常`, {
-      batchId,
-      msg,
-      stack: err instanceof Error ? err.stack : undefined,
-    })
-    return emergencyRecover(batchId, msg)
-  }
-}
-
 /**
- * 启动或恢复批量拆题 worker。
- * 优先在同函数内 waitUntil 直接执行（避免 self-fetch 401/URL 错误）；
- * 链式续跑仍走 triggerBatchWorker HTTP。
+ * 启动或恢复批量拆题 worker（HTTP 单通道触发 /api/batch/worker）。
  */
 export async function startBatchProcessing(batchId, teacherId, req) {
   const normalizedBatchId = String(batchId ?? '').trim()
@@ -148,20 +123,28 @@ export async function startBatchProcessing(batchId, teacherId, req) {
   console.log(`[启动] 正在触发 Worker，batchId=${normalizedBatchId}`)
   await markBatchRunning(normalizedBatchId)
 
-  // 双通道触发：waitUntil 直调 + HTTP 备用，避免 Worker 未被调度
-  waitUntil(runWorkerInBackground(normalizedBatchId, 'start-waitUntil'))
-  console.log('[batchStart] 已通过 waitUntil 调度 safeRunBatchWorker', { batchId: normalizedBatchId })
-
   const httpTriggered = await triggerBatchWorker(normalizedBatchId, req)
-  if (httpTriggered.ok) {
-    console.log('[batchStart] HTTP Worker 触发成功', { batchId: normalizedBatchId, httpStatus: httpTriggered.status })
-  } else {
-    console.warn('[batchStart] HTTP Worker 触发失败，已依赖 waitUntil 直调', {
+  if (!httpTriggered.ok) {
+    const errMsg = httpTriggered.error || 'Worker 触发失败'
+    console.error('[batchStart] HTTP Worker 触发失败', {
       batchId: normalizedBatchId,
-      error: httpTriggered.error,
+      error: errMsg,
       httpStatus: httpTriggered.status,
     })
+    await markBatchFailed(normalizedBatchId, errMsg)
+    return {
+      ok: false,
+      httpStatus: 500,
+      taskStatus: 'failed',
+      batchId: normalizedBatchId,
+      message: errMsg,
+    }
   }
+
+  console.log('[batchStart] HTTP Worker 触发成功', {
+    batchId: normalizedBatchId,
+    httpStatus: httpTriggered.status,
+  })
 
   return {
     ok: true,

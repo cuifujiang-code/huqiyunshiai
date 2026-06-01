@@ -367,7 +367,8 @@ export async function countItemsByStatus(batchId) {
   return counts
 }
 
-export async function insertBatchQuestions(batchId, teacherId, itemId, questions, taskMeta = {}) {
+export async function insertBatchQuestions(batchId, teacherId, itemId, questions, taskMeta = {}, options = {}) {
+  const { syncTaskCounts = false, syncTeacherBank = false } = options
   const rawQuestions = Array.isArray(questions) ? questions : []
   const questionCount = rawQuestions.length
   console.log('[入库] 收到题目数据，数量=' + questionCount, { batchId, itemId, teacherId })
@@ -420,99 +421,71 @@ export async function insertBatchQuestions(batchId, teacherId, itemId, questions
     )
   }
 
-  // 写入后独立 COUNT 验证，不依赖 insert 的返回数据
+  // 写入后按 item 验证（单轮批量入库时不重复全表 COUNT）
   const { count: verifyCount, error: verifyErr } = await admin
     .from(BANK)
     .select('id', { count: 'exact', head: true })
     .eq('batch_id', batchId)
     .eq('item_id', itemId)
-  const insertedCount = verifyCount ?? 0
-  console.log('[入库] COUNT 验证结果', { batchId, itemId, verifyCount, hasVerifyErr: Boolean(verifyErr) })
+  const insertedCount = verifyErr ? rows.length : (verifyCount ?? rows.length)
+  console.log('[入库] item COUNT 验证', { batchId, itemId, verifyCount, hasVerifyErr: Boolean(verifyErr) })
 
   if (verifyErr) {
-    console.warn('[入库] COUNT 验证查询失败，但 insert 已发出，按写入行数继续', {
-      batchId,
-      itemId,
-      message: verifyErr.message,
-    })
+    console.warn('[入库] item COUNT 验证失败，按写入行数继续', { batchId, itemId, message: verifyErr.message })
   }
 
-  if (insertedCount === 0) {
-    console.warn('[入库] COUNT=0，数据可能未写入或被 RLS 拦截', { batchId, itemId, attempted: rows.length })
-    // 不直接 fail，记录警告，由最终兜底逻辑（finalizeBatchTaskFromDatabase）决定任务状态
+  if (!verifyErr && insertedCount === 0) {
+    console.warn('[入库] item COUNT=0，数据可能未写入或被 RLS 拦截', { batchId, itemId, attempted: rows.length })
   }
 
-  // 同步写入教师主题库（失败不阻断 batch_question_bank 入库，仅记录警告）
-  try {
-    const tqbRows = rows.map((q) => ({
-      teacher_id: teacherId,
-      subject: q.subject,
-      grade: q.grade,
-      knowledge_point: q.knowledge_point,
-      question_type: q.question_type,
-      difficulty: q.difficulty,
-      content: q.content,
-      options: q.options,
-      answer: q.answer,
-      analysis: q.analysis,
-      source: '批量拆题',
-      tags: q.tags,
-      updated_at: nowIso(),
-    }))
-    const { error: tqbErr } = await admin.from('teacher_question_bank').insert(tqbRows)
-    if (tqbErr) {
-      console.warn('[入库] teacher_question_bank 同步失败（batch_question_bank 已写入）', {
-        batchId,
-        itemId,
-        message: tqbErr.message,
-        code: tqbErr.code,
-        details: tqbErr.details,
-        hint: tqbErr.hint,
-      })
-    }
-  } catch (syncErr) {
-    console.warn('[入库] teacher_question_bank 同步异常（batch_question_bank 已写入）', {
-      batchId,
-      itemId,
-      error: syncErr instanceof Error ? syncErr.message : String(syncErr),
+  // teacher_question_bank 同步：改为后台静默写入，失败不阻断主流程
+  // 对标学科网：题目入库优先保证 batch_question_bank 成功，teacher_question_bank 同步为增强功能
+  if (syncTeacherBank) {
+    // 后台异步写入，不 await，不阻断返回
+    Promise.resolve().then(async () => {
+      try {
+        const tqbRows = rows.map((q) => ({
+          teacher_id: teacherId,
+          subject: q.subject,
+          grade: q.grade,
+          knowledge_point: q.knowledge_point,
+          question_type: q.question_type,
+          difficulty: q.difficulty,
+          content: q.content,
+          options: q.options,
+          answer: q.answer,
+          analysis: q.analysis,
+          source: '批量拆题',
+          tags: q.tags,
+          updated_at: nowIso(),
+        }))
+        const { error: tqbErr } = await admin.from('teacher_question_bank').insert(tqbRows)
+        if (tqbErr) {
+          console.warn('[入库] teacher_question_bank 后台同步失败（已忽略，不影响入库）', {
+            batchId, itemId, message: tqbErr.message,
+          })
+        } else {
+          console.log('[入库] teacher_question_bank 后台同步成功', { batchId, itemId, count: tqbRows.length })
+        }
+      } catch (syncErr) {
+        console.warn('[入库] teacher_question_bank 后台同步异常（已忽略）', {
+          batchId, itemId,
+          error: syncErr instanceof Error ? syncErr.message : String(syncErr),
+        })
+      }
+    }).catch((e) => {
+      console.error('[入库] teacher_question_bank 后台同步 Promise 异常', { error: e instanceof Error ? e.message : String(e) })
     })
   }
 
   const finalCount = insertedCount > 0 ? insertedCount : rows.length
 
-  // 以 batch_question_bank 实际 COUNT 同步任务表题目数
-  let actualTotal = finalCount
-  try {
-    actualTotal = await countBatchQuestionsInBank(batchId)
-  } catch (countErr) {
-    console.warn('[入库] countBatchQuestionsInBank 失败，使用本次写入数', {
-      batchId,
-      finalCount,
-      message: countErr instanceof Error ? countErr.message : String(countErr),
-    })
-    const task = await getBatchTask(batchId)
-    actualTotal = (task?.imported_questions ?? 0) + finalCount
+  if (syncTaskCounts) {
+    await syncImportedQuestionsFromBank(batchId)
   }
 
-  const taskAdmin = getSupabaseAdmin()
-  const { error: progressErr } = await taskAdmin.from(TASKS).update({
-    imported_questions: actualTotal,
-    total_questions: actualTotal,
-    updated_at: nowIso(),
-  }).eq('batch_id', batchId)
-  if (progressErr) {
-    console.error('[入库] 更新 imported_questions/total_questions 失败', {
-      batchId,
-      actualTotal,
-      message: progressErr.message,
-      code: progressErr.code,
-    })
-  } else {
-    console.log('[入库] 已同步任务题目数', { batchId, imported_questions: actualTotal, total_questions: actualTotal })
-  }
-
-  console.log(`[入库成功] 共写入 ${finalCount} 题`, { batchId, itemId, teacherId, actualTotal })
-  return { success: true, count: finalCount, actualTotal }
+  console.log(`[入库成功] 共写入 ${finalCount} 题`, { batchId, itemId, teacherId, syncTaskCounts, syncTeacherBank })
+  return { success: true, count: finalCount }
 }
 
 const BANK_SELECT_FIELDS = [
@@ -697,7 +670,54 @@ export async function finalizeBatchTaskFromDatabase(batchId, itemCounts = {}) {
   if (error) throw new Error(error.message)
 
   console.log(`[最终状态] batchId=${batchId}，真实入库数量=${realCount}，任务状态=${status}`)
+
+  if (realCount > 0 && status !== 'failed') {
+    const task = await getBatchTask(batchId)
+    if (task?.teacher_id) {
+      syncTeacherQuestionBankFromBatch(batchId, task.teacher_id).catch((err) => {
+        console.warn('[batchTaskStore] teacher_question_bank 后台同步失败', {
+          batchId,
+          message: err instanceof Error ? err.message : String(err),
+        })
+      })
+    }
+  }
+
   return { realCount, status }
+}
+
+/** 任务完成后将 batch_question_bank 题目同步至 teacher_question_bank（后台异步） */
+export async function syncTeacherQuestionBankFromBatch(batchId, teacherId) {
+  const admin = getBatchQuestionBankClient()
+  const { data, error } = await admin
+    .from(BANK)
+    .select('subject, grade, knowledge_point, question_type, difficulty, content, options, answer, analysis, tags')
+    .eq('batch_id', batchId)
+    .eq('teacher_id', teacherId)
+  if (error) throw new Error(error.message)
+  if (!data?.length) return 0
+
+  const tqbRows = data.map((q) => ({
+    teacher_id: teacherId,
+    subject: q.subject,
+    grade: q.grade,
+    knowledge_point: q.knowledge_point,
+    question_type: q.question_type,
+    difficulty: q.difficulty,
+    content: q.content,
+    options: q.options ?? [],
+    answer: q.answer,
+    analysis: q.analysis,
+    source: '批量拆题',
+    tags: q.tags ?? [],
+    updated_at: nowIso(),
+  }))
+
+  const { error: tqbErr } = await getSupabaseAdmin().from('teacher_question_bank').insert(tqbRows)
+  if (tqbErr) throw new Error(tqbErr.message)
+
+  console.log('[batchTaskStore] teacher_question_bank 批量同步完成', { batchId, count: tqbRows.length })
+  return tqbRows.length
 }
 
 /** 以 batch_question_bank 实际数量同步 batch_decompose_tasks.imported_questions */

@@ -5,6 +5,7 @@
  * 1. 提取 ```json ... ``` 代码块
  * 2. 去除首尾空白
  * 3. 定位第一个 '[' 或 '{' 作为 JSON 起始
+ * 4. 支持中文标点包裹的"伪代码块"
  */
 export function extractJsonFromAiText(text) {
   let s = String(text ?? '').replace(/^\uFEFF/, '').trim()
@@ -34,6 +35,13 @@ export function extractJsonFromAiText(text) {
     if (sliced) return sliced
   }
 
+  // 中文标点伪代码块：「...」、「JSON」...「/JSON」
+  const cnBlock = s.match(/[「【]\s*(?:json|JSON)?\s*([\s\S]*?)[」】]/i)
+  if (cnBlock?.[1]) {
+    const sliced = sliceJsonFromText(cnBlock[1].trim())
+    if (sliced) return sliced
+  }
+
   return sliceJsonFromText(s)
 }
 
@@ -46,23 +54,60 @@ function sliceJsonFromText(text) {
   const objStart = s.indexOf('{')
 
   if (arrStart >= 0 && (objStart < 0 || arrStart <= objStart)) {
-    const end = s.lastIndexOf(']')
+    // 找到匹配的 ]
+    let depth = 0; let end = -1
+    for (let i = arrStart; i < s.length; i++) {
+      if (s[i] === '[') depth++
+      else if (s[i] === ']') { depth--; if (depth === 0) { end = i; break } }
+    }
     if (end > arrStart) return s.slice(arrStart, end + 1).trim()
+    // 降级：最后一个 ]
+    const lastBracket = s.lastIndexOf(']')
+    if (lastBracket > arrStart) return s.slice(arrStart, lastBracket + 1).trim()
   }
 
   if (objStart >= 0) {
-    const end = s.lastIndexOf('}')
+    let depth = 0; let end = -1
+    for (let i = objStart; i < s.length; i++) {
+      if (s[i] === '{') depth++
+      else if (s[i] === '}') { depth--; if (depth === 0) { end = i; break } }
+    }
     if (end > objStart) return s.slice(objStart, end + 1).trim()
+    const lastBrace = s.lastIndexOf('}')
+    if (lastBrace > objStart) return s.slice(objStart, lastBrace + 1).trim()
   }
 
   return s
 }
 
-/** 常见 AI JSON 瑕疵修复（尾随逗号等） */
+/** 常见 AI JSON 瑕疵修复（尾随逗号、单引号、注释等） */
 function repairJsonText(jsonText) {
-  return String(jsonText ?? '')
-    .replace(/,\s*]/g, ']')
-    .replace(/,\s*}/g, '}')
+  let s = String(jsonText ?? '')
+    // 去除行注释
+    .replace(/\/\/.*$/gm, '')
+    // 去除块注释
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+  // 尾随逗号
+  s = s.replace(/,\s*]/g, ']').replace(/,\s*}/g, '}')
+  // 单引号 → 双引号（仅限 key）
+  s = s.replace(/'([^']+)'\s*:/g, '"$1":')
+  return s
+}
+
+/**
+ * 多层 JSON 嵌套解包：AI 有时会输出 JSON 字符串嵌套
+ */
+function unwrapNestedJson(str) {
+  let s = str.trim()
+  for (let i = 0; i < 5; i++) {
+    if ((s.startsWith('"') && s.endsWith('"')) || (s.startsWith("'") && s.endsWith("'"))) {
+      try { s = JSON.parse(s); s = typeof s === 'string' ? s.trim() : JSON.stringify(s) }
+      catch { break }
+    } else {
+      break
+    }
+  }
+  return s
 }
 
 export function safeJsonParse(text) {
@@ -73,6 +118,7 @@ export function safeJsonParse(text) {
   const candidates = [
     String(text).trim(),
     extractJsonFromAiText(text),
+    unwrapNestedJson(String(text).trim()),
     sliceJsonFromText(String(text).trim()),
   ]
 
@@ -104,6 +150,7 @@ export function safeJsonParseAiResponse(aiText) {
 
   const candidates = [
     extractJsonFromAiText(raw),
+    unwrapNestedJson(raw),
     sliceJsonFromText(raw),
     raw,
   ]
