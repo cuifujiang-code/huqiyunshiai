@@ -166,57 +166,164 @@ async function parseImageWithVision(buffer, fileName, meta = {}) {
 }
 
 /**
+ * 解析 DOCX 中的 rels 文件，建立 rId → 文件路径 映射
+ */
+function parseDocxRels(zip) {
+  const relsMap = {}
+  const relsEntry = zip.getEntry('word/_rels/document.xml.rels')
+  if (!relsEntry) return relsMap
+
+  try {
+    const relsXml = relsEntry.getData().toString('utf8')
+    const relRe = /<Relationship[^>]*Id="([^"]*)"[^>]*Target="([^"]*)"[^>]*\/>/g
+    let m
+    while ((m = relRe.exec(relsXml)) !== null) {
+      const target = m[2]
+      // 处理相对路径：media/image1.wmf → word/media/image1.wmf
+      const fullPath = target.startsWith('media/') ? 'word/' + target : target
+      relsMap[m[1]] = fullPath
+    }
+  } catch (e) {
+    console.warn('[docxRels] 解析 rels 失败', e.message)
+  }
+  return relsMap
+}
+
+/**
+ * 从 ZIP 中读取文件为 base64
+ */
+function readZipFileBase64(zip, entryPath) {
+  const entry = zip.getEntry(entryPath)
+  if (!entry) return null
+  const buf = entry.getData()
+  if (!buf || buf.length === 0) return null
+  return buf.toString('base64')
+}
+
+/**
  * DOCX 预处理：在 mammoth 之前，将 MathType OLE 公式和图片替换为占位符
- *
- * mammoth 的 extractRawText 会完全跳过 OLE 对象和图片，
- * 导致文档中的所有公式和图形丢失。
- * 本函数先替换 XML 中的 OLE 公式和图片为文本标记，
- * 确保 mammoth 能将其作为普通文本提取出来。
+ * 同时提取公式和图片的 base64 数据，用于后续自动渲染
  *
  * @param {Buffer} buffer docx 文件二进制
- * @returns {Buffer} 预处理后的 docx 文件二进制
+ * @returns {{ buffer: Buffer, formulaImages: Array, images: Array }}
  */
 function preprocessDocxXml(buffer) {
+  const formulaImages = []
+  const images = []
+
   try {
     const zip = new AdmZip(buffer)
     const docEntry = zip.getEntry('word/document.xml')
     if (!docEntry) {
       console.warn('[docxPreprocess] 未找到 word/document.xml，跳过预处理')
-      return buffer
+      return { buffer, formulaImages, images }
     }
+
+    // 解析 rId → 文件映射
+    const relsMap = parseDocxRels(zip)
 
     let xml = docEntry.getData().toString('utf8')
     let modifications = 0
+    let formulaIdx = 0
+    let imageIdx = 0
+
+    // ========== 辅助函数：提取 OLE 公式对应的 WMF 渲染图 ==========
+    function extractOleImage(oleXmlBlock, idx) {
+      // 从 OLE 对象的 r:id 找到对应的 WMF 文件
+      const rIdMatch = oleXmlBlock.match(/r:id="(rId\d+)"/)
+      if (rIdMatch && relsMap[rIdMatch[1]]) {
+        const wmfPath = relsMap[rIdMatch[1]]
+        const b64 = readZipFileBase64(zip, wmfPath)
+        if (b64) {
+          const ext = wmfPath.split('.').pop().toLowerCase()
+          // 判断尺寸（从 XML 中提取 cy/style 属性估算）
+          let width = 'auto', height = 'auto'
+          const styleMatch = oleXmlBlock.match(/style="width:([\d.]+)(pt|in|cm|px)/)
+          if (styleMatch) {
+            width = styleMatch[1]
+            const unit = styleMatch[2]
+            if (unit === 'pt') width = Math.round(parseFloat(width) * 1.33) + 'px'
+            else if (unit === 'in') width = Math.round(parseFloat(width) * 96) + 'px'
+          }
+          formulaImages.push({
+            index: idx,
+            base64: b64,
+            format: ext,
+            width,
+            height,
+          })
+          return true
+        }
+      }
+      // 如果 r:id 没找到，尝试从 w:pict 的 imagedata 找
+      const imgIdMatch = oleXmlBlock.match(/r:id="(rId\d+)"/g)
+      if (imgIdMatch) {
+        for (const idStr of imgIdMatch) {
+          const id = idStr.match(/rId\d+/)[0]
+          if (relsMap[id]) {
+            const b64 = readZipFileBase64(zip, relsMap[id])
+            if (b64) {
+              formulaImages.push({ index: idx, base64: b64, format: relsMap[id].split('.').pop().toLowerCase(), width: 'auto', height: 'auto' })
+              return true
+            }
+          }
+        }
+      }
+      return false
+    }
+
+    // ========== 辅助函数：提取独立图片 ==========
+    function extractDrawingImage(drawingXml, idx) {
+      // 从 a:blip 的 r:embed 找到图片
+      const blipMatch = drawingXml.match(/r:embed="(rId\d+)"/)
+      if (blipMatch && relsMap[blipMatch[1]]) {
+        const imgPath = relsMap[blipMatch[1]]
+        const b64 = readZipFileBase64(zip, imgPath)
+        if (b64) {
+          const ext = imgPath.split('.').pop().toLowerCase()
+          images.push({
+            index: idx,
+            base64: b64,
+            mime: ext === 'png' ? 'image/png' : ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg' : ext === 'gif' ? 'image/gif' : 'image/' + ext,
+            size: b64.length,
+          })
+          return true
+        }
+      }
+      return false
+    }
 
     // 1. 处理 MathType OLE 公式对象
-    // OLE 对象模式: <w:object ...><v:shape ...><o:OLEObject .../></v:shape></w:object>
-    // 替换为文本标记
     const oleRe = /<w:object[\s\S]*?<\/w:object>/g
     xml = xml.replace(oleRe, (match) => {
-      // 检查是否包含 OLEObject（确认是嵌入对象）
       if (match.includes('OLEObject')) {
         modifications++
-        // 尝试从 w:instrText 中提取域代码文本
-        const instrMatch = match.match(/<w:instrText[^>]*>([\s\S]*?)<\/w:instrText>/)
-        if (instrMatch && instrMatch[1]) {
-          // 有域代码文本，提取为公式标记
-          return '<w:r><w:t xml:space="preserve">【公式】</w:t></w:r>'
-        }
+        extractOleImage(match, formulaIdx++)
         return '<w:r><w:t xml:space="preserve">【公式】</w:t></w:r>'
       }
       return match
     })
 
-    // 2. 处理 w:pict 中的 OLE 公式（MathType 旧格式）
+    // 2. 处理 w:pict 中的 OLE 公式 / 图片
     const pictRe = /<w:pict[\s\S]*?<\/w:pict>/g
     xml = xml.replace(pictRe, (match) => {
       if (match.includes('OLEObject') || match.includes('EMBED Equation')) {
         modifications++
+        extractOleImage(match, formulaIdx++)
         return '<w:r><w:t xml:space="preserve">【公式】</w:t></w:r>'
       }
-      // 检查是否是图片
       if (match.includes('imagedata') || match.includes('image')) {
         modifications++
+        // 提取图片
+        const rIdMatch = match.match(/r:id="(rId\d+)"/)
+        if (rIdMatch && relsMap[rIdMatch[1]]) {
+          const b64 = readZipFileBase64(zip, relsMap[rIdMatch[1]])
+          if (b64) {
+            const p = relsMap[rIdMatch[1]]
+            images.push({ index: imageIdx, base64: b64, mime: p.endsWith('.png') ? 'image/png' : p.endsWith('.jpg') ? 'image/jpeg' : 'image/' + p.split('.').pop(), size: b64.length })
+          }
+        }
+        imageIdx++
         return '<w:r><w:t xml:space="preserve">[图片占位符]</w:t></w:r>'
       }
       return match
@@ -224,15 +331,17 @@ function preprocessDocxXml(buffer) {
 
     // 3. 处理 w:drawing（图片）
     const drawingRe = /<w:drawing[\s\S]*?<\/w:drawing>/g
-    xml = xml.replace(drawingRe, () => {
+    xml = xml.replace(drawingRe, (match) => {
       modifications++
+      extractDrawingImage(match, imageIdx++)
       return '<w:r><w:t xml:space="preserve">[图片占位符]</w:t></w:r>'
     })
 
-    // 4. 处理独立的 OLEObject（在 w:object 外的情况）
+    // 4. 处理独立的 OLEObject
     const standaloneOleRe = /<o:OLEObject[^>]*\/>/g
     xml = xml.replace(standaloneOleRe, () => {
       modifications++
+      formulaIdx++
       return '<w:r><w:t xml:space="preserve">【公式】</w:t></w:r>'
     })
 
@@ -240,19 +349,21 @@ function preprocessDocxXml(buffer) {
       zip.updateFile('word/document.xml', Buffer.from(xml, 'utf8'))
       console.log('[docxPreprocess] 预处理完成', {
         modifications,
+        formulasExtracted: formulaImages.length,
+        imagesExtracted: images.length,
         oleFormulas: (xml.match(/【公式】/g) || []).length,
         imagePlaceholders: (xml.match(/\[图片占位符\]/g) || []).length,
       })
-      return zip.toBuffer()
+      return { buffer: zip.toBuffer(), formulaImages, images }
     }
 
     console.log('[docxPreprocess] 无需预处理（未发现公式或图片）')
-    return buffer
+    return { buffer, formulaImages, images }
   } catch (err) {
     console.error('[docxPreprocess] 预处理失败，回退原始文件', {
       error: err instanceof Error ? err.message : String(err),
     })
-    return buffer
+    return { buffer, formulaImages, images }
   }
 }
 
@@ -260,8 +371,8 @@ function preprocessDocxXml(buffer) {
 async function parseDocx(buffer, fileName) {
   console.log('[试卷解析] 开始 Word', { fileName, bytes: buffer.length })
 
-  // 预处理：替换 MathType OLE 公式和图片为占位符
-  const preprocessed = preprocessDocxXml(buffer)
+  // 预处理：替换 MathType OLE 公式和图片为占位符，同时提取 base64
+  const { buffer: preprocessed, formulaImages, images } = preprocessDocxXml(buffer)
 
   const result = await mammoth.extractRawText({ buffer: preprocessed })
   const text = (result.value || '').trim()
@@ -278,8 +389,21 @@ async function parseDocx(buffer, fileName) {
     textLength: text.length,
     formulaMarkers: formulaCount,
     imagePlaceholders: imageCount,
+    formulasExtracted: formulaImages.length,
+    imagesExtracted: images.length,
   })
-  return { text, type: 'docx', _preprocessStats: { formulaMarkers: formulaCount, imagePlaceholders: imageCount } }
+
+  const result2 = { text, type: 'docx', _preprocessStats: { formulaMarkers: formulaCount, imagePlaceholders: imageCount } }
+
+  // 附加提取的公式/图片数据
+  if (formulaImages.length > 0) {
+    result2.formulaImages = formulaImages
+  }
+  if (images.length > 0) {
+    result2.images = images
+  }
+
+  return result2
 }
 
 /** 解析 .pdf（含扫描版 PDF 检测 + OCR 回退） */

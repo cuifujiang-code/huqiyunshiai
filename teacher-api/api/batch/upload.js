@@ -62,7 +62,7 @@ async function parseUploadToText(body) {
   const { examFileBase64, examFileName, rawText, subject, grade } = body ?? {}
 
   if (rawText && typeof rawText === 'string' && rawText.trim()) {
-    return { text: rawText.trim(), fileName: examFileName || 'paste.txt', type: 'text' }
+    return { text: rawText.trim(), fileName: examFileName || 'paste.txt', type: 'text', formulaImages: null, images: null }
   }
 
   if (!examFileBase64 || !examFileName) {
@@ -78,8 +78,20 @@ async function parseUploadToText(body) {
     grade: meta.grade,
   })
   const result = await parseExamFile(buffer, examFileName, meta)
-  console.log('[batch/upload] 解析完成', { examFileName, textLength: result.text.length, type: result.type })
-  return { text: result.text, fileName: examFileName, type: result.type }
+  console.log('[batch/upload] 解析完成', {
+    examFileName,
+    textLength: result.text.length,
+    type: result.type,
+    hasFormulaImages: Boolean(result.formulaImages?.length),
+    hasImages: Boolean(result.images?.length),
+  })
+  return {
+    text: result.text,
+    fileName: examFileName,
+    type: result.type,
+    formulaImages: result.formulaImages || null,
+    images: result.images || null,
+  }
 }
 
 export default async function handler(req, res) {
@@ -145,7 +157,7 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { text, fileName } = await parseUploadToText(body)
+    const { text, fileName, formulaImages: autoFormulaImages, images: autoImages } = await parseUploadToText(body)
     const chunks = splitTextIntoChunks(text)
     const chunkCount = chunks.length
 
@@ -156,7 +168,23 @@ export default async function handler(req, res) {
     }
 
     const batchId = randomUUID()
-    console.log('[batch/upload] 创建任务 → batch_decompose_tasks', { batchId, teacherId, chunkCount })
+
+    // 合并：优先使用前端传入的 imagesJson，其次使用后端自动提取的
+    const effectiveFormulaImages = (imagesJson?.formulas?.length > 0)
+      ? imagesJson.formulas
+      : autoFormulaImages || []
+    const effectiveImages = (imagesJson?.images?.length > 0)
+      ? imagesJson.images
+      : autoImages || []
+
+    console.log('[batch/upload] 创建任务 → batch_decompose_tasks', {
+      batchId,
+      teacherId,
+      chunkCount,
+      formulaCount: effectiveFormulaImages.length,
+      imageCount: effectiveImages.length,
+      source: (imagesJson?.formulas?.length > 0) ? '前端传入' : '后端自动提取',
+    })
 
     const created = await createBatchTask({
       batchId,
@@ -168,9 +196,9 @@ export default async function handler(req, res) {
       meta: {
         chunkCount,
         textLength: text.length,
-        ...(imagesJson ? {
-          formulaImages: imagesJson.formulas || [],
-          images: imagesJson.images || [],
+        ...(effectiveFormulaImages.length > 0 || effectiveImages.length > 0 ? {
+          formulaImages: effectiveFormulaImages,
+          images: effectiveImages,
         } : {}),
       },
     })

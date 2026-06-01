@@ -143,8 +143,11 @@ export function isValidQuestion(q) {
 
 /**
  * 用预提取的公式渲染图替换 content 中的【公式】占位符
+ * 支持两种格式：
+ *   新格式（后端自动提取）: {base64, format:'wmf'|'png', width, height}
+ *   旧格式（Python提取）:   {png_base64, width, height}
  * @param {string} text 文本内容
- * @param {Array} formulaImages 预提取的公式图 [{png_base64, width, height}]
+ * @param {Array} formulaImages 预提取的公式图
  * @param {number} startIndex 公式图索引起始偏移
  * @returns {{ text: string, replacedCount: number, nextIndex: number }}
  */
@@ -159,24 +162,41 @@ function replaceFormulaPlaceholders(text, formulaImages, startIndex = 0) {
 
   text = text.replace(/【公式】/g, () => {
     if (idx >= formulaImages.length) return '【公式待补】'
-    if (replaced >= MAX_FORMULA_PER_QUESTION) return '【公式】' // 超出限制，保留占位符
+    if (replaced >= MAX_FORMULA_PER_QUESTION) return '【公式】'
     const fi = formulaImages[idx]
     idx++
-    if (fi && fi.png_base64) {
-      replaced++
-      // 限制 base64 长度（防止 DB 字段过大：约 100KB 上限）
-      const MAX_B64_LEN = 15000
-      let b64 = fi.png_base64
-      if (b64.length > MAX_B64_LEN) {
-        console.warn('[normalizer] 公式 base64 过长，截断', { idx: idx - 1, len: b64.length })
-        b64 = b64.slice(0, MAX_B64_LEN)
-      }
-      const w = fi.width || 'auto'
-      const h = fi.height || 'auto'
-      // 使用 data URI，但限制总大小
-      return `<img src="data:image/png;base64,${b64}" alt="公式" style="display:inline-block;vertical-align:middle;max-width:100%;height:auto;" width="${w}" height="${h}" />`
+
+    // 获取 base64（兼容新旧格式）
+    const b64 = fi.png_base64 || fi.base64
+    if (!b64) return '【公式待补】'
+
+    replaced++
+
+    // 限制 base64 长度
+    const MAX_B64_LEN = 15000
+    let safeB64 = b64
+    if (safeB64.length > MAX_B64_LEN) {
+      console.warn('[normalizer] 公式 base64 过长，截断', { idx: idx - 1, len: safeB64.length })
+      safeB64 = safeB64.slice(0, MAX_B64_LEN)
     }
-    return '【公式待补】'
+
+    const w = fi.width || 'auto'
+    const h = fi.height || 'auto'
+    const fmt = fi.format || 'png'
+
+    // 根据格式选择 MIME 类型
+    const mimeMap = {
+      wmf: 'image/x-wmf',
+      emf: 'image/x-emf',
+      png: 'image/png',
+      jpg: 'image/jpeg',
+      jpeg: 'image/jpeg',
+      gif: 'image/gif',
+      svg: 'image/svg+xml',
+    }
+    const mime = mimeMap[fmt] || 'image/' + fmt
+
+    return `<img src="data:${mime};base64,${safeB64}" alt="公式" style="display:inline-block;vertical-align:middle;max-width:100%;height:auto;" width="${w}" height="${h}" data-formula-idx="${idx - 1}" data-format="${fmt}" />`
   })
 
   return { text, replacedCount: replaced, nextIndex: idx }

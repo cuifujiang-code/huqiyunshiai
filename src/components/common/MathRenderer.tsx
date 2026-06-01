@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useMemo, useEffect, useRef } from 'react'
 import katex from 'katex'
 import 'katex/dist/katex.min.css'
 
@@ -170,9 +170,40 @@ function renderWithHtmlTags(text: string): string {
 
 export default function MathRenderer({ text, className = '', displayMode = true }: MathRendererProps) {
   const html = useMemo(() => renderLatexText(text, displayMode), [text, displayMode])
+  const containerRef = useRef<HTMLSpanElement>(null)
+
+  // 处理 WMF 公式图片的 fallback：当浏览器不支持 image/x-wmf 时显示公式编号
+  useEffect(() => {
+    const container = containerRef.current
+    if (!container) return
+
+    const wmfImgs = container.querySelectorAll<HTMLImageElement>('img[data-format="wmf"]')
+    wmfImgs.forEach((img) => {
+      // 如果图片已经加载成功（自然宽度 > 0），跳过
+      if (img.naturalWidth > 0) return
+
+      // 添加错误处理：WMF 加载失败时显示公式编号 fallback
+      const handleError = () => {
+        const idx = img.getAttribute('data-formula-idx') || '?'
+        const span = document.createElement('span')
+        span.className = 'inline-flex items-center justify-center px-1.5 py-0.5 mx-0.5 rounded bg-amber-100 text-amber-800 text-xs font-medium border border-amber-300 dark:bg-amber-900/30 dark:text-amber-300 dark:border-amber-700'
+        span.textContent = `F${idx}`
+        span.title = `公式 #${idx}（浏览器不支持 WMF 格式，请在预览中查看）`
+        img.replaceWith(span)
+      }
+
+      // 如果已经加载失败（complete=true 且 naturalWidth=0）
+      if (img.complete && img.naturalWidth === 0) {
+        handleError()
+      } else {
+        img.addEventListener('error', handleError, { once: true })
+      }
+    })
+  }, [html])
 
   return (
     <span
+      ref={containerRef}
       className={`math-renderer ${className}`}
       dangerouslySetInnerHTML={{ __html: html }}
     />
