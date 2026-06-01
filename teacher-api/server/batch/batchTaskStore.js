@@ -652,7 +652,25 @@ export async function finalizeBatchTaskFromDatabase(batchId, itemCounts = {}) {
   }
 
   if (status === 'failed') {
-    patch.error_message = '拆题流程结束但未检测到入库题目（batch_question_bank count=0）'
+    // 收集所有 failed item 的错误原因用于排查
+    let itemsErrorInfo = ''
+    try {
+      const { data: failedItems } = await admin.from(ITEMS)
+        .select('item_index, error_message')
+        .eq('batch_id', batchId)
+        .eq('status', 'failed')
+        .limit(5)
+      if (failedItems && failedItems.length > 0) {
+        const errors = failedItems.map(it => `[分块${it.item_index}] ${(it.error_message || '未知').slice(0, 100)}`)
+        itemsErrorInfo = ' | 分块错误: ' + errors.join('; ')
+      }
+    } catch (e) {
+      itemsErrorInfo = ' | (无法查询分块错误: ' + (e instanceof Error ? e.message : String(e)) + ')'
+    }
+    patch.error_message = '拆题流程结束但未检测到入库题目（batch_question_bank count=0）。' +
+      `total_items=${itemCounts.completed + itemCounts.failed + (itemCounts.pending ?? 0) + (itemCounts.processing ?? 0)}, ` +
+      `completed=${itemCounts.completed ?? 0}, failed=${itemCounts.failed ?? 0}` +
+      itemsErrorInfo
   } else {
     patch.error_message = null
   }

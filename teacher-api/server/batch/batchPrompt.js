@@ -405,9 +405,13 @@ export async function parseBatchSplitAiResponse(aiText, meta, sortOffset, extrac
     console.warn(`[Prompt] 无法解析 AI 响应，原始内容前500字符=${rawPreview500}`)
     console.warn('[batchWorker] 所有提取路径均为空', {
       attempts,
-      parsedPreview: JSON.stringify(parsed).slice(0, 400),
+      parsedType: typeof parsed,
+      parsedIsArray: Array.isArray(parsed),
+      parsedKeys: parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? Object.keys(parsed).slice(0, 20) : [],
+      parsedPreview: JSON.stringify(parsed).slice(0, 500),
+      rawPreview500,
     })
-    return { questions: [], rawQuestions: [], extractPath: 'all_paths_empty', parsed, rawPreview1000 }
+    return { questions: [], rawQuestions: [], extractPath: 'all_paths_empty', parsed, rawPreview1000, attempts }
   }
 
   const questions = normalizeBatchQuestions(rawQuestions, meta, sortOffset)

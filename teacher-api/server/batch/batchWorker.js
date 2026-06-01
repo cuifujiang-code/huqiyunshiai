@@ -147,7 +147,16 @@ async function invokeAiParse(item, meta, sortOffset, useFallbackPrompt) {
     label: useFallbackPrompt ? 'batch-split-fallback' : 'batch-split',
   })
 
-  console.log('[batchWorker] AI 完整原始响应前1000字符:', String(content ?? '').slice(0, 1000))
+  const rawText = String(content ?? '')
+  const respLen = rawText.length
+  console.log('[batchWorker] AI 响应', {
+    label: useFallbackPrompt ? 'fallback' : 'primary',
+    model: BATCH_MODEL,
+    responseLength: respLen,
+    first200: rawText.slice(0, 200),
+    last200: respLen > 200 ? rawText.slice(-200) : '',
+    containsJsonArray: rawText.includes('[') && rawText.includes(']'),
+  })
 
   return await parseBatchSplitAiResponse(content, meta, sortOffset, extractJson, safeJsonParse)
 }
@@ -249,14 +258,25 @@ async function processOneItem(item, meta, sortOffset, batchId) {
     })
 
     if (!normalizedQuestions.length) {
-      const msg = `本分块无有效题目（原始=${rawCount}，过滤=${filteredCount}，extractPath=${parsed.extractPath}）`
+      // 收集 AI 响应摘要用于排查
+      const rawPreview = parsed.rawPreview1000 || (parsed.parsed ? JSON.stringify(parsed.parsed).slice(0, 500) : '无')
+      const attemptsInfo = parsed.attempts ? parsed.attempts.join('; ') : '无'
+      const detailMsg = [
+        `本分块无有效题目（原始=${rawCount}，过滤=${filteredCount}，extractPath=${parsed.extractPath}）`,
+        `AI解析尝试: ${attemptsInfo}`,
+        `AI响应预览: ${rawPreview.slice(0, 300)}`,
+      ].join(' | ')
       console.warn('[Worker] 本分块跳过入库，不标记任务失败，等待最终数据库兜底', {
         itemId: item.id,
         batchId,
-        msg,
+        rawCount,
+        filteredCount,
+        extractPath: parsed.extractPath,
+        attempts: parsed.attempts,
+        rawPreview: rawPreview.slice(0, 200),
       })
-      await markItemFailed(item.id, msg)
-      return { success: false, error: msg, itemId: item.id, rawQuestions: [], questions: [], skipTaskFail: true }
+      await markItemFailed(item.id, detailMsg)
+      return { success: false, error: detailMsg, itemId: item.id, rawQuestions: [], questions: [], skipTaskFail: true, debug: { extractPath: parsed.extractPath, attempts: parsed.attempts, rawPreview } }
     }
 
     return {
@@ -267,9 +287,13 @@ async function processOneItem(item, meta, sortOffset, batchId) {
     }
   } catch (error) {
     const msg = error instanceof Error ? error.message : '拆题失败'
-    console.error('[batchWorker] 分块处理失败', { itemId: item.id, msg })
-    await markItemFailed(item.id, msg)
-    return { success: false, error: msg, itemId: item.id, rawQuestions: [], questions: [], skipTaskFail: true }
+    const detailMsg = [
+      msg,
+      `chunk_text前100字符: ${String(item.chunk_text ?? '').slice(0, 100)}`,
+    ].join(' | ')
+    console.error('[batchWorker] 分块处理失败', { itemId: item.id, msg, chunkPreview: String(item.chunk_text ?? '').slice(0, 200) })
+    await markItemFailed(item.id, detailMsg)
+    return { success: false, error: detailMsg, itemId: item.id, rawQuestions: [], questions: [], skipTaskFail: true, debug: { chunkPreview: String(item.chunk_text ?? '').slice(0, 200) } }
   }
 }
 
