@@ -7,6 +7,8 @@ import healthHandler from './health.js'
 import workerHandler from './worker.js'
 import autoRetryHandler from './auto-retry.js'
 
+import debugHandler from './debug.js'
+
 const ROUTES = {
   upload: uploadHandler,
   start: startHandler,
@@ -14,6 +16,7 @@ const ROUTES = {
   health: healthHandler,
   worker: workerHandler,
   'auto-retry': autoRetryHandler,
+  debug: debugHandler,
 }
 
 function resolveBatchSegment(req) {
