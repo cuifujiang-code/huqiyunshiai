@@ -411,7 +411,7 @@ export async function insertBatchQuestions(batchId, teacherId, itemId, questions
       code: error.code,
       details: error.details,
       hint: error.hint,
-      fullError: error,
+      fullErrorJson: JSON.stringify(error, Object.getOwnPropertyNames(error)),
     })
     return failBatchInsert(
       batchId,
@@ -480,12 +480,27 @@ export async function insertBatchQuestions(batchId, teacherId, itemId, questions
 
   const finalCount = insertedCount > 0 ? insertedCount : rows.length
 
-  if (syncTaskCounts) {
-    await syncImportedQuestionsFromBank(batchId)
+  // 写入成功：必须同步 batch_decompose_tasks.total_questions / imported_questions
+  let actualTotal = finalCount
+  try {
+    actualTotal = await syncImportedQuestionsFromBank(batchId)
+    console.log('[入库] 已同步 batch_decompose_tasks 题目数', {
+      batchId,
+      imported_questions: actualTotal,
+      total_questions: actualTotal,
+      itemWritten: finalCount,
+    })
+  } catch (syncErr) {
+    console.error('[入库] 同步 total_questions/imported_questions 失败', {
+      batchId,
+      itemId,
+      message: syncErr instanceof Error ? syncErr.message : String(syncErr),
+      stack: syncErr instanceof Error ? syncErr.stack : undefined,
+    })
   }
 
-  console.log(`[入库成功] 共写入 ${finalCount} 题`, { batchId, itemId, teacherId, syncTaskCounts, syncTeacherBank })
-  return { success: true, count: finalCount }
+  console.log(`[入库成功] 共写入 ${finalCount} 题`, { batchId, itemId, teacherId, actualTotal })
+  return { success: true, count: finalCount, actualTotal }
 }
 
 const BANK_SELECT_FIELDS = [

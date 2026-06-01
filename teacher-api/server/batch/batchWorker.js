@@ -171,6 +171,7 @@ async function invokeAiParse(item, meta, sortOffset, useBackupPrompt) {
     throw new DeepSeekApiError(msg, { model: BATCH_MODEL })
   }
 
+  console.log('[DeepSeek] 完整响应:', JSON.stringify(aiResponse, null, 2))
   console.log('[AI解析] 原始返回数据: ' + JSON.stringify(aiResponse))
 
   const parsed = await parseBatchSplitAiResponse(aiResponse, meta, sortOffset, extractJson, safeJsonParse)

@@ -9,6 +9,39 @@ function sleep(ms) {
 }
 
 /**
+ * 从 DeepSeek/OpenAI 聊天格式响应中提取 message.content
+ * 支持：纯文本、JSON 字符串、{ choices: [{ message: { content: "..." } }] }
+ */
+export function extractDeepSeekChatContent(raw) {
+  if (raw == null) return ''
+
+  if (typeof raw === 'object') {
+    const content = raw?.choices?.[0]?.message?.content
+      ?? raw?.choices?.[0]?.text
+      ?? raw?.message?.content
+    if (typeof content === 'string' && content.trim()) return content.trim()
+    return ''
+  }
+
+  const s = String(raw).replace(/^\uFEFF/, '').trim()
+  if (!s) return ''
+
+  if (s.startsWith('{') || s.startsWith('[')) {
+    try {
+      const parsed = JSON.parse(s)
+      if (parsed && typeof parsed === 'object') {
+        const fromChat = extractDeepSeekChatContent(parsed)
+        if (fromChat) return fromChat
+      }
+    } catch {
+      // 非 JSON，按纯文本继续
+    }
+  }
+
+  return s
+}
+
+/**
  * 预处理 AI 原始字符串：移除 Markdown 标记，提取第一个 '[' 到最后一个 ']' 的 JSON 片段
  */
 export function preprocessAiJsonString(rawText) {
@@ -56,7 +89,8 @@ export async function parseJsonFromAiTextWithRetry(rawText, safeJsonParseFn) {
       return parsed
     } catch (err) {
       lastError = err instanceof Error ? err : new Error(String(err))
-      console.warn('[batchPrompt] JSON.parse 失败', {
+      console.warn('[batchPrompt] JSON.parse 失败，原始 content 前500字符=', fullRaw.slice(0, 500))
+      console.warn('[batchPrompt] JSON.parse 失败详情', {
         attempt,
         message: lastError.message,
         cleanedPreview: cleaned.slice(0, 300),
@@ -371,9 +405,17 @@ export function normalizeBatchQuestions(raw, meta, startOrder = 0) {
  * @returns {Promise<{ questions: object[], rawQuestions: object[], extractPath: string, parsed: unknown }>}
  */
 export async function parseBatchSplitAiResponse(aiText, meta, sortOffset, extractJson, safeJsonParse) {
-  const rawText = String(aiText ?? '')
+  const chatContent = extractDeepSeekChatContent(aiText)
+  const rawText = chatContent || String(aiText ?? '')
   const rawPreview500 = rawText.slice(0, 500)
   const rawPreview1000 = rawText.slice(0, 1000)
+
+  if (chatContent && chatContent !== String(aiText ?? '').trim()) {
+    console.log('[batchPrompt] 已从 DeepSeek choices.message.content 提取文本', {
+      extractLength: chatContent.length,
+      preview500: chatContent.slice(0, 500),
+    })
+  }
 
   if (!rawText.trim()) {
     console.warn('[batchWorker] AI 响应为空')
@@ -426,9 +468,18 @@ export async function parseBatchSplitAiResponse(aiText, meta, sortOffset, extrac
   console.log('[Worker] 提取题目，原始数据字段=' + topKeysBefore.join(','))
 
   if (parsed == null) {
-    console.warn(`[Prompt] 无法解析 AI 响应，原始内容前500字符=${rawPreview500}`)
-    console.warn('[batchWorker] JSON 解析全部失败', { attempts, parseSource, rawPreview1000 })
-    throw new Error(`AI 响应 JSON 解析失败（attempts=${attempts.join('; ')}）`)
+    console.warn(`[Prompt] 无法解析 AI 响应，原始 content 前500字符=${rawPreview500}`)
+    console.warn('[batchWorker] JSON 解析全部失败，2秒后重试一次', { attempts, parseSource, rawPreview1000 })
+    await sleep(JSON_PARSE_RETRY_DELAY_MS)
+    try {
+      parsed = await parseJsonFromAiTextWithRetry(preprocessAiJsonString(rawText), safeJsonParse)
+      parseSource = 'retry_after_json_fail'
+      attempts.push('retry_after_json_fail:ok')
+    } catch (retryErr) {
+      attempts.push(`retry_after_json_fail:${retryErr instanceof Error ? retryErr.message : String(retryErr)}`)
+      console.warn('[batchWorker] JSON 解析重试仍失败', { attempts, rawPreview500 })
+      throw new Error(`AI 响应 JSON 解析失败（attempts=${attempts.join('; ')}）`)
+    }
   }
 
   console.log('[batchWorker] JSON 解析成功', { parseSource, attempts })
