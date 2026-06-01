@@ -55,6 +55,10 @@
     "api/decompose-process.js": {
       "maxDuration": 60,
       "includeFiles": "server/**"
+    },
+    "api/debug-tasks.js": {
+      "maxDuration": 10,
+      "includeFiles": "server/**"
     }
   },
   "crons": [
