@@ -120,25 +120,52 @@ function escapeHtml(text: string): string {
 
 /**
  * 渲染含 HTML 标签的文本（img 等保留标签直接输出，其余转义）
+ * 带缓存：相同文本不重复解析
  */
+const htmlTagCache = new Map<string, string>()
+
 function renderWithHtmlTags(text: string): string {
   if (!/<img\s[^>]*\/?>|<br\s*\/?>|<hr\s*\/?>/.test(text)) {
     return escapeHtml(text)
   }
+
+  // 缓存检查
+  if (htmlTagCache.has(text)) {
+    return htmlTagCache.get(text)!
+  }
+
+  // 防止缓存过大
+  if (htmlTagCache.size > 500) {
+    const iter = htmlTagCache.keys()
+    for (let i = 0; i < 200; i++) {
+      htmlTagCache.delete(iter.next().value!)
+    }
+  }
+
   const parts: string[] = []
   let remaining = text
-  const tagRegex = /(<img\s[^>]*\/?>|<br\s*\/?>|<hr\s*\/?>)/gi
+  // 优化正则：更精确地匹配自闭合标签
+  const tagRegex = /(<img\b[^>]*\/?>|<br\b[^>]*\/?>|<hr\b[^>]*\/?>)/gi
   let lastIndex = 0
   let match: RegExpExecArray | null
+
+  // 重置 lastIndex 避免 sticky 问题
+  tagRegex.lastIndex = 0
+
   while ((match = tagRegex.exec(remaining)) !== null) {
     const before = remaining.slice(lastIndex, match.index)
     if (before) parts.push(escapeHtml(before))
+    // 直接输出 HTML 标签（不做转义）
     parts.push(match[1])
     lastIndex = match.index + match[0].length
   }
+
   const after = remaining.slice(lastIndex)
   if (after) parts.push(escapeHtml(after))
-  return parts.join('')
+
+  const result = parts.join('')
+  htmlTagCache.set(text, result)
+  return result
 }
 
 export default function MathRenderer({ text, className = '', displayMode = true }: MathRendererProps) {

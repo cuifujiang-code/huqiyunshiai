@@ -152,18 +152,29 @@ function replaceFormulaPlaceholders(text, formulaImages, startIndex = 0) {
   if (!formulaImages || !formulaImages.length) return { text, replacedCount: 0, nextIndex: startIndex }
   if (!text || !text.includes('【公式】')) return { text, replacedCount: 0, nextIndex: startIndex }
 
+  // 安全限制：最多替换 50 个公式，防止 content 过大
+  const MAX_FORMULA_PER_QUESTION = 50
   let replaced = 0
   let idx = startIndex
 
   text = text.replace(/【公式】/g, () => {
     if (idx >= formulaImages.length) return '【公式待补】'
+    if (replaced >= MAX_FORMULA_PER_QUESTION) return '【公式】' // 超出限制，保留占位符
     const fi = formulaImages[idx]
     idx++
     if (fi && fi.png_base64) {
       replaced++
+      // 限制 base64 长度（防止 DB 字段过大：约 100KB 上限）
+      const MAX_B64_LEN = 15000
+      let b64 = fi.png_base64
+      if (b64.length > MAX_B64_LEN) {
+        console.warn('[normalizer] 公式 base64 过长，截断', { idx: idx - 1, len: b64.length })
+        b64 = b64.slice(0, MAX_B64_LEN)
+      }
       const w = fi.width || 'auto'
       const h = fi.height || 'auto'
-      return `<img src="data:image/png;base64,${fi.png_base64}" alt="公式" style="display:inline-block;vertical-align:middle;max-width:100%;height:auto;" width="${w}" height="${h}" />`
+      // 使用 data URI，但限制总大小
+      return `<img src="data:image/png;base64,${b64}" alt="公式" style="display:inline-block;vertical-align:middle;max-width:100%;height:auto;" width="${w}" height="${h}" />`
     }
     return '【公式待补】'
   })
@@ -181,17 +192,26 @@ function replaceImagePlaceholders(text, images, startIndex = 0) {
   if (!images || !images.length) return { text, replacedCount: 0, nextIndex: startIndex }
   if (!text || !text.includes('[图片占位符]')) return { text, replacedCount: 0, nextIndex: startIndex }
 
+  const MAX_IMG_PER_QUESTION = 20
   let replaced = 0
   let idx = startIndex
 
   text = text.replace(/\[图片占位符\]/g, () => {
     if (idx >= images.length) return '[图片占位符]'
+    if (replaced >= MAX_IMG_PER_QUESTION) return '[图片占位符]' // 超出限制
     const img = images[idx]
     idx++
     if (img && img.base64) {
       replaced++
       const mime = img.mime || 'image/png'
-      return `<img src="data:${mime};base64,${img.base64}" alt="插图" style="display:block;max-width:100%;height:auto;margin:8px 0;" />`
+      // 限制 base64 长度
+      const MAX_B64_LEN = 50000
+      let b64 = img.base64
+      if (b64.length > MAX_B64_LEN) {
+        console.warn('[normalizer] 图片 base64 过长，截断', { idx: idx - 1, len: b64.length })
+        b64 = b64.slice(0, MAX_B64_LEN)
+      }
+      return `<img src="data:${mime};base64,${b64}" alt="插图" style="display:block;max-width:100%;height:auto;margin:8px 0;" />`
     }
     return '[图片占位符]'
   })
