@@ -1,6 +1,10 @@
 import batchRouter from '../api/batch/[...path].js'
 import { handleTeacherApi } from '../api/teacherApiHandler.js'
 import { getTeacherApiPathSegments } from './urlUtil.js'
+import decomposeSubmit from '../api/decompose-submit.js'
+import decomposeStatus from '../api/decompose-status.js'
+import decomposeTasks from '../api/decompose-tasks.js'
+import decomposeProcess from '../api/decompose-process.js'
 
 function getRequestPathname(req) {
   if (typeof req.url !== 'string' || !req.url) return '/'
@@ -33,6 +37,12 @@ export async function dispatchApiRequest(req, res) {
     ensureBatchPathQuery(req)
     return batchRouter(req, res)
   }
+
+  // decompose-* 独立路由
+  if (pathname === '/api/decompose-submit') return decomposeSubmit(req, res)
+  if (pathname === '/api/decompose-status') return decomposeStatus(req, res)
+  if (pathname === '/api/decompose-tasks') return decomposeTasks(req, res)
+  if (pathname === '/api/decompose-process') return decomposeProcess(req, res)
 
   const segments = getTeacherApiPathSegments(req)
   if (segments.length > 0) {
