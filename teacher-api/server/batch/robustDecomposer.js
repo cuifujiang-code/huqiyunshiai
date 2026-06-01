@@ -146,7 +146,7 @@ async function callDecomposeAi(text, model, label) {
   return rawResponse
 }
 
-const DECOMPOSE_MAX_RETRIES = Number(process.env.BATCH_DECOMPOSE_RETRIES || 2)
+const DECOMPOSE_MAX_RETRIES = Number(process.env.BATCH_DECOMPOSE_RETRIES || 3)
 
 async function decomposeWithModels(text) {
   const models = [

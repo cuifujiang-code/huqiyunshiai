@@ -13,11 +13,11 @@
       "includeFiles": "{server/**,node_modules/mammoth/**,node_modules/pdf-parse/**,node_modules/pdfjs-dist/**}"
     },
     "api/batch/upload.js": {
-      "maxDuration": 60,
+      "maxDuration": 120,
       "includeFiles": "{server/**,node_modules/mammoth/**,node_modules/pdf-parse/**,node_modules/pdfjs-dist/**}"
     },
     "api/batch/start.js": {
-      "maxDuration": 60,
+      "maxDuration": 120,
       "includeFiles": "server/**"
     },
     "api/batch/progress.js": {
@@ -33,7 +33,7 @@
       "includeFiles": "{server/**,node_modules/mammoth/**,node_modules/pdf-parse/**,node_modules/pdfjs-dist/**}"
     },
     "api/batch/worker.js": {
-      "maxDuration": 60,
+      "maxDuration": 300,
       "includeFiles": "{server/**,node_modules/mammoth/**,node_modules/pdf-parse/**,node_modules/pdfjs-dist/**}"
     },
     "api/batch/auto-retry.js": {
@@ -41,7 +41,7 @@
       "includeFiles": "server/**"
     },
     "api/decompose-submit.js": {
-      "maxDuration": 60,
+      "maxDuration": 300,
       "includeFiles": "server/**"
     },
     "api/decompose-status.js": {

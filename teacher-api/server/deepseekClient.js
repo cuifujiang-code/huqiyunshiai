@@ -108,7 +108,7 @@ async function executeDeepSeekRequest(body, { label = 'DeepSeek', model, attempt
         Accept: 'application/json',
       },
       body: requestBody,
-      signal: AbortSignal.timeout(25000),
+      signal: AbortSignal.timeout(45000),
     })
   } catch (fetchErr) {
     const message = fetchErr instanceof Error ? fetchErr.message : String(fetchErr)
