@@ -3,6 +3,12 @@
 export const IMAGE_PLACEHOLDER = '[图片占位符]'
 export const FORMULA_PLACEHOLDER = '【公式】'
 
+export const COMPLETE_EXTRACTION_RULE = `【完整提取 - 最高优先级】
+- 必须逐字完整复制原文中的题干、条件、数据、选项，禁止省略、概括或用 {...}、{...}、▲、省略号代替任何内容
+- 禁止在 analysis 中写「信息不完整」「无法提供解析」「内容缺失」——若原文片段确实无法构成完整题目，则不要输出该题
+- 选择题的 options 必须是含完整文字的字符串数组，如 ["A. 选项内容", "B. 选项内容"]，禁止只有 "A." "B." 空标签
+- 集合、向量、复数等数学对象必须保留原文中的全部元素与条件，禁止简化为 {...}`
+
 export const LATEX_STRICT_RULE = `【LaTeX 公式 - 极其严格】
 文本中的 ${FORMULA_PLACEHOLDER} 标记代表原始文档中此处有一个数学公式（MathType/OMML）。
 你必须根据上下文推断该公式的内容，并以标准 LaTeX 格式写出：
@@ -12,10 +18,7 @@ export const LATEX_STRICT_RULE = `【LaTeX 公式 - 极其严格】
 - 矩阵用 \\begin{pmatrix}...\\end{pmatrix}
 - 禁止把公式改成 Unicode 近似符号或口语描述
 - 禁止输出 ${FORMULA_PLACEHOLDER} 标记本身（必须替换为 LaTeX）
-- 根据题目的数学语境准确推断公式含义
-示例：
-  输入「数列${FORMULA_PLACEHOLDER}的通项」→ 输出「数列 $a_n$ 的通项」
-  输入「${FORMULA_PLACEHOLDER}」在等式上下文中 → 输出「$S_n = a_1 + a_2 + ... + a_n$」`
+- 禁止用 $...$ 或 {...} 作为公式占位符`
 
 export const IMAGE_PLACEHOLDER_RULE = `【图片占位 - 必须遵守】
 对于题目中你无法识别或未提供的图片/图表/函数图像：

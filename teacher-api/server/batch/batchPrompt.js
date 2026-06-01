@@ -1,7 +1,7 @@
 /** 专业教育题库拆题 Prompt：LaTeX 公式、几何图形、空间图形全支持 */
 
 import { extractJsonFromAiText } from './safeJson.js'
-import { IMAGE_PLACEHOLDER, FORMULA_PLACEHOLDER, IMAGE_PLACEHOLDER_RULE, JSON_EXAMPLE_WITH_LATEX, LATEX_STRICT_RULE } from './batchQualityPrompts.js'
+import { IMAGE_PLACEHOLDER, FORMULA_PLACEHOLDER, IMAGE_PLACEHOLDER_RULE, JSON_EXAMPLE_WITH_LATEX, LATEX_STRICT_RULE, COMPLETE_EXTRACTION_RULE } from './batchQualityPrompts.js'
 
 const JSON_PARSE_RETRY_DELAY_MS = 2000
 
@@ -152,6 +152,8 @@ export function buildBatchSplitPrompt(chunkText, meta) {
 
   return `将以下试卷文本拆分为独立题目，完整保留数学表达式与图形信息。
 ${countHint}
+${COMPLETE_EXTRACTION_RULE}
+
 学科：${meta.subject || '数学'}
 年级：${meta.grade || '八年级'}
 
@@ -200,6 +202,8 @@ export function backupPrompt(chunkText, meta) {
 
   return `【强制 JSON 数组模式 - 违反任何一条均视为失败】
 ${countHint}
+${COMPLETE_EXTRACTION_RULE}
+
 你的输出必须且只能是一个 JSON 数组，以字符 [ 开头、以字符 ] 结尾。
 禁止输出 markdown（禁止 \`\`\`json）。
 禁止用对象包装（禁止 {"questions":[...]}、禁止 {"data":{...}}、禁止 {"result":{...}}）。

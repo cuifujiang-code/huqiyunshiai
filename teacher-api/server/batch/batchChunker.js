@@ -1,45 +1,43 @@
 /**
- * 智能分块：优先按题号边界切分，绝不在题目中间截断
+ * 智能分块：仅按主题号切分，整卷优先，绝不在题目中间截断
  */
 
 const DEFAULT_CHUNK = Number(process.env.BATCH_CHUNK_MAX_LEN || 4000)
-const QUESTIONS_PER_CHUNK = Number(process.env.BATCH_QUESTIONS_PER_CHUNK || 4)
+const QUESTIONS_PER_CHUNK = Number(process.env.BATCH_QUESTIONS_PER_CHUNK || 3)
+const WHOLE_PAPER_MAX_LEN = Number(process.env.BATCH_WHOLE_PAPER_MAX || 20000)
 
 /**
- * 题号行首模式（新题目开始）：
- * - 1. / 2． / 3、
- * - (1) / （1）
- * - 第1题
+ * 主题号行首（仅 1. 2. 12. 等，不含 A. B. 或 (1) 小题号）
+ * 要求题号后紧跟非空白内容，避免误匹配页码/分数
  */
-const QUESTION_LINE_START_RE = /^\s*(?:(\d{1,3})[\.．、]|（(\d{1,3})）|\((\d{1,3})\)|第\s*(\d{1,3})\s*题)/
+const MAIN_QUESTION_LINE_RE = /^\s*(\d{1,3})[\.．、]\s*\S/
 
-const QUESTION_SPLIT_LOOKAHEAD = /(?=^\s*(?:\d{1,3}[\.．、]|（\d{1,3}）|\(\d{1,3}\)|第\s*\d{1,3}\s*题|第\s*[一二三四五六七八九十百千]+题))/m
+const MAIN_QUESTION_SPLIT_LOOKAHEAD = /(?=^\s*\d{1,3}[\.．、]\s*\S)/m
 
-/** 统计题号行数（仅行首匹配，避免正文误计） */
+/** 统计主题号行数 */
 export function countQuestionMarkers(text) {
   const s = String(text ?? '')
   if (!s.trim()) return 0
   let count = 0
   for (const line of s.split('\n')) {
-    if (QUESTION_LINE_START_RE.test(line)) count += 1
+    if (MAIN_QUESTION_LINE_RE.test(line)) count += 1
   }
   return count
 }
 
-/** 从题目文本首行提取题号标签 */
+/** 从题目文本首行提取题号 */
 export function extractQuestionLabel(questionText) {
   const firstLine = String(questionText ?? '').split('\n')[0] ?? ''
-  const m = firstLine.match(QUESTION_LINE_START_RE)
-  if (!m) return null
-  return m[1] || m[2] || m[3] || m[4] || null
+  const m = firstLine.match(MAIN_QUESTION_LINE_RE)
+  return m ? m[1] : null
 }
 
-/** 按题号边界拆成完整单题列表（每元素 = 一道完整题，绝不截断） */
+/** 按主题号边界拆成完整单题（不含 (1) 小题号切分） */
 export function splitIntoCompleteQuestions(text) {
   const normalized = String(text ?? '').replace(/\r\n/g, '\n').trim()
   if (!normalized) return []
 
-  const parts = normalized.split(QUESTION_SPLIT_LOOKAHEAD)
+  const parts = normalized.split(MAIN_QUESTION_SPLIT_LOOKAHEAD)
   const questions = parts.map((p) => p.trim()).filter(Boolean)
 
   if (questions.length <= 1) {
@@ -49,12 +47,11 @@ export function splitIntoCompleteQuestions(text) {
   return questions
 }
 
-/** @deprecated 兼容旧名 */
+/** @deprecated */
 export function splitChunkByQuestions(text) {
   return splitIntoCompleteQuestions(text)
 }
 
-/** 将完整题目列表合并为分块（每块 ≤ maxLen 字，每块含若干整题） */
 function mergeQuestionsIntoChunks(questions, maxLen = DEFAULT_CHUNK, questionsPerChunk = QUESTIONS_PER_CHUNK) {
   const chunks = []
   let buffer = []
@@ -78,7 +75,6 @@ function mergeQuestionsIntoChunks(questions, maxLen = DEFAULT_CHUNK, questionsPe
     const qLen = q.length
     const sepLen = buffer.length ? 2 : 0
 
-    // 单题超长：单独成块，绝不截断
     if (qLen > maxLen) {
       flush()
       chunks.push({
@@ -106,7 +102,6 @@ function mergeQuestionsIntoChunks(questions, maxLen = DEFAULT_CHUNK, questionsPe
   return chunks
 }
 
-/** 无题号时的兜底：按空行分段，仍保证不在段内截断 */
 function splitByParagraphs(text, maxLen = DEFAULT_CHUNK) {
   const normalized = String(text ?? '').trim()
   if (!normalized) return []
@@ -120,12 +115,11 @@ function splitByParagraphs(text, maxLen = DEFAULT_CHUNK) {
 
   const flush = () => {
     if (!buffer.length) return
-    const text = buffer.join('\n\n')
     chunks.push({
-      text,
+      text: buffer.join('\n\n'),
       questionCount: buffer.length,
       questionLabels: [],
-      charLength: text.length,
+      charLength: buffer.join('\n\n').length,
       fallback: 'paragraph',
     })
     buffer = []
@@ -156,7 +150,7 @@ function splitByParagraphs(text, maxLen = DEFAULT_CHUNK) {
   }
 
   flush()
-  return chunks.map((c) => c.text)
+  return chunks
 }
 
 function logChunkSummary(chunks, mode) {
@@ -177,7 +171,9 @@ function logChunkSummary(chunks, mode) {
 }
 
 /**
- * 主入口：智能分块，返回文本数组
+ * 主入口：智能分块
+ * - 标准试卷（≤20000字且≥5题）：整卷单块，保证 AI 看到完整上下文
+ * - 否则按主题号切整题后合并
  */
 export function splitTextIntoChunks(text, maxLen = DEFAULT_CHUNK) {
   const normalized = String(text ?? '').replace(/\r\n/g, '\n').trim()
@@ -185,26 +181,43 @@ export function splitTextIntoChunks(text, maxLen = DEFAULT_CHUNK) {
 
   const markerCount = countQuestionMarkers(normalized)
 
-  if (markerCount >= 1) {
+  // 整卷模式：一份卷通常 10~30 题，单次 AI 提取质量最高
+  if (
+    normalized.length <= WHOLE_PAPER_MAX_LEN
+    && markerCount >= 5
+    && markerCount <= 80
+  ) {
+    console.log('[batchChunker] 整卷单块模式', {
+      textLength: normalized.length,
+      markerCount,
+      reason: '保证题目完整、避免碎片化',
+    })
+    return [normalized]
+  }
+
+  if (markerCount >= 2) {
     const questions = splitIntoCompleteQuestions(normalized)
-    if (questions.length >= 1) {
+    if (questions.length >= 2) {
       const chunkMeta = mergeQuestionsIntoChunks(questions, maxLen, QUESTIONS_PER_CHUNK)
-      logChunkSummary(chunkMeta, markerCount >= 2 ? 'question_boundary' : 'single_question')
+      logChunkSummary(chunkMeta, 'main_question_boundary')
       return chunkMeta.map((c) => c.text)
     }
   }
 
-  // 兜底：按段落，不在段内截断
-  const paraChunks = splitByParagraphs(normalized, maxLen)
+  if (markerCount === 1) {
+    console.log('[batchChunker] 单题整卷', { textLength: normalized.length })
+    return [normalized]
+  }
+
+  const paraMeta = splitByParagraphs(normalized, maxLen)
   console.log('[batchChunker] 按段落兜底切分', {
     textLength: normalized.length,
-    chunkCount: paraChunks.length,
+    chunkCount: paraMeta.length,
     markerCount,
   })
-  return paraChunks
+  return paraMeta.map((c) => c.text)
 }
 
-/** 估算分块数量 */
 export function estimateItemCount(textLength, maxLen = DEFAULT_CHUNK) {
   return Math.max(1, Math.ceil(textLength / maxLen))
 }

@@ -6,12 +6,13 @@ import { callDeepSeekAI, DeepSeekApiError } from '../deepseekClient.js'
 import { createServiceRoleClient, getSupabaseAdmin } from '../supabaseAdmin.js'
 import { countQuestionMarkers } from './batchChunker.js'
 import {
-  IMAGE_PLACEHOLDER,
+  COMPLETE_EXTRACTION_RULE,
   FORMULA_PLACEHOLDER,
   IMAGE_PLACEHOLDER_RULE,
   JSON_EXAMPLE_WITH_LATEX,
   LATEX_STRICT_RULE,
 } from './batchQualityPrompts.js'
+import { filterCompleteQuestions } from './questionCompleteness.js'
 import { normalizeQuestionsBatch } from './questionNormalizer.js'
 import { countBatchQuestionsInBank } from './batchTaskStore.js'
 
@@ -31,14 +32,22 @@ const DECOMPOSE_MAX_RETRIES = Number(process.env.BATCH_DECOMPOSE_RETRIES || 2)
 
 const ROBUST_SYSTEM_PROMPT = `你是一个专业的题目解析器。只输出 JSON 数组，不输出任何其它内容。
 
+${COMPLETE_EXTRACTION_RULE}
+
 ${LATEX_STRICT_RULE}
 
-重要：文本中的 ${FORMULA_PLACEHOLDER} 标记代表 MathType 公式占位符。你必须根据上下文推断公式内容并替换为 LaTeX，禁止保留 ${FORMULA_PLACEHOLDER} 标记本身。
+文本中的 ${FORMULA_PLACEHOLDER} 标记代表 MathType 公式占位符。你必须根据上下文推断公式内容并替换为 LaTeX，禁止保留 ${FORMULA_PLACEHOLDER} 标记本身。
 
 ${IMAGE_PLACEHOLDER_RULE}`
 
-function buildRobustUserPrompt(text) {
-  return `你是一个专业的题目解析器。请将以下文本中的题目逐题提取出来，返回一个严格的JSON数组。
+function buildRobustUserPrompt(text, expectedCount = 0) {
+  const countHint = expectedCount > 0
+    ? `\n本片段约含 ${expectedCount} 道主题（题号 1. 2. 3. …）。JSON 数组长度必须等于实际完整题目数，禁止拆分一题为多条，禁止输出残次题。\n`
+    : ''
+
+  return `你是一个专业的题目解析器。请将以下文本中的题目逐题完整提取，返回一个严格的JSON数组。
+${countHint}
+${COMPLETE_EXTRACTION_RULE}
 
 文本中的 ${FORMULA_PLACEHOLDER} 标记代表原始文档的公式占位符。你必须根据上下文推断每个 ${FORMULA_PLACEHOLDER} 的实际公式内容，并替换为标准 LaTeX 格式。禁止在输出中保留 ${FORMULA_PLACEHOLDER} 标记。
 
@@ -46,8 +55,9 @@ ${LATEX_STRICT_RULE}
 
 ${IMAGE_PLACEHOLDER_RULE}
 
-每道题必须包含以下字段：content(题目内容), answer(答案), analysis(解析), question_type(题型), difficulty(难度), knowledge_point(知识点)。
-不要输出任何其他文字，不要用markdown代码块包裹。如果无法提取，返回空数组[]。
+每道题必须包含：content(完整题干), answer(答案), analysis(解析), question_type, difficulty, knowledge_point。
+选择题必须包含 options 数组，每项为 "A. 完整选项文字" 格式。
+不要输出任何其他文字，不要用markdown代码块包裹。无法构成完整题目时不要输出该题。
 
 JSON 格式示例：
 ${JSON_EXAMPLE_WITH_LATEX}
@@ -193,7 +203,10 @@ function normalizeBankInsertRow(q, batchId, teacherId, itemId, fallbackIndex, ta
 }
 
 async function callDecomposeAi(text, model, label, useFragmentPrompt = false) {
-  const userPrompt = useFragmentPrompt ? buildFragmentUserPrompt(text) : buildRobustUserPrompt(text)
+  const expectedCount = countQuestionMarkers(text)
+  const userPrompt = useFragmentPrompt
+    ? buildFragmentUserPrompt(text)
+    : buildRobustUserPrompt(text, expectedCount)
   console.log('[robustDecomposer] 调用 DeepSeek', {
     model,
     label,
@@ -443,18 +456,22 @@ export async function forceDecomposeAndInsert(batchId, teacherId, text, subject,
 
     const { rawArray, model } = decomposeResult
     const startSort = await countBatchQuestionsInBank(normalizedBatchId)
-    const { valid: normalizedQuestions, rawCount, filteredCount } = normalizeQuestionsBatch(
+    const { valid: normalizedRaw, rawCount, filteredCount } = normalizeQuestionsBatch(
       rawArray,
       taskMeta,
       startSort,
     )
 
+    const normalizedQuestions = filterCompleteQuestions(normalizedRaw)
+
     console.log('[robustDecomposer] 标准化结果', {
       batchId: normalizedBatchId,
       itemId,
       rawCount,
-      validCount: normalizedQuestions.length,
+      afterNormalize: normalizedRaw.length,
+      afterCompleteness: normalizedQuestions.length,
       filteredCount,
+      rejectedIncomplete: normalizedRaw.length - normalizedQuestions.length,
     })
 
     if (!normalizedQuestions.length) {

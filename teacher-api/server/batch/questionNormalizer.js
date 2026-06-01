@@ -4,10 +4,11 @@
  */
 
 import { IMAGE_PLACEHOLDER, FORMULA_PLACEHOLDER } from './batchQualityPrompts.js'
+import { enrichQuestionOptions, extractOptionsFromContent, isIncompleteQuestion } from './questionCompleteness.js'
 
 const VALID_TYPES = new Set(['选择题', '填空题', '计算题', '证明题', '实验题', '应用题'])
 const VALID_DIFFICULTY = new Set(['基础', '中等', '拔高'])
-const DEFAULT_OPTIONS = ['A. ', 'B. ', 'C. ', 'D. ']
+const EMPTY_OPTION_RE = /^[A-Fa-f][\.．、\)）]?\s*$/
 
 /** 统一全角/半角、空格、换行、标点 */
 export function cleanText(text) {
@@ -106,7 +107,7 @@ function normalizeDifficulty(raw) {
   return '中等'
 }
 
-function normalizeOptions(raw, questionType) {
+function normalizeOptions(raw, questionType, content = '') {
   const src = raw?.options ?? raw?.choices ?? raw?.option_list ?? []
   let options = []
   if (Array.isArray(src)) {
@@ -115,24 +116,28 @@ function normalizeOptions(raw, questionType) {
     options = Object.values(src).map((o) => cleanText(String(o))).filter(Boolean)
   }
 
-  const isChoice = questionType === '选择题' || options.length >= 2
-  if (isChoice && options.length === 0) {
-    options = [...DEFAULT_OPTIONS]
-  }
-  if (isChoice && options.length > 0 && options.length < 4) {
-    while (options.length < 4) {
-      options.push(`${String.fromCharCode(65 + options.length)}. `)
+  // 移除空占位选项
+  options = options.filter((o) => o.length > 2 && !EMPTY_OPTION_RE.test(o))
+
+  const isChoice = questionType === '选择题' || options.length >= 2 || /[A-Fa-f][\.．、\)）]\s*\S/.test(content)
+
+  if (isChoice && options.length < 2) {
+    const extracted = extractOptionsFromContent(content)
+    if (extracted.length >= 2) {
+      options = extracted
     }
   }
+
   return options
 }
 
-/** 题目是否有效（content 非空且长度合理） */
+/** 题目是否有效（content 非空且非残次占位） */
 export function isValidQuestion(q) {
   if (!q || typeof q !== 'object') return false
   const content = cleanText(q.content ?? '')
-  if (!content || content.length < 2) return false
+  if (!content || content.length < 8) return false
   if (/^(null|undefined|N\/A|暂无)$/i.test(content)) return false
+  if (isIncompleteQuestion(q)) return false
   return true
 }
 
@@ -161,18 +166,6 @@ export function normalizeQuestion(raw, index, taskMeta = {}) {
   answer = cleanFormula(answer)
   analysis = cleanFormula(analysis)
 
-  // 兜底：如果 AI 没有替换掉【公式】标记，用 $...$ 包裹
-  // 这确保即使 AI 漏掉了公式推断，也不会在输出中保留原始占位符
-  const hasFormulaPlaceholder = content.includes(FORMULA_PLACEHOLDER)
-    || answer.includes(FORMULA_PLACEHOLDER)
-    || analysis.includes(FORMULA_PLACEHOLDER)
-  if (hasFormulaPlaceholder) {
-    // 尝试智能替换：根据上下文将【公式】替换为合理默认值
-    content = content.replace(new RegExp(FORMULA_PLACEHOLDER.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), '$...$')
-    answer = answer.replace(new RegExp(FORMULA_PLACEHOLDER.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), '$...$')
-    analysis = analysis.replace(new RegExp(FORMULA_PLACEHOLDER.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), '$...$')
-  }
-
   if (!content) content = `题目 ${sortOrder}`
   if (!answer) answer = '暂无'
   if (!analysis) analysis = '暂无'
@@ -187,7 +180,7 @@ export function normalizeQuestion(raw, index, taskMeta = {}) {
       : `${analysis}\n此题包含图片，需手动处理`
   }
 
-  const options = normalizeOptions(raw, questionType)
+  const options = normalizeOptions(raw, questionType, content)
 
   const latexFromFields = [
     ...extractLatexBlocks(content),
@@ -249,8 +242,13 @@ export function normalizeQuestionsBatch(rawQuestions, taskMeta = {}, startIndex 
   const valid = []
 
   for (let i = 0; i < list.length; i++) {
-    const normalized = normalizeQuestion(list[i], startIndex + i, taskMeta)
-    if (normalized) valid.push(normalized)
+    let normalized = normalizeQuestion(list[i], startIndex + i, taskMeta)
+    if (normalized) {
+      normalized = enrichQuestionOptions(normalized)
+      if (isValidQuestion(normalized)) {
+        valid.push(normalized)
+      }
+    }
   }
 
   const filteredCount = rawCount - valid.length
