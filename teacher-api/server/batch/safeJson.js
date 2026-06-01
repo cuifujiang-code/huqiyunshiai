@@ -125,15 +125,18 @@ export function safeJsonParse(text) {
   const seen = new Set()
   let lastError = null
 
-  for (let candidate of candidates) {
-    if (!candidate || seen.has(candidate)) continue
-    seen.add(candidate)
+  for (let ci = 0; ci < candidates.length; ci++) {
+    const candidate = candidates[ci]
+    if (!candidate) {
+      continue
+    }
 
     for (const attempt of [candidate, repairJsonText(candidate)]) {
       if (!attempt || seen.has(attempt)) continue
       seen.add(attempt)
       try {
-        return JSON.parse(attempt)
+        const result = JSON.parse(attempt)
+        return result
       } catch (err) {
         lastError = err
       }
