@@ -1,9 +1,10 @@
 /**
  * 批量拆题 · 稳健拆题核心
- * 单一入口 forceDecomposeAndInsert：DeepSeek 拆题 → 清洗解析 → 标准化 → SERVICE_ROLE 入库 → 任务状态同步
+ * 单一入口 forceDecomposeAndInsert：DeepSeek 拆题 → 清洗解析 → 标准化 → SERVICE_ROLE 入库
  */
 import { callDeepSeekAI, DeepSeekApiError } from '../deepseekClient.js'
 import { createServiceRoleClient, getSupabaseAdmin } from '../supabaseAdmin.js'
+import { countQuestionMarkers } from './batchChunker.js'
 import { normalizeQuestionsBatch } from './questionNormalizer.js'
 import { countBatchQuestionsInBank } from './batchTaskStore.js'
 
@@ -11,8 +12,15 @@ const BANK = 'batch_question_bank'
 const TASKS = 'batch_decompose_tasks'
 
 const PRIMARY_MODEL = process.env.DEEPSEEK_MODEL || 'deepseek-chat'
-const BACKUP_MODEL = process.env.DEEPSEEK_BATCH_MODEL || 'deepseek-v4-flash'
+let BACKUP_MODEL = process.env.DEEPSEEK_BATCH_MODEL || 'deepseek-v4-flash'
+if (BACKUP_MODEL === PRIMARY_MODEL) {
+  BACKUP_MODEL = PRIMARY_MODEL.includes('flash') ? 'deepseek-chat' : 'deepseek-v4-flash'
+}
+
 const MAX_TOKENS = Number(process.env.DEEPSEEK_BATCH_MAX_TOKENS || 8192)
+const AI_TIMEOUT_MS = Number(process.env.DEEPSEEK_BATCH_TIMEOUT_MS || 55000)
+const MIN_MEANINGFUL_CHUNK = Number(process.env.BATCH_MIN_CHUNK_LEN || 150)
+const DECOMPOSE_MAX_RETRIES = Number(process.env.BATCH_DECOMPOSE_RETRIES || 2)
 
 const ROBUST_SYSTEM_PROMPT = '你是一个专业的题目解析器。只输出 JSON 数组，不输出任何其它内容。'
 
@@ -22,8 +30,30 @@ function buildRobustUserPrompt(text) {
 ${text}`
 }
 
+function buildFragmentUserPrompt(text) {
+  return `你是一个专业的题目解析器。以下文本是试卷 OCR/PDF 提取后的**片段**，可能只有半道题、续篇、页眉页脚或答案区。请尽可能从中提取题目；若确实无任何题目信息，返回空数组[]。
+
+每道题必须包含：content, answer, analysis, question_type, difficulty, knowledge_point。
+只输出 JSON 数组，不要 markdown 代码块。
+
+文本片段：
+${text}`
+}
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+/** 极短且无题号标记的块，多为 PDF 切分噪声 */
+export function isLikelyNonQuestionFragment(text) {
+  const s = String(text ?? '').trim()
+  if (!s) return true
+  if (s.length >= 280) return false
+  if (countQuestionMarkers(s) >= 1) return false
+  if (s.length < MIN_MEANINGFUL_CHUNK) return true
+  if (/^\[?(答案|解析|参考答案|考点)/.test(s)) return true
+  if (/^第\s*\d+\s*页/.test(s)) return true
+  return false
 }
 
 /** 移除 markdown 代码块标记，提取第一个 '[' 到最后一个 ']' */
@@ -86,7 +116,9 @@ function normalizeBankInsertRow(q, batchId, teacherId, itemId, fallbackIndex, ta
   if (!VALID_TYPES.has(questionType)) questionType = '应用题'
 
   let difficulty = String(q?.difficulty ?? '').trim() || '中等'
-  if (!VALID_DIFFICULTY.has(difficulty)) difficulty = '中等'
+  if (/拔高|困难|难/.test(difficulty)) difficulty = '拔高'
+  else if (/基础|简单|易/.test(difficulty)) difficulty = '基础'
+  else if (!VALID_DIFFICULTY.has(difficulty)) difficulty = '中等'
 
   const optionsRaw = q?.options ?? q?.choices ?? []
   const options = Array.isArray(optionsRaw)
@@ -125,19 +157,27 @@ function normalizeBankInsertRow(q, batchId, teacherId, itemId, fallbackIndex, ta
   }
 }
 
-async function callDecomposeAi(text, model, label) {
-  const userPrompt = buildRobustUserPrompt(text)
-  console.log('[robustDecomposer] 调用 DeepSeek', { model, label, textLength: text.length })
+async function callDecomposeAi(text, model, label, useFragmentPrompt = false) {
+  const userPrompt = useFragmentPrompt ? buildFragmentUserPrompt(text) : buildRobustUserPrompt(text)
+  console.log('[robustDecomposer] 调用 DeepSeek', {
+    model,
+    label,
+    textLength: text.length,
+    fragmentMode: useFragmentPrompt,
+    timeoutMs: AI_TIMEOUT_MS,
+  })
 
   const rawResponse = await callDeepSeekAI(ROBUST_SYSTEM_PROMPT, userPrompt, {
     model,
     maxTokens: MAX_TOKENS,
+    timeoutMs: AI_TIMEOUT_MS,
     label,
   })
 
   console.log('[robustDecomposer] 原始 AI 返回', {
     model,
     label,
+    fragmentMode: useFragmentPrompt,
     length: String(rawResponse ?? '').length,
     preview: String(rawResponse ?? '').slice(0, 500),
     full: rawResponse,
@@ -146,24 +186,46 @@ async function callDecomposeAi(text, model, label) {
   return rawResponse
 }
 
-const DECOMPOSE_MAX_RETRIES = Number(process.env.BATCH_DECOMPOSE_RETRIES || 3)
+function parseAiResponse(rawResponse, model, retry, fragmentMode) {
+  const { cleaned, arraySlice } = cleanAiResponseString(rawResponse)
+  console.log('[robustDecomposer] 清洗后字符串', {
+    model,
+    retry,
+    fragmentMode,
+    cleanedLength: cleaned.length,
+    arraySliceLength: arraySlice?.length ?? 0,
+    arrayPreview: arraySlice?.slice(0, 500) ?? cleaned.slice(0, 500),
+  })
+
+  if (!arraySlice) {
+    return { rawArray: [], error: new Error('清洗后未找到 JSON 数组边界') }
+  }
+
+  const rawArray = parseJsonArrayWithFallback(arraySlice)
+  console.log('[robustDecomposer] 解析后题目数', {
+    model,
+    retry,
+    fragmentMode,
+    parsedCount: rawArray.length,
+    firstQuestionPreview: rawArray[0] ? JSON.stringify(rawArray[0]).slice(0, 300) : '(空)',
+  })
+
+  return { rawArray }
+}
 
 async function decomposeWithModels(text) {
   const models = [
     { model: PRIMARY_MODEL, label: 'robust-decompose-primary' },
     { model: BACKUP_MODEL, label: 'robust-decompose-backup' },
   ]
-
-  // 去重：主备模型相同时只调一次
   const uniqueModels = models.filter((m, i, arr) => arr.findIndex((x) => x.model === m.model) === i)
 
   let lastError = null
-  let lastRaw = ''
+  const tryFragmentPrompt = isLikelyNonQuestionFragment(text) || text.length < 300
 
-  // 外层重试循环：整个模型链重试 DECOMPOSE_MAX_RETRIES 次
   for (let retry = 0; retry < DECOMPOSE_MAX_RETRIES; retry++) {
     if (retry > 0) {
-      const delayMs = 3000 + retry * 2000
+      const delayMs = 2000 + retry * 1500
       console.warn('[robustDecomposer] 第' + (retry + 1) + '次完整重试', {
         delayMs,
         textLength: text.length,
@@ -172,65 +234,54 @@ async function decomposeWithModels(text) {
       await sleep(delayMs)
     }
 
-    for (let i = 0; i < uniqueModels.length; i++) {
-      const { model, label } = uniqueModels[i]
-      if (i > 0) {
-        console.warn('[robustDecomposer] 模型切换重试', {
-          backupModel: model,
-          delayMs: 2000,
-          retry,
-        })
-        await sleep(2000)
-      }
+    const promptModes = tryFragmentPrompt ? [false, true] : [false]
 
-      try {
-        const rawResponse = await callDecomposeAi(text, model, label)
-        lastRaw = rawResponse
-
-        const { cleaned, arraySlice } = cleanAiResponseString(rawResponse)
-        console.log('[robustDecomposer] 清洗后字符串', {
-          model,
-          retry,
-          cleanedLength: cleaned.length,
-          arraySliceLength: arraySlice?.length ?? 0,
-          arrayPreview: arraySlice?.slice(0, 500) ?? cleaned.slice(0, 500),
-        })
-
-        if (!arraySlice) {
-          lastError = new Error('清洗后未找到 JSON 数组边界')
-          continue
+    for (const fragmentMode of promptModes) {
+      for (let i = 0; i < uniqueModels.length; i++) {
+        const { model, label } = uniqueModels[i]
+        if (i > 0 || fragmentMode) {
+          await sleep(1500)
         }
 
-        const rawArray = parseJsonArrayWithFallback(arraySlice)
-        console.log('[robustDecomposer] 解析后题目数', {
-          model,
-          retry,
-          parsedCount: rawArray.length,
-          firstQuestionPreview: rawArray[0] ? JSON.stringify(rawArray[0]).slice(0, 300) : '(空)',
-        })
+        try {
+          const rawResponse = await callDecomposeAi(text, model, label, fragmentMode)
+          const { rawArray, error } = parseAiResponse(rawResponse, model, retry, fragmentMode)
 
-        if (rawArray.length > 0) {
-          return { rawArray, rawResponse, model, arraySlice }
+          if (error) {
+            lastError = error
+            continue
+          }
+
+          if (rawArray.length > 0) {
+            return { rawArray, model, fragmentMode }
+          }
+
+          lastError = new Error('AI 返回空数组')
+        } catch (err) {
+          lastError = err instanceof Error ? err : new Error(String(err))
+          console.error('[robustDecomposer] 模型调用/解析失败', {
+            model,
+            retry,
+            fragmentMode,
+            message: lastError.message,
+            isDeepSeek: err instanceof DeepSeekApiError,
+          })
         }
-
-        lastError = new Error('AI 返回空数组')
-      } catch (err) {
-        lastError = err instanceof Error ? err : new Error(String(err))
-        console.error('[robustDecomposer] 模型调用/解析失败', {
-          model,
-          retry,
-          message: lastError.message,
-          isDeepSeek: err instanceof DeepSeekApiError,
-        })
-        // 不在内层 throw，继续尝试下一个模型或下一轮重试
       }
     }
 
-    // 本轮所有模型都失败，记录后进入下一轮重试
     console.warn('[robustDecomposer] 第' + (retry + 1) + '轮全部模型失败', {
       lastError: lastError?.message ?? '未知',
       remainingRetries: DECOMPOSE_MAX_RETRIES - retry - 1,
     })
+  }
+
+  if (isLikelyNonQuestionFragment(text)) {
+    console.log('[robustDecomposer] 判定为 PDF 切分噪声片段，跳过', {
+      textLength: text.length,
+      preview: text.slice(0, 80),
+    })
+    return { rawArray: [], model: null, skippedFragment: true }
   }
 
   throw lastError || new Error('拆题失败：经 ' + DECOMPOSE_MAX_RETRIES + ' 轮重试，所有模型均未返回有效题目')
@@ -241,12 +292,14 @@ async function insertQuestionsToBank(batchId, teacherId, itemId, questions, task
   console.log('[robustDecomposer] Supabase 客户端已初始化（SERVICE_ROLE_KEY）', {
     batchId,
     teacherId,
+    itemId,
     table: BANK,
   })
 
   const rows = questions.map((q, i) => normalizeBankInsertRow(q, batchId, teacherId, itemId, i, taskMeta))
   console.log('[robustDecomposer] 准备入库', {
     batchId,
+    itemId,
     rowCount: rows.length,
     firstRowPreview: rows[0] ? JSON.stringify(rows[0]).slice(0, 400) : '(空)',
   })
@@ -256,18 +309,18 @@ async function insertQuestionsToBank(batchId, teacherId, itemId, questions, task
   if (error) {
     console.error('[robustDecomposer] 入库失败', {
       batchId,
+      itemId,
       httpStatus: status,
       statusText,
       message: error.message,
       code: error.code,
-      details: error.details,
-      hint: error.hint,
     })
     throw new Error(`batch_question_bank 入库失败: ${error.message}`)
   }
 
   console.log('[robustDecomposer] 入库成功', {
     batchId,
+    itemId,
     insertedRows: rows.length,
     httpStatus: status,
   })
@@ -275,87 +328,85 @@ async function insertQuestionsToBank(batchId, teacherId, itemId, questions, task
   return rows.length
 }
 
-async function syncTaskFromBankCount(batchId) {
+/** 分块处理期间仅同步题目数，不修改任务 status（由 worker 收尾） */
+async function syncImportedQuestionsOnly(batchId) {
   const realCount = await countBatchQuestionsInBank(batchId)
-  const status = realCount > 0 ? 'completed' : 'failed'
-
   const admin = getSupabaseAdmin()
-  const patch = {
+  const { error } = await admin.from(TASKS).update({
     imported_questions: realCount,
     total_questions: realCount,
-    status,
     updated_at: new Date().toISOString(),
-  }
+  }).eq('batch_id', batchId)
 
-  if (status === 'failed') {
-    patch.error_message = '稳健拆题未检测到入库题目（batch_question_bank count=0）'
-  } else {
-    patch.error_message = null
-  }
-
-  const { error } = await admin.from(TASKS).update(patch).eq('batch_id', batchId)
   if (error) {
-    console.error('[robustDecomposer] 更新 batch_decompose_tasks 失败', {
-      batchId,
-      message: error.message,
-    })
+    console.error('[robustDecomposer] 同步 imported_questions 失败', { batchId, message: error.message })
     throw new Error(error.message)
   }
 
-  console.log('[robustDecomposer] 任务状态已同步', {
+  console.log('[robustDecomposer] 已同步 imported_questions（未改 status）', {
     batchId,
     imported_questions: realCount,
-    status,
   })
 
-  return { realCount, status }
+  return realCount
 }
 
 /**
  * 稳健拆题并入库（主入口）
- * @param {string} batchId
- * @param {string} teacherId
- * @param {string} text 待拆题文本（分块或整卷）
- * @param {string} subject
- * @param {string} grade
- * @returns {Promise<{ success: boolean, insertedCount: number, parsedCount: number, questions: object[], realCount: number, status: string, error?: string, model?: string }>}
+ * @param {object} [options] itemId: 分块 ID；skipStatusSync: 默认 true
  */
-export async function forceDecomposeAndInsert(batchId, teacherId, text, subject, grade) {
+export async function forceDecomposeAndInsert(batchId, teacherId, text, subject, grade, options = {}) {
   const normalizedBatchId = String(batchId ?? '').trim()
   const normalizedTeacherId = String(teacherId ?? '').trim()
   const chunkText = String(text ?? '').trim()
+  const itemId = options.itemId ?? null
   const taskMeta = { subject: subject || '数学', grade: grade || '八年级' }
 
   console.log('[robustDecomposer] === forceDecomposeAndInsert 开始 ===', {
     batchId: normalizedBatchId,
     teacherId: normalizedTeacherId,
+    itemId,
     textLength: chunkText.length,
     subject: taskMeta.subject,
     grade: taskMeta.grade,
     primaryModel: PRIMARY_MODEL,
     backupModel: BACKUP_MODEL,
+    likelyFragment: isLikelyNonQuestionFragment(chunkText),
   })
 
   if (!normalizedBatchId || !normalizedTeacherId) {
-    return { success: false, insertedCount: 0, parsedCount: 0, questions: [], realCount: 0, status: 'failed', error: '缺少 batchId 或 teacherId' }
+    return {
+      success: false, insertedCount: 0, parsedCount: 0, questions: [],
+      realCount: 0, status: 'failed', error: '缺少 batchId 或 teacherId',
+    }
   }
 
   if (!chunkText) {
-    const synced = await syncTaskFromBankCount(normalizedBatchId).catch(() => ({ realCount: 0, status: 'failed' }))
     return {
-      success: false,
-      insertedCount: 0,
-      parsedCount: 0,
-      questions: [],
-      realCount: synced.realCount ?? 0,
-      status: synced.status ?? 'failed',
-      error: '文本为空，无法拆题',
+      success: false, insertedCount: 0, parsedCount: 0, questions: [],
+      realCount: 0, status: 'failed', error: '文本为空，无法拆题', skipped: true,
     }
   }
 
   try {
-    const { rawArray, model } = await decomposeWithModels(chunkText)
+    const decomposeResult = await decomposeWithModels(chunkText)
 
+    if (decomposeResult.skippedFragment) {
+      const realCount = await syncImportedQuestionsOnly(normalizedBatchId).catch(() => 0)
+      return {
+        success: true,
+        skipped: true,
+        skippedFragment: true,
+        insertedCount: 0,
+        parsedCount: 0,
+        questions: [],
+        realCount,
+        status: 'running',
+        model: null,
+      }
+    }
+
+    const { rawArray, model } = decomposeResult
     const startSort = await countBatchQuestionsInBank(normalizedBatchId)
     const { valid: normalizedQuestions, rawCount, filteredCount } = normalizeQuestionsBatch(
       rawArray,
@@ -365,20 +416,21 @@ export async function forceDecomposeAndInsert(batchId, teacherId, text, subject,
 
     console.log('[robustDecomposer] 标准化结果', {
       batchId: normalizedBatchId,
+      itemId,
       rawCount,
       validCount: normalizedQuestions.length,
       filteredCount,
     })
 
     if (!normalizedQuestions.length) {
-      const synced = await syncTaskFromBankCount(normalizedBatchId)
+      const realCount = await syncImportedQuestionsOnly(normalizedBatchId).catch(() => 0)
       return {
         success: false,
         insertedCount: 0,
         parsedCount: rawCount,
         questions: [],
-        realCount: synced.realCount,
-        status: synced.status,
+        realCount,
+        status: 'running',
         error: '解析成功但无有效题目（标准化后为空）',
         model,
       }
@@ -387,19 +439,19 @@ export async function forceDecomposeAndInsert(batchId, teacherId, text, subject,
     const insertedCount = await insertQuestionsToBank(
       normalizedBatchId,
       normalizedTeacherId,
-      null,
+      itemId,
       normalizedQuestions,
       taskMeta,
     )
 
-    const { realCount, status } = await syncTaskFromBankCount(normalizedBatchId)
+    const realCount = await syncImportedQuestionsOnly(normalizedBatchId)
 
     console.log('[robustDecomposer] === forceDecomposeAndInsert 完成 ===', {
       batchId: normalizedBatchId,
+      itemId,
       insertedCount,
       parsedCount: normalizedQuestions.length,
       realCount,
-      status,
       model,
     })
 
@@ -409,33 +461,27 @@ export async function forceDecomposeAndInsert(batchId, teacherId, text, subject,
       parsedCount: normalizedQuestions.length,
       questions: normalizedQuestions,
       realCount,
-      status,
+      status: 'running',
       model,
     }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     console.error('[robustDecomposer] === forceDecomposeAndInsert 失败 ===', {
       batchId: normalizedBatchId,
+      itemId,
       message: msg,
       stack: err instanceof Error ? err.stack : undefined,
     })
 
-    let synced = { realCount: 0, status: 'failed' }
-    try {
-      synced = await syncTaskFromBankCount(normalizedBatchId)
-    } catch (syncErr) {
-      console.error('[robustDecomposer] 失败后同步任务状态也失败', {
-        message: syncErr instanceof Error ? syncErr.message : String(syncErr),
-      })
-    }
+    const realCount = await syncImportedQuestionsOnly(normalizedBatchId).catch(() => 0)
 
     return {
       success: false,
       insertedCount: 0,
       parsedCount: 0,
       questions: [],
-      realCount: synced.realCount ?? 0,
-      status: synced.realCount > 0 ? synced.status : 'failed',
+      realCount,
+      status: 'running',
       error: msg,
     }
   }

@@ -77,7 +77,7 @@ function extractMessageContent(data) {
   return ''
 }
 
-async function executeDeepSeekRequest(body, { label = 'DeepSeek', model, attempt = 0 } = {}) {
+async function executeDeepSeekRequest(body, { label = 'DeepSeek', model, attempt = 0, timeoutMs = 45000 } = {}) {
   const cfg = getDeepSeekConfig()
   const requestBody = JSON.stringify(body)
   const requestBodyBytes = Buffer.byteLength(requestBody, 'utf8')
@@ -108,7 +108,7 @@ async function executeDeepSeekRequest(body, { label = 'DeepSeek', model, attempt
         Accept: 'application/json',
       },
       body: requestBody,
-      signal: AbortSignal.timeout(45000),
+      signal: AbortSignal.timeout(timeoutMs),
     })
   } catch (fetchErr) {
     const message = fetchErr instanceof Error ? fetchErr.message : String(fetchErr)
@@ -183,7 +183,7 @@ async function executeDeepSeekRequest(body, { label = 'DeepSeek', model, attempt
     if (attempt < MAX_EMPTY_CONTENT_RETRIES) {
       console.warn('[DeepSeek] 空内容，2秒后重试', { label, nextAttempt: attempt + 1 })
       await sleep(EMPTY_CONTENT_RETRY_DELAY_MS)
-      return executeDeepSeekRequest(body, { label, model: resolvedModel, attempt: attempt + 1 })
+      return executeDeepSeekRequest(body, { label, model: resolvedModel, attempt: attempt + 1, timeoutMs })
     }
 
     const err = new DeepSeekApiError('DeepSeek API 未返回有效内容（已重试仍为空）', {
@@ -211,6 +211,7 @@ export async function callDeepSeekAI(systemPrompt, userPrompt, options = {}) {
   const cfg = getDeepSeekConfig()
   const model = options.model || cfg.model
   const maxTokens = options.maxTokens ?? 4096
+  const timeoutMs = options.timeoutMs ?? 45000
   const label = options.label || 'DeepSeek'
 
   console.log(`[${label}] 配置检查`, getDeepSeekConfigSummary())
@@ -235,7 +236,7 @@ export async function callDeepSeekAI(systemPrompt, userPrompt, options = {}) {
       max_tokens: maxTokens,
       stream: false,
     },
-    { label, model },
+    { label, model, timeoutMs },
   )
 }
 

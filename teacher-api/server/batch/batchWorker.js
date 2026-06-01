@@ -19,8 +19,7 @@ import {
 } from './batchTaskStore.js'
 import { triggerBatchWorker } from './batchTrigger.js'
 
-const CONCURRENCY = Number(process.env.BATCH_AI_CONCURRENCY || 2)
-const ITEMS_PER_INVOCATION = Number(process.env.BATCH_ITEMS_PER_RUN || 3)
+const ITEMS_PER_INVOCATION = Math.min(Number(process.env.BATCH_ITEMS_PER_RUN || 1), 2)
 
 const CHAIN_INITIAL_DELAY_MS = 2000
 const CHAIN_RETRY_DELAY_STEP_MS = 2000
@@ -142,6 +141,7 @@ async function processOneItem(item, meta, batchId, teacherId) {
       item.chunk_text,
       meta.subject,
       meta.grade,
+      { itemId: item.id },
     )
 
     console.log('[batchWorker] forceDecomposeAndInsert 结果', {
@@ -149,6 +149,7 @@ async function processOneItem(item, meta, batchId, teacherId) {
       itemId: item.id,
       itemIndex: item.item_index,
       success: result.success,
+      skipped: result.skipped ?? false,
       insertedCount: result.insertedCount,
       parsedCount: result.parsedCount,
       realCount: result.realCount,
@@ -156,6 +157,17 @@ async function processOneItem(item, meta, batchId, teacherId) {
       model: result.model,
       error: result.error ?? null,
     })
+
+    if (result.skipped || result.skippedFragment) {
+      await markItemCompleted(item.id, [])
+      return {
+        success: true,
+        skipped: true,
+        itemId: item.id,
+        insertedCount: 0,
+        questions: [],
+      }
+    }
 
     if (!result.success || result.insertedCount === 0) {
       // 如果 AI 层面已经重试过但失败了，不再重复
@@ -216,29 +228,24 @@ async function processOneItem(item, meta, batchId, teacherId) {
 async function runPool(items, meta, batchId, teacherId) {
   const results = []
 
-  for (let i = 0; i < items.length; i += CONCURRENCY) {
-    const slice = items.slice(i, i + CONCURRENCY)
-    console.log('[batchWorker] 并发批次稳健拆题', {
-      batchFrom: i,
-      batchSize: slice.length,
-      itemIndexes: slice.map((it) => it.item_index),
+  // 稳健拆题必须串行：避免 DeepSeek 并发超时 + sort_order 竞态
+  for (const item of items) {
+    console.log('[batchWorker] 串行稳健拆题', {
+      itemIndex: item.item_index,
+      chunkLength: item.chunk_text?.length ?? 0,
     })
 
-    const settled = await Promise.all(
-      slice.map((item) => processOneItem(item, meta, batchId, teacherId)),
-    )
-    results.push(...settled)
+    const outcome = await processOneItem(item, meta, batchId, teacherId)
+    results.push(outcome)
 
-    console.log('[batchWorker] 并发批次稳健拆题完成', {
+    console.log('[batchWorker] 分块处理完成', {
       batchId,
-      batchFrom: i,
-      outcomes: settled.map((r, j) => ({
-        itemIndex: slice[j]?.item_index,
-        itemId: r.itemId,
-        success: r.success,
-        insertedCount: r.insertedCount ?? 0,
-        error: r.error ?? null,
-      })),
+      itemIndex: item.item_index,
+      itemId: outcome.itemId,
+      success: outcome.success,
+      skipped: outcome.skipped ?? false,
+      insertedCount: outcome.insertedCount ?? 0,
+      error: outcome.error ?? null,
     })
   }
 
