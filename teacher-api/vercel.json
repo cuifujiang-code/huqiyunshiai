@@ -39,6 +39,22 @@
     "api/batch/auto-retry.js": {
       "maxDuration": 60,
       "includeFiles": "server/**"
+    },
+    "api/decompose-submit.js": {
+      "maxDuration": 60,
+      "includeFiles": "server/**"
+    },
+    "api/decompose-status.js": {
+      "maxDuration": 10,
+      "includeFiles": "server/**"
+    },
+    "api/decompose-tasks.js": {
+      "maxDuration": 15,
+      "includeFiles": "server/**"
+    },
+    "api/decompose-process.js": {
+      "maxDuration": 60,
+      "includeFiles": "server/**"
     }
   },
   "crons": [
