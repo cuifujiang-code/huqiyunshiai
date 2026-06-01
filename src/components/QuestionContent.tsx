@@ -1,11 +1,22 @@
 import { useMemo } from 'react'
-import katex from 'katex'
+import TeX from '@matejmazur/react-katex'
+import 'katex/dist/katex.min.css'
 
 const IMAGE_PLACEHOLDER = '[图片占位符]'
+
+const KATEX_SETTINGS = {
+  throwOnError: false,
+  trust: true,
+  strict: false,
+} as const
 
 /** 将块级公式 $$...$$ 独立成段，便于正确识别 */
 export function normalizeBlockMath(text: string): string {
   return text.replace(/\$\$([\s\S]*?)\$\$/g, (_, inner) => `\n$$${inner.trim()}$$\n`)
+}
+
+function normalizeDollars(text: string): string {
+  return text.replace(/\uFF04/g, '$')
 }
 
 /** 统一 \(...\) / \[...\] 为 $ / $$ 语法 */
@@ -15,7 +26,13 @@ function normalizeLatexDelimiters(text: string): string {
     .replace(/\\\[([\s\S]*?)\\\]/g, (_, inner) => `$$${inner.trim()}$$`)
 }
 
-/** 为未包裹 $ 的裸 LaTeX 命令自动加定界符 */
+function isEscaped(s: string, idx: number): boolean {
+  let bs = 0
+  for (let i = idx - 1; i >= 0 && s[i] === '\\'; i--) bs++
+  return bs % 2 === 1
+}
+
+/** 为未包裹 $ 的裸 LaTeX 命令自动加定界符（跳过 $$...$$ 与 $...$ 内部） */
 function wrapBareLatex(text: string): string {
   const bareRe =
     /\\(?:frac|sqrt|sum|int|prod|lim|sin|cos|tan|log|ln|pi|alpha|beta|gamma|theta|Delta|Omega|vec|overline|underline|left|right|begin|text|mathrm|mathbf|mathit|displaystyle|limits|cdot|times|div|pm|mp|leq|geq|neq|approx|infty|partial|nabla|forall|exists|in|notin|subset|supset|cup|cap|rightarrow|leftarrow|Rightarrow|Leftarrow|Leftrightarrow|ldots|cdots|vdots|ddots)\b(?:\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\})*(?:_\{[^{}]*\}|\^\{[^{}]*\})*(?:_\w|\^\w)*/g
@@ -24,12 +41,6 @@ function wrapBareLatex(text: string): string {
   let cursor = 0
   let inInline = false
   let inBlock = false
-
-  const isEscaped = (s: string, idx: number) => {
-    let bs = 0
-    for (let i = idx - 1; i >= 0 && s[i] === '\\'; i--) bs++
-    return bs % 2 === 1
-  }
 
   while (cursor < text.length) {
     if (!inInline && !inBlock && text.startsWith('$$', cursor) && !isEscaped(text, cursor)) {
@@ -76,7 +87,8 @@ function wrapBareLatex(text: string): string {
 
 function preprocessText(text: string): string {
   if (!text) return ''
-  return wrapBareLatex(normalizeBlockMath(normalizeLatexDelimiters(text.replace(/\\\\/g, '\\'))))
+  const normalized = normalizeDollars(text.replace(/\\\\/g, '\\'))
+  return wrapBareLatex(normalizeBlockMath(normalizeLatexDelimiters(normalized)))
 }
 
 type Segment =
@@ -85,56 +97,83 @@ type Segment =
   | { kind: 'block'; value: string }
   | { kind: 'image' }
 
-function parseSegments(text: string): Segment[] {
-  const processed = preprocessText(text)
-  const segments: Segment[] = []
+function findClosingDoubleDollar(s: string, from: number): number {
+  for (let i = from; i < s.length - 1; i++) {
+    if (s[i] === '$' && s[i + 1] === '$' && !isEscaped(s, i)) {
+      return i
+    }
+  }
+  return -1
+}
 
-  const chunks = processed.split(/(\[图片占位符\])/g)
-  for (const chunk of chunks) {
-    if (chunk === IMAGE_PLACEHOLDER) {
+function findClosingSingleDollar(s: string, from: number): number {
+  for (let i = from; i < s.length; i++) {
+    if (s[i] === '$' && !isEscaped(s, i)) {
+      return i
+    }
+  }
+  return -1
+}
+
+/**
+ * 单次扫描分词：优先匹配 $$...$$ 块级公式，再匹配 $...$ 行内公式
+ */
+function tokenizeMathText(text: string): Segment[] {
+  const segments: Segment[] = []
+  let i = 0
+
+  while (i < text.length) {
+    if (text.startsWith(IMAGE_PLACEHOLDER, i)) {
       segments.push({ kind: 'image' })
+      i += IMAGE_PLACEHOLDER.length
       continue
     }
-    if (!chunk) continue
 
-    let remaining = chunk
-    while (remaining.length > 0) {
-      const blockMatch = remaining.match(/^\$\$([\s\S]*?)\$\$/)
-      if (blockMatch) {
-        segments.push({ kind: 'block', value: blockMatch[1].trim() })
-        remaining = remaining.slice(blockMatch[0].length)
+    // 1. 块级公式 $$...$$（必须在行内 $...$ 之前判断）
+    if (text[i] === '$' && text[i + 1] === '$' && !isEscaped(text, i)) {
+      const close = findClosingDoubleDollar(text, i + 2)
+      if (close !== -1) {
+        const formula = text.slice(i + 2, close).trim()
+        if (formula) {
+          segments.push({ kind: 'block', value: formula })
+        }
+        i = close + 2
         continue
       }
-
-      const inlineMatch = remaining.match(/^\$([^$\n]+?)\$/)
-      if (inlineMatch) {
-        segments.push({ kind: 'inline', value: inlineMatch[1].trim() })
-        remaining = remaining.slice(inlineMatch[0].length)
-        continue
-      }
-
-      const nextSpecial = remaining.search(/\$\$|\$|\[图片占位符\]/)
-      const end = nextSpecial === -1 ? remaining.length : nextSpecial
-      const plain = remaining.slice(0, end)
-      if (plain) segments.push({ kind: 'text', value: plain })
-      remaining = remaining.slice(end)
     }
+
+    // 2. 行内公式 $...$
+    if (text[i] === '$' && !isEscaped(text, i) && text[i + 1] !== '$') {
+      const close = findClosingSingleDollar(text, i + 1)
+      if (close !== -1) {
+        const formula = text.slice(i + 1, close).trim()
+        if (formula) {
+          segments.push({ kind: 'inline', value: formula })
+        }
+        i = close + 1
+        continue
+      }
+    }
+
+    // 3. 普通文本，直到下一个特殊标记
+    let j = i + 1
+    while (j < text.length) {
+      if (text.startsWith(IMAGE_PLACEHOLDER, j)) break
+      if (text[j] === '$' && !isEscaped(text, j)) break
+      j++
+    }
+    const plain = text.slice(i, j)
+    if (plain) {
+      segments.push({ kind: 'text', value: plain })
+    }
+    i = j
   }
 
   return segments
 }
 
-function renderKatexHtml(latex: string, displayMode: boolean): string {
-  try {
-    return katex.renderToString(latex, {
-      displayMode,
-      throwOnError: false,
-      trust: true,
-      strict: false,
-    })
-  } catch {
-    return displayMode ? `$$${latex}$$` : `$${latex}$`
-  }
+function parseSegments(text: string): Segment[] {
+  return tokenizeMathText(preprocessText(text))
 }
 
 function ImagePlaceholderCard() {
@@ -181,19 +220,22 @@ export default function QuestionContent({ text, className = '' }: QuestionConten
         }
         if (seg.kind === 'block') {
           return (
-            <div
+            <TeX
               key={`block-${idx}`}
-              className="my-2 overflow-x-auto"
-              dangerouslySetInnerHTML={{ __html: renderKatexHtml(seg.value, true) }}
+              block
+              math={seg.value}
+              className="my-2 block w-full overflow-x-auto text-center"
+              settings={KATEX_SETTINGS}
             />
           )
         }
         if (seg.kind === 'inline') {
           return (
-            <span
+            <TeX
               key={`inline-${idx}`}
+              math={seg.value}
               className="mx-0.5 inline align-baseline"
-              dangerouslySetInnerHTML={{ __html: renderKatexHtml(seg.value, false) }}
+              settings={KATEX_SETTINGS}
             />
           )
         }
