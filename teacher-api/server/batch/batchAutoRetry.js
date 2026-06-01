@@ -2,7 +2,7 @@ import {
   countItemsByStatus,
   listStuckBatchTasks,
   markBatchRunning,
-  resetFailedItemsToPending,
+  resetAllItemsToPending,
   resetStuckProcessingItems,
 } from './batchTaskStore.js'
 import { triggerBatchWorker } from './batchTrigger.js'
@@ -31,11 +31,11 @@ export async function runBatchAutoRetry(req, staleMinutes = DEFAULT_STALE_MINUTE
     }
 
     try {
-      // 针对 failed 状态的任务：重置 failed 分块为 pending
+      // 针对 failed 状态的任务：将所有分块（含 completed/failed/processing）重置为 pending
       let resetCount = 0
       if (task.status === 'failed') {
-        resetCount = await resetFailedItemsToPending(batchId)
-        console.log('[batchAutoRetry] failed 任务分块已重置', { batchId, resetCount })
+        resetCount = await resetAllItemsToPending(batchId)
+        console.log('[batchAutoRetry] failed 任务全部 ' + resetCount + ' 个分块已重置为 pending', { batchId })
       } else {
         resetCount = await resetStuckProcessingItems(batchId, staleMinutes)
       }
