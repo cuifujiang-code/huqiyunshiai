@@ -386,6 +386,30 @@ export async function parseBatchSplitAiResponse(aiText, meta, sortOffset, extrac
     extractPath = rawQuestions.length ? 'deepFindQuestionArrays' : extractPath
   }
 
+  // 新增：尝试常见混合字段组合
+  if (!rawQuestions.length && parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+    // 尝试 parsed.data.questions / parsed.result.questions / parsed.output.questions
+    for (const prefix of ['data', 'result', 'output', 'body']) {
+      if (!parsed[prefix]) continue
+      const sub = parsed[prefix]
+      if (Array.isArray(sub)) {
+        rawQuestions = sub.filter(q => q && typeof q === 'object')
+        if (rawQuestions.length) { extractPath = prefix + '[array]'; break }
+      }
+      if (sub && typeof sub === 'object') {
+        for (const k of ['questions', 'items', 'list', 'results']) {
+          if (!sub[k]) continue
+          const arr = Array.isArray(sub[k]) ? sub[k] : null
+          if (arr && arr.length) {
+            rawQuestions = arr.filter(q => q && typeof q === 'object')
+            if (rawQuestions.length) { extractPath = prefix + '.' + k; break }
+          }
+        }
+      }
+      if (rawQuestions.length) break
+    }
+  }
+
   if (!rawQuestions.length && Array.isArray(parsed)) {
     rawQuestions = parsed.filter((x) => x && typeof x === 'object')
     if (rawQuestions.length) extractPath = 'array_filter_objects'

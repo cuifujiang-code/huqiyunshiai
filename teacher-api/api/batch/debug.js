@@ -29,20 +29,36 @@ export default async function handler(req, res) {
       .from('batch_question_bank')
       .select('id', { count: 'exact', head: true })
 
-    // 4. 查询最近 5 个任务
+    // 4. 查询最近 5 个任务（含真实 COUNT）
     const { data: tasks, error: tasksErr } = await admin
       .from('batch_decompose_tasks')
       .select('batch_id, status, file_name, total_items, completed_items, total_questions, imported_questions, error_message, created_at, updated_at')
       .order('created_at', { ascending: false })
       .limit(5)
 
-    // 5. 测试写入一条数据（快速验证 RLS/权限）
+    // 5. 为每个任务查询 batch_question_bank 真实数量
+    const tasksWithRealCount = tasks ? await Promise.all(
+      tasks.map(async (t) => {
+        try {
+          const { count, error } = await admin
+            .from('batch_question_bank')
+            .select('id', { count: 'exact', head: true })
+            .eq('batch_id', t.batch_id)
+          return { ...t, real_bank_count: count ?? 0, bank_error: error?.message || null }
+        } catch (e) {
+          return { ...t, real_bank_count: '查询失败', bank_error: e.message }
+        }
+      })
+    ) : []
+
+    // 6. 测试写入一条数据（用 null item_id）
     const testBatchId = 'debug-' + Date.now()
     const { error: insertErr, status: insertStatus } = await admin
       .from('batch_question_bank')
       .insert({
         batch_id: testBatchId,
         teacher_id: 'debug',
+        item_id: null,
         subject: '数学',
         grade: '八年级',
         question_type: '选择题',
@@ -52,7 +68,7 @@ export default async function handler(req, res) {
         analysis: '测试',
       })
 
-    // 6. COUNT 验证写入
+    // 7. COUNT 验证写入
     let verifyCount = 0
     if (!insertErr) {
       const { count } = await admin
@@ -62,15 +78,6 @@ export default async function handler(req, res) {
       verifyCount = count ?? 0
       // 清理
       await admin.from('batch_question_bank').delete().eq('batch_id', testBatchId)
-    }
-
-    // 7. 检查 RLS 状态（rpc 可能不存在，忽略错误）
-    let rlsData = { error: 'rpc not available' }
-    try {
-      const { data, error } = await admin.rpc('check_rls_status', { table_name: 'batch_question_bank' })
-      rlsData = error ? { error: error.message } : { data }
-    } catch (rpcErr) {
-      rlsData = { error: 'rpc not available: ' + (rpcErr instanceof Error ? rpcErr.message : String(rpcErr)) }
     }
 
     return res.status(200).json({
@@ -84,14 +91,13 @@ export default async function handler(req, res) {
         batch_question_bank_count: bankCount,
         batch_question_bank_count_error: bankCountErr ? bankCountErr.message : null,
       },
-      recent_tasks: tasks || [],
+      recent_tasks: tasksWithRealCount,
       recent_tasks_error: tasksErr ? tasksErr.message : null,
       write_test: {
         insertStatus,
         insertError: insertErr ? { message: insertErr.message, code: insertErr.code, details: insertErr.details, hint: insertErr.hint } : null,
         verifyCount,
       },
-      rls: rlsData || { error: rlsErr?.message || 'not checked' },
       timestamp: new Date().toISOString(),
     })
   } catch (err) {
