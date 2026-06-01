@@ -5,6 +5,7 @@ import { logStepError } from './apiErrorUtil.js'
 import fs from 'fs/promises'
 import path from 'path'
 import os from 'os'
+import AdmZip from 'adm-zip'
 
 const require = createRequire(import.meta.url)
 
@@ -164,16 +165,121 @@ async function parseImageWithVision(buffer, fileName, meta = {}) {
   }
 }
 
+/**
+ * DOCX 预处理：在 mammoth 之前，将 MathType OLE 公式和图片替换为占位符
+ *
+ * mammoth 的 extractRawText 会完全跳过 OLE 对象和图片，
+ * 导致文档中的所有公式和图形丢失。
+ * 本函数先替换 XML 中的 OLE 公式和图片为文本标记，
+ * 确保 mammoth 能将其作为普通文本提取出来。
+ *
+ * @param {Buffer} buffer docx 文件二进制
+ * @returns {Buffer} 预处理后的 docx 文件二进制
+ */
+function preprocessDocxXml(buffer) {
+  try {
+    const zip = new AdmZip(buffer)
+    const docEntry = zip.getEntry('word/document.xml')
+    if (!docEntry) {
+      console.warn('[docxPreprocess] 未找到 word/document.xml，跳过预处理')
+      return buffer
+    }
+
+    let xml = docEntry.getData().toString('utf8')
+    let modifications = 0
+
+    // 1. 处理 MathType OLE 公式对象
+    // OLE 对象模式: <w:object ...><v:shape ...><o:OLEObject .../></v:shape></w:object>
+    // 替换为文本标记
+    const oleRe = /<w:object[\s\S]*?<\/w:object>/g
+    xml = xml.replace(oleRe, (match) => {
+      // 检查是否包含 OLEObject（确认是嵌入对象）
+      if (match.includes('OLEObject')) {
+        modifications++
+        // 尝试从 w:instrText 中提取域代码文本
+        const instrMatch = match.match(/<w:instrText[^>]*>([\s\S]*?)<\/w:instrText>/)
+        if (instrMatch && instrMatch[1]) {
+          // 有域代码文本，提取为公式标记
+          return '<w:r><w:t xml:space="preserve">【公式】</w:t></w:r>'
+        }
+        return '<w:r><w:t xml:space="preserve">【公式】</w:t></w:r>'
+      }
+      return match
+    })
+
+    // 2. 处理 w:pict 中的 OLE 公式（MathType 旧格式）
+    const pictRe = /<w:pict[\s\S]*?<\/w:pict>/g
+    xml = xml.replace(pictRe, (match) => {
+      if (match.includes('OLEObject') || match.includes('EMBED Equation')) {
+        modifications++
+        return '<w:r><w:t xml:space="preserve">【公式】</w:t></w:r>'
+      }
+      // 检查是否是图片
+      if (match.includes('imagedata') || match.includes('image')) {
+        modifications++
+        return '<w:r><w:t xml:space="preserve">[图片占位符]</w:t></w:r>'
+      }
+      return match
+    })
+
+    // 3. 处理 w:drawing（图片）
+    const drawingRe = /<w:drawing[\s\S]*?<\/w:drawing>/g
+    xml = xml.replace(drawingRe, () => {
+      modifications++
+      return '<w:r><w:t xml:space="preserve">[图片占位符]</w:t></w:r>'
+    })
+
+    // 4. 处理独立的 OLEObject（在 w:object 外的情况）
+    const standaloneOleRe = /<o:OLEObject[^>]*\/>/g
+    xml = xml.replace(standaloneOleRe, () => {
+      modifications++
+      return '<w:r><w:t xml:space="preserve">【公式】</w:t></w:r>'
+    })
+
+    if (modifications > 0) {
+      zip.updateFile('word/document.xml', Buffer.from(xml, 'utf8'))
+      console.log('[docxPreprocess] 预处理完成', {
+        modifications,
+        oleFormulas: (xml.match(/【公式】/g) || []).length,
+        imagePlaceholders: (xml.match(/\[图片占位符\]/g) || []).length,
+      })
+      return zip.toBuffer()
+    }
+
+    console.log('[docxPreprocess] 无需预处理（未发现公式或图片）')
+    return buffer
+  } catch (err) {
+    console.error('[docxPreprocess] 预处理失败，回退原始文件', {
+      error: err instanceof Error ? err.message : String(err),
+    })
+    return buffer
+  }
+}
+
 /** 解析 .docx */
 async function parseDocx(buffer, fileName) {
   console.log('[试卷解析] 开始 Word', { fileName, bytes: buffer.length })
-  const result = await mammoth.extractRawText({ buffer })
+
+  // 预处理：替换 MathType OLE 公式和图片为占位符
+  const preprocessed = preprocessDocxXml(buffer)
+
+  const result = await mammoth.extractRawText({ buffer: preprocessed })
   const text = (result.value || '').trim()
   if (!text) {
     throw new Error('Word 试卷未能提取到文字，请检查文件内容')
   }
-  console.log('[试卷解析] Word 完成', { fileName, textLength: text.length })
-  return { text, type: 'docx' }
+
+  // 统计预处理效果
+  const formulaCount = (text.match(/【公式】/g) || []).length
+  const imageCount = (text.match(/\[图片占位符\]/g) || []).length
+
+  console.log('[试卷解析] Word 完成', {
+    fileName,
+    textLength: text.length,
+    formulaMarkers: formulaCount,
+    imagePlaceholders: imageCount,
+  })
+  return { text, type: 'docx', _preprocessStats: { formulaMarkers: formulaCount, imagePlaceholders: imageCount } }
 }
 
 /** 解析 .pdf（含扫描版 PDF 检测 + OCR 回退） */

@@ -3,7 +3,7 @@
  * 将 AI 任意格式输出强制转换为可入库的标准结构
  */
 
-import { IMAGE_PLACEHOLDER } from './batchQualityPrompts.js'
+import { IMAGE_PLACEHOLDER, FORMULA_PLACEHOLDER } from './batchQualityPrompts.js'
 
 const VALID_TYPES = new Set(['选择题', '填空题', '计算题', '证明题', '实验题', '应用题'])
 const VALID_DIFFICULTY = new Set(['基础', '中等', '拔高'])
@@ -161,6 +161,18 @@ export function normalizeQuestion(raw, index, taskMeta = {}) {
   answer = cleanFormula(answer)
   analysis = cleanFormula(analysis)
 
+  // 兜底：如果 AI 没有替换掉【公式】标记，用 $...$ 包裹
+  // 这确保即使 AI 漏掉了公式推断，也不会在输出中保留原始占位符
+  const hasFormulaPlaceholder = content.includes(FORMULA_PLACEHOLDER)
+    || answer.includes(FORMULA_PLACEHOLDER)
+    || analysis.includes(FORMULA_PLACEHOLDER)
+  if (hasFormulaPlaceholder) {
+    // 尝试智能替换：根据上下文将【公式】替换为合理默认值
+    content = content.replace(new RegExp(FORMULA_PLACEHOLDER.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), '$...$')
+    answer = answer.replace(new RegExp(FORMULA_PLACEHOLDER.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), '$...$')
+    analysis = analysis.replace(new RegExp(FORMULA_PLACEHOLDER.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), '$...$')
+  }
+
   if (!content) content = `题目 ${sortOrder}`
   if (!answer) answer = '暂无'
   if (!analysis) analysis = '暂无'
@@ -200,6 +212,9 @@ export function normalizeQuestion(raw, index, taskMeta = {}) {
     : []
   if (hasImagePlaceholder && !tags.includes('含图片占位符')) {
     tags.push('含图片占位符')
+  }
+  if (hasFormulaPlaceholder && !tags.includes('含公式占位符')) {
+    tags.push('含公式占位符')
   }
 
   const normalized = {

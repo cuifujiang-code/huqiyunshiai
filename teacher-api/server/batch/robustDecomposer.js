@@ -6,6 +6,8 @@ import { callDeepSeekAI, DeepSeekApiError } from '../deepseekClient.js'
 import { createServiceRoleClient, getSupabaseAdmin } from '../supabaseAdmin.js'
 import { countQuestionMarkers } from './batchChunker.js'
 import {
+  IMAGE_PLACEHOLDER,
+  FORMULA_PLACEHOLDER,
   IMAGE_PLACEHOLDER_RULE,
   JSON_EXAMPLE_WITH_LATEX,
   LATEX_STRICT_RULE,
@@ -28,11 +30,17 @@ const MIN_MEANINGFUL_CHUNK = Number(process.env.BATCH_MIN_CHUNK_LEN || 150)
 const DECOMPOSE_MAX_RETRIES = Number(process.env.BATCH_DECOMPOSE_RETRIES || 2)
 
 const ROBUST_SYSTEM_PROMPT = `你是一个专业的题目解析器。只输出 JSON 数组，不输出任何其它内容。
+
 ${LATEX_STRICT_RULE}
+
+重要：文本中的 ${FORMULA_PLACEHOLDER} 标记代表 MathType 公式占位符。你必须根据上下文推断公式内容并替换为 LaTeX，禁止保留 ${FORMULA_PLACEHOLDER} 标记本身。
+
 ${IMAGE_PLACEHOLDER_RULE}`
 
 function buildRobustUserPrompt(text) {
   return `你是一个专业的题目解析器。请将以下文本中的题目逐题提取出来，返回一个严格的JSON数组。
+
+文本中的 ${FORMULA_PLACEHOLDER} 标记代表原始文档的公式占位符。你必须根据上下文推断每个 ${FORMULA_PLACEHOLDER} 的实际公式内容，并替换为标准 LaTeX 格式。禁止在输出中保留 ${FORMULA_PLACEHOLDER} 标记。
 
 ${LATEX_STRICT_RULE}
 
@@ -50,6 +58,8 @@ ${text}`
 
 function buildFragmentUserPrompt(text) {
   return `你是一个专业的题目解析器。以下文本是试卷 OCR/PDF 提取后的**片段**，可能只有半道题、续篇、页眉页脚或答案区。请尽可能从中提取完整题目；若确实无任何题目信息，返回空数组[]。
+
+文本中的 ${FORMULA_PLACEHOLDER} 标记代表原始文档的公式占位符。你必须根据上下文推断每个 ${FORMULA_PLACEHOLDER} 的实际公式内容，并替换为标准 LaTeX 格式。禁止在输出中保留 ${FORMULA_PLACEHOLDER} 标记。
 
 ${LATEX_STRICT_RULE}
 
