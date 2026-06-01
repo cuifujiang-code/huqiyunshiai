@@ -49,6 +49,7 @@ export function getDeepSeekConfigSummary() {
   const cfg = getDeepSeekConfig()
   return {
     hasApiKey: cfg.hasApiKey,
+    apiKeyPrefix: cfg.apiKey ? `${cfg.apiKey.slice(0, 8)}…` : '(missing)',
     apiBase: cfg.apiBase,
     model: cfg.model,
     visionModel: cfg.visionModel || cfg.model,
@@ -57,16 +58,43 @@ export function getDeepSeekConfigSummary() {
   }
 }
 
-async function executeDeepSeekRequest(body, { label = 'DeepSeek', model } = {}) {
+const EMPTY_CONTENT_RETRY_DELAY_MS = 2000
+const MAX_EMPTY_CONTENT_RETRIES = 1
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+function extractMessageContent(data) {
+  const choice = data?.choices?.[0]
+  const content = choice?.message?.content
+  if (typeof content === 'string' && content.trim()) return content.trim()
+
+  // 部分兼容实现可能返回 reasoning_content 或其它字段
+  const alt = choice?.message?.reasoning_content ?? choice?.text ?? data?.content
+  if (typeof alt === 'string' && alt.trim()) return alt.trim()
+
+  return ''
+}
+
+async function executeDeepSeekRequest(body, { label = 'DeepSeek', model, attempt = 0 } = {}) {
   const cfg = getDeepSeekConfig()
   const requestBody = JSON.stringify(body)
   const requestBodyBytes = Buffer.byteLength(requestBody, 'utf8')
+  const resolvedModel = model || body.model
 
-  console.log(`[${label}] 发起请求`, {
+  console.log('[DeepSeek] 请求开始', {
+    label,
+    attempt,
     url: cfg.url,
-    model: model || body.model,
+    apiBase: cfg.apiBase,
+    model: resolvedModel,
+    hasApiKey: Boolean(cfg.apiKey),
+    authHeader: cfg.apiKey ? 'Bearer ***' : '(missing)',
     requestBodyBytes,
-    requestBodyKB: (requestBodyBytes / 1024).toFixed(1),
+    messageCount: Array.isArray(body.messages) ? body.messages.length : 0,
+    maxTokens: body.max_tokens,
+    stream: body.stream ?? false,
   })
 
   const started = Date.now()
@@ -77,6 +105,7 @@ async function executeDeepSeekRequest(body, { label = 'DeepSeek', model } = {}) 
       headers: {
         Authorization: `Bearer ${cfg.apiKey}`,
         'Content-Type': 'application/json',
+        Accept: 'application/json',
       },
       body: requestBody,
       signal: AbortSignal.timeout(25000),
@@ -85,34 +114,39 @@ async function executeDeepSeekRequest(body, { label = 'DeepSeek', model } = {}) 
     const message = fetchErr instanceof Error ? fetchErr.message : String(fetchErr)
     const err = new DeepSeekApiError(`DeepSeek 网络请求异常: ${message}`, {
       url: cfg.url,
-      model: model || body.model,
+      model: resolvedModel,
       config: getDeepSeekConfigSummary(),
     })
-    console.error(`[${label}] 网络错误`, err.toJSON())
+    console.error('[DeepSeek] 网络错误', { label, attempt, ...err.toJSON() })
     throw err
   }
 
   const elapsedMs = Date.now() - started
   const responseText = await response.text()
+  const statusCode = response.status
 
-  console.log(`[${label}] 收到响应`, {
-    status: response.status,
+  console.log(`[DeepSeek] 响应状态码=${statusCode}`, {
+    label,
+    attempt,
     elapsedMs,
+    ok: response.ok,
     responseBodyBytes: Buffer.byteLength(responseText, 'utf8'),
   })
 
-  if (!response.ok) {
-    const err = new DeepSeekApiError(`DeepSeek API 请求失败 (${response.status})`, {
-      statusCode: response.status,
-      responseBody: responseText.slice(0, 2000),
+  if (statusCode !== 200) {
+    console.error('[DeepSeek] 非200响应完整body', {
+      label,
+      attempt,
+      statusCode,
       url: cfg.url,
-      model: model || body.model,
-      config: getDeepSeekConfigSummary(),
+      body: responseText,
     })
-    console.error(`[${label}] HTTP 错误`, {
-      status: response.status,
-      elapsedMs,
-      body: responseText.slice(0, 2000),
+    const err = new DeepSeekApiError(`DeepSeek API 请求失败 (HTTP ${statusCode})`, {
+      statusCode,
+      responseBody: responseText,
+      url: cfg.url,
+      model: resolvedModel,
+      config: getDeepSeekConfigSummary(),
     })
     throw err
   }
@@ -121,32 +155,53 @@ async function executeDeepSeekRequest(body, { label = 'DeepSeek', model } = {}) 
   try {
     data = JSON.parse(responseText)
   } catch {
-    const err = new DeepSeekApiError('DeepSeek 响应不是合法 JSON', {
-      statusCode: response.status,
-      responseBody: responseText.slice(0, 2000),
-      url: cfg.url,
-      model: model || body.model,
+    console.error('[DeepSeek] 响应不是合法 JSON', {
+      label,
+      attempt,
+      body: responseText,
     })
-    console.error(`[${label}] JSON 解析失败`, err.toJSON())
+    const err = new DeepSeekApiError('DeepSeek 响应不是合法 JSON', {
+      statusCode,
+      responseBody: responseText,
+      url: cfg.url,
+      model: resolvedModel,
+    })
     throw err
   }
 
-  const content = data?.choices?.[0]?.message?.content
+  const content = extractMessageContent(data)
   if (!content) {
-    const err = new DeepSeekApiError('DeepSeek API 未返回有效内容', {
-      statusCode: response.status,
-      responseBody: JSON.stringify(data).slice(0, 2000),
-      url: cfg.url,
-      model: model || body.model,
+    console.warn('[DeepSeek] 响应内容为空', {
+      label,
+      attempt,
+      finishReason: data?.choices?.[0]?.finish_reason,
+      choiceKeys: data?.choices?.[0] ? Object.keys(data.choices[0]) : [],
+      messageKeys: data?.choices?.[0]?.message ? Object.keys(data.choices[0].message) : [],
+      responsePreview: JSON.stringify(data).slice(0, 1500),
     })
-    console.error(`[${label}] 空内容`, err.toJSON())
+
+    if (attempt < MAX_EMPTY_CONTENT_RETRIES) {
+      console.warn('[DeepSeek] 空内容，2秒后重试', { label, nextAttempt: attempt + 1 })
+      await sleep(EMPTY_CONTENT_RETRY_DELAY_MS)
+      return executeDeepSeekRequest(body, { label, model: resolvedModel, attempt: attempt + 1 })
+    }
+
+    const err = new DeepSeekApiError('DeepSeek API 未返回有效内容（已重试仍为空）', {
+      statusCode,
+      responseBody: JSON.stringify(data),
+      url: cfg.url,
+      model: resolvedModel,
+      config: getDeepSeekConfigSummary(),
+    })
+    console.error('[DeepSeek] 空内容最终失败', err.toJSON())
     throw err
   }
 
   console.log(`[${label}] 调用成功`, {
-    model: model || body.model,
+    model: resolvedModel,
     elapsedMs,
     contentLength: content.length,
+    attempt,
   })
 
   return content
@@ -168,6 +223,7 @@ export async function callDeepSeekAI(systemPrompt, userPrompt, options = {}) {
     throw err
   }
 
+  // OpenAI 兼容格式：POST {base}/chat/completions
   return executeDeepSeekRequest(
     {
       model,
@@ -175,7 +231,7 @@ export async function callDeepSeekAI(systemPrompt, userPrompt, options = {}) {
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userPrompt },
       ],
-      temperature: 0.7,
+      temperature: options.temperature ?? 0.7,
       max_tokens: maxTokens,
       stream: false,
     },

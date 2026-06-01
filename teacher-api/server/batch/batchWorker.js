@@ -1,5 +1,5 @@
 import { waitUntil } from '@vercel/functions'
-import { callDeepSeekAI, extractJson } from '../deepseekClient.js'
+import { callDeepSeekAI, DeepSeekApiError, extractJson, serializeError } from '../deepseekClient.js'
 import { safeJsonParse } from './safeJson.js'
 import {
   BATCH_SYSTEM_PROMPT,
@@ -143,11 +143,33 @@ async function invokeAiParse(item, meta, sortOffset, useBackupPrompt) {
     ? backupPrompt(item.chunk_text, meta)
     : buildBatchSplitPrompt(item.chunk_text, meta)
 
-  const aiResponse = await callDeepSeekAI(BATCH_SYSTEM_PROMPT, prompt, {
-    model: BATCH_MODEL,
-    maxTokens: 4096,
-    label: useBackupPrompt ? 'batch-split-backup' : 'batch-split',
-  })
+  let aiResponse
+  try {
+    aiResponse = await callDeepSeekAI(BATCH_SYSTEM_PROMPT, prompt, {
+      model: BATCH_MODEL,
+      maxTokens: 4096,
+      label: useBackupPrompt ? 'batch-split-backup' : 'batch-split',
+    })
+  } catch (err) {
+    const detail = serializeError(err)
+    console.error('[batchWorker] DeepSeek API 调用失败', {
+      itemId: item.id,
+      itemIndex: item.item_index,
+      useBackupPrompt,
+      model: BATCH_MODEL,
+      detail,
+    })
+    throw err
+  }
+
+  if (!aiResponse || !String(aiResponse).trim()) {
+    const msg = 'DeepSeek API 返回空内容'
+    console.warn('[batchWorker] DeepSeek 空内容（客户端重试后仍失败）', {
+      itemId: item.id,
+      itemIndex: item.item_index,
+    })
+    throw new DeepSeekApiError(msg, { model: BATCH_MODEL })
+  }
 
   console.log('[AI解析] 原始返回数据: ' + JSON.stringify(aiResponse))
 
@@ -200,13 +222,18 @@ async function callAiParseWithRetry(item, meta, sortOffset, batchId) {
       if (parsed.questions?.length > 0) return parsed
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
+      const detail = serializeError(err)
       console.error('[batchWorker] AI 调用/解析异常', {
         batchId,
         itemId: item.id,
+        itemIndex: item.item_index,
         attempt: attemptIndex,
         message: msg,
+        detail,
       })
-      if (attemptIndex === 1) throw err
+      if (err instanceof DeepSeekApiError || attemptIndex === 1) {
+        throw err
+      }
     }
   }
 
@@ -271,12 +298,22 @@ async function processOneItem(item, meta, sortOffset, batchId) {
     }
   } catch (error) {
     const msg = error instanceof Error ? error.message : '拆题失败'
-    console.error('[batchWorker] 分块处理失败', { itemId: item.id, batchId, msg })
-    await markItemFailed(item.id, msg)
+    const detail = serializeError(error)
+    const detailMsg = error instanceof DeepSeekApiError
+      ? `DeepSeek API 失败: ${msg}${error.statusCode ? ` (HTTP ${error.statusCode})` : ''}`
+      : msg
+    console.error('[batchWorker] 分块处理失败', {
+      itemId: item.id,
+      itemIndex: item.item_index,
+      batchId,
+      msg: detailMsg,
+      detail,
+    })
+    await markItemFailed(item.id, detailMsg)
     if (msg === AI_PARSE_FAIL_MESSAGE) {
-      return { success: false, error: msg, itemId: item.id, rawQuestions: [], questions: [], failTask: true }
+      return { success: false, error: detailMsg, itemId: item.id, rawQuestions: [], questions: [], failTask: true }
     }
-    return { success: false, error: msg, itemId: item.id, rawQuestions: [], questions: [], skipTaskFail: true }
+    return { success: false, error: detailMsg, itemId: item.id, rawQuestions: [], questions: [], skipTaskFail: true }
   }
 }
 
