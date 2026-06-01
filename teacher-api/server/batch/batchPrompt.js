@@ -133,8 +133,13 @@ export const BATCH_SYSTEM_PROMPT = `你是 K12 专业题库拆题引擎，对标
 11. 一题一条，禁止合并多道小题`
 
 export function buildBatchSplitPrompt(chunkText, meta) {
-  return `将以下试卷文本拆分为独立题目，完整保留数学表达式与图形信息。
+  const estimated = meta.estimatedQuestions ?? 0
+  const countHint = estimated >= 2
+    ? `\n【题量要求】本片段约含 ${estimated} 道题（检测到 ${estimated} 个题号）。必须逐题识别并输出，JSON 数组长度必须等于片段内独立题目数量，禁止只输出 1 题后停止。\n`
+    : '\n【题量要求】必须识别片段中的每一道独立题目，JSON 数组长度等于实际题目数，禁止遗漏或合并。\n'
 
+  return `将以下试卷文本拆分为独立题目，完整保留数学表达式与图形信息。
+${countHint}
 学科：${meta.subject || '数学'}
 年级：${meta.grade || '八年级'}
 
@@ -182,8 +187,13 @@ ${chunkText}
 
 /** 备用 prompt（backupPrompt）：极度明确，必须且只能返回纯 JSON 数组 */
 export function backupPrompt(chunkText, meta) {
-  return `【强制 JSON 数组模式 - 违反任何一条均视为失败】
+  const estimated = meta.estimatedQuestions ?? 0
+  const countHint = estimated >= 2
+    ? `\n本片段约含 ${estimated} 道题，JSON 数组必须包含 ${estimated} 个元素，禁止只输出 1 题。\n`
+    : '\n必须输出片段内全部题目，JSON 数组长度等于实际题目数。\n'
 
+  return `【强制 JSON 数组模式 - 违反任何一条均视为失败】
+${countHint}
 你的输出必须且只能是一个 JSON 数组，以字符 [ 开头、以字符 ] 结尾。
 禁止输出 markdown（禁止 \`\`\`json）。
 禁止用对象包装（禁止 {"questions":[...]}、禁止 {"data":{...}}、禁止 {"result":{...}}）。
@@ -197,10 +207,10 @@ export function backupPrompt(chunkText, meta) {
 - 即使 AI 无法识别的公式，也要用描述性 LaTeX 占位（如 $\\text{公式图像}$）
 
 学科：${meta.subject || '数学'}
-年级：${meta.grade || '八年级'}}
+年级：${meta.grade || '八年级'}
 
 试卷文本：
-${chunkText}}
+${chunkText}
 
 每道题必须是 JSON 对象，且必须包含以下字符串字段（均不能为空）：
 - content（题干，含完整公式）

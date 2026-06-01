@@ -1,10 +1,13 @@
 import { triggerBatchWorker } from './batchTrigger.js'
 import {
   countItemsByStatus,
+  clearBatchQuestionBank,
   getBatchTaskForTeacher,
   markBatchFailed,
   markBatchRunning,
+  resetAllItemsToPending,
   resetBatchTaskToPending,
+  resetFailedItemsToPending,
   resetStuckProcessingItems,
 } from './batchTaskStore.js'
 
@@ -22,6 +25,7 @@ function isTaskStale(task, staleMinutes = STALE_TASK_MINUTES) {
 export async function startBatchProcessing(batchId, teacherId, req) {
   const normalizedBatchId = String(batchId ?? '').trim()
   const normalizedTeacherId = String(teacherId ?? '').trim()
+  const rerun = req?.body?.rerun === true || req?.body?.rerun === 'true'
 
   console.log('[batchStart] 收到启动请求', {
     batchId: normalizedBatchId,
@@ -39,13 +43,21 @@ export async function startBatchProcessing(batchId, teacherId, req) {
     return { ok: false, httpStatus: 404, taskStatus: 'failed', message: '任务不存在或无权访问' }
   }
 
-  if (task.status === 'failed' || task.status === 'partial') {
+  if (rerun && (task.status === 'completed' || task.status === 'partial' || task.status === 'failed')) {
+    console.log('[batchStart] 重新拆题：清空题库并重置分块', { batchId: normalizedBatchId, oldStatus: task.status })
+    await clearBatchQuestionBank(normalizedBatchId)
+    await resetAllItemsToPending(normalizedBatchId)
+    await resetBatchTaskToPending(normalizedBatchId)
+    task = { ...task, status: 'pending', error_message: null, imported_questions: 0 }
+  } else if (task.status === 'failed' || task.status === 'partial') {
     console.log(`[启动前重置] batchId=${normalizedBatchId}，旧状态=${task.status}，已重置为 pending`)
     await resetBatchTaskToPending(normalizedBatchId)
+    const resetItems = await resetFailedItemsToPending(normalizedBatchId)
+    console.log('[batchStart] 已重置 failed 分块', { batchId: normalizedBatchId, resetItems })
     task = { ...task, status: 'pending', error_message: null }
   }
 
-  if (task.status === 'completed') {
+  if (task.status === 'completed' && !rerun) {
     console.log('[batchStart] 任务已完成，跳过', { batchId: normalizedBatchId, status: task.status })
     return {
       ok: true,

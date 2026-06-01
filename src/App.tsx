@@ -3,6 +3,7 @@ import ProtectedRoute from './components/ProtectedRoute'
 import ProtectedRouteAuth from './components/ProtectedRouteAuth'
 import { AuthProvider } from './context/AuthContext'
 import { MembershipProvider } from './context/MembershipContext'
+import { QuestionBasketProvider } from './context/QuestionBasketContext'
 import LoginPage from './pages/LoginPage'
 import HomePage from './pages/HomePage'
 import MemberCenterPage from './pages/MemberCenterPage'
@@ -25,6 +26,7 @@ export default function App() {
     <BrowserRouter>
       <AuthProvider>
         <MembershipProvider>
+          <QuestionBasketProvider>
           <Routes>
             <Route path="/login" element={<LoginPage />} />
             <Route path="/" element={<HomePage />} />
@@ -142,6 +144,7 @@ export default function App() {
             />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
+          </QuestionBasketProvider>
         </MembershipProvider>
       </AuthProvider>
     </BrowserRouter>

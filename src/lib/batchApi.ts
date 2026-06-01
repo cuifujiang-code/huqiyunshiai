@@ -177,11 +177,11 @@ export async function uploadBatchTask(
 /** uploadBatchTask 别名，兼容旧调用名 uploadExam */
 export const uploadExam = uploadBatchTask
 
-export async function startBatchTask(teacherId: string, batchId: string) {
+export async function startBatchTask(teacherId: string, batchId: string, options?: { rerun?: boolean }) {
   return callBatch<{ success: boolean; batchId: string; status: string; message: string }>(
     batchApiUrl('batch/start'),
-    { teacherId, batchId },
-    '启动批量拆题',
+    { teacherId, batchId, ...(options?.rerun ? { rerun: true } : {}) },
+    options?.rerun ? '重新拆题' : '启动批量拆题',
   )
 }
 

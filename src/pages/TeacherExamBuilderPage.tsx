@@ -1,6 +1,8 @@
 import { useRef, useState } from 'react'
 import DashboardHeader from '../components/layout/DashboardHeader'
 import { useAuth } from '../context/AuthContext'
+import { useQuestionBasket } from '../context/QuestionBasketContext'
+import QuestionBasket from '../components/batch/QuestionBasket'
 import { exportHtmlAsWord, questionsToHtml } from '../lib/exportDoc'
 import { exportToPdf } from '../lib/exportPdf'
 import { buildExam } from '../lib/teacherApi'
@@ -27,6 +29,7 @@ export default function TeacherExamBuilderPage() {
   const [exam, setExam] = useState<BuiltExam | null>(null)
   const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
+  const { items: basketItems, count: basketCount } = useQuestionBasket()
 
   const totalScore = rows.reduce((s, r) => s + r.count * r.scorePerQuestion, 0)
 
@@ -59,6 +62,11 @@ export default function TeacherExamBuilderPage() {
         <div className="grid gap-6 lg:grid-cols-2">
           <section className="rounded-2xl border border-slate-700 bg-slate-900/60 p-4">
             <h3 className="mb-3 font-semibold">组卷配置</h3>
+            {basketCount > 0 && (
+              <p className="mb-3 rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-3 py-2 text-sm text-cyan-300">
+                试题篮中有 {basketCount} 道题目，可直接用于组卷
+              </p>
+            )}
             <input className={`${inputClass} mb-3`} placeholder="试卷名称" value={title} onChange={(e) => setTitle(e.target.value)} />
             <div className="mb-3 grid grid-cols-2 gap-2">
               <select className={inputClass} value={subject} onChange={(e) => setSubject(e.target.value)}>{TEACHER_SUBJECTS.map((s) => <option key={s}>{s}</option>)}</select>
@@ -105,6 +113,9 @@ export default function TeacherExamBuilderPage() {
           </section>
         </div>
       </main>
+
+      {/* 试题篮悬浮组件 */}
+      <QuestionBasket />
     </div>
   )
 }

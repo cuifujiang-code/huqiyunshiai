@@ -287,6 +287,39 @@ export async function resetBatchTaskToPending(batchId) {
   if (error) throw new Error(error.message)
 }
 
+/** 将 failed 分块重置为 pending，便于重跑 */
+export async function resetFailedItemsToPending(batchId) {
+  const admin = getSupabaseAdmin()
+  const { data, error } = await admin
+    .from(ITEMS)
+    .update({ status: 'pending', error_message: null, updated_at: nowIso() })
+    .eq('batch_id', batchId)
+    .eq('status', 'failed')
+    .select('id')
+  if (error) throw new Error(error.message)
+  return data?.length ?? 0
+}
+
+/** 将全部非 pending 分块重置为 pending（重新拆题） */
+export async function resetAllItemsToPending(batchId) {
+  const admin = getSupabaseAdmin()
+  const { data, error } = await admin
+    .from(ITEMS)
+    .update({ status: 'pending', error_message: null, updated_at: nowIso() })
+    .eq('batch_id', batchId)
+    .neq('status', 'pending')
+    .select('id')
+  if (error) throw new Error(error.message)
+  return data?.length ?? 0
+}
+
+/** 清空批次题库记录（重新拆题前） */
+export async function clearBatchQuestionBank(batchId) {
+  const admin = getBatchQuestionBankClient()
+  const { error } = await admin.from(BANK).delete().eq('batch_id', batchId)
+  if (error) throw new Error(error.message)
+}
+
 export async function updateBatchProgress(batchId, { completedItems, totalQuestions, status }) {
   const admin = getSupabaseAdmin()
   const patch = { updated_at: nowIso() }

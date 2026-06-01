@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import DashboardHeader from '../components/layout/DashboardHeader'
 import { useAuth } from '../context/AuthContext'
+import { useQuestionBasket } from '../context/QuestionBasketContext'
 import { fileToBase64 } from '../lib/fileBase64'
 import {
   diagnoseEmptyQuestions,
@@ -15,6 +16,8 @@ import {
   type BatchProgress,
   type BatchQuestion,
 } from '../lib/batchApi'
+import BatchQuestionPreview from '../components/batch/BatchQuestionPreview'
+import QuestionBasket from '../components/batch/QuestionBasket'
 import { TEACHER_GRADES, TEACHER_SUBJECTS, btnPrimary, btnSecondary, inputClass } from '../types/teacher'
 
 function formatTime(iso: string) {
@@ -67,6 +70,7 @@ export default function TeacherBatchDecomposePage() {
   const autoRetryRef = useRef(false)
   const tasksRef = useRef<BatchProgress[]>([])
   tasksRef.current = tasks
+  const { count: basketCount } = useQuestionBasket()
 
   const loadTasks = useCallback(async () => {
     if (!teacherId) return
@@ -158,13 +162,13 @@ export default function TeacherBatchDecomposePage() {
     }
   }
 
-  const handleStart = async (batchId: string) => {
+  const handleStart = async (batchId: string, rerun = false) => {
     if (!teacherId) return
     setStartingId(batchId)
     setMessage(null)
     try {
-      const res = await startBatchTask(teacherId, batchId)
-      setMessage(res.message || '已启动批量拆题')
+      const res = await startBatchTask(teacherId, batchId, rerun ? { rerun: true } : undefined)
+      setMessage(res.message || (rerun ? '已重新开始拆题' : '已启动批量拆题'))
       await loadTasks()
     } catch (e) {
       setMessage(e instanceof Error ? e.message : '启动失败')
@@ -262,6 +266,12 @@ export default function TeacherBatchDecomposePage() {
             <Link to="/teacher/task-center" className="text-cyan-400 hover:underline">拆题任务中心</Link>
             {' '}
             查看单卷拆题任务
+            {basketCount > 0 && (
+              <>
+                {' '}
+                | 试题篮已有 <Link to="/teacher/exam-builder" className="text-cyan-400 hover:underline font-medium">{basketCount} 题</Link>，可前往组卷
+              </>
+            )}
           </p>
         </div>
 
@@ -352,9 +362,19 @@ export default function TeacherBatchDecomposePage() {
                         </button>
                       )}
                       {(task.status === 'completed' || task.status === 'partial') && (
-                        <button type="button" className={btnPrimary} onClick={() => viewResult(task.batchId)}>
-                          查看题目
-                        </button>
+                        <>
+                          <button type="button" className={btnPrimary} onClick={() => viewResult(task.batchId)}>
+                            查看题目
+                          </button>
+                          <button
+                            type="button"
+                            className={`${btnSecondary} ml-2`}
+                            disabled={startingId === task.batchId}
+                            onClick={() => handleStart(task.batchId, true)}
+                          >
+                            {startingId === task.batchId ? '重置中...' : '重新拆题'}
+                          </button>
+                        </>
                       )}
                     </td>
                   </tr>
@@ -380,48 +400,14 @@ export default function TeacherBatchDecomposePage() {
       )}
 
       {preview && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
-          <div className="max-h-[90vh] w-full max-w-4xl overflow-y-auto rounded-2xl border border-slate-700 bg-slate-900 p-6">
-            <h3 className="mb-4 text-lg font-semibold">拆题结果（{preview.length} 道，已自动入库）</h3>
-            <div className="space-y-3">
-              {preview.map((q, idx) => (
-                <div key={q.id || `q-${idx}`} className="rounded-lg border border-slate-700 p-3">
-                  <p className="text-xs text-slate-500">
-                    第 {q.sort_order ?? idx + 1} 题 · {q.question_type} · {q.difficulty} · {q.knowledge_point}
-                  </p>
-                  <p className="mt-2 whitespace-pre-wrap text-sm">{q.content}</p>
-                  {q.options.length > 0 && (
-                    <ul className="mt-2 space-y-1 text-sm text-slate-300">
-                      {q.options.map((opt, oi) => (
-                        <li key={oi}>{opt}</li>
-                      ))}
-                    </ul>
-                  )}
-                  {q.answer && q.answer !== '暂无' && (
-                    <p className="mt-2 text-sm text-emerald-300">答案：{q.answer}</p>
-                  )}
-                  {q.analysis && q.analysis !== '暂无' && (
-                    <p className="mt-1 text-sm text-slate-400">解析：{q.analysis}</p>
-                  )}
-                  {q.geometry_desc && (
-                    <p className="mt-2 text-xs text-amber-200/80">图形：{q.geometry_desc}</p>
-                  )}
-                  {q.latex_blocks && q.latex_blocks.length > 0 && (
-                    <p className="mt-1 text-xs text-cyan-200/70">
-                      LaTeX：{q.latex_blocks.join(' · ')}
-                    </p>
-                  )}
-                </div>
-              ))}
-            </div>
-            <div className="mt-4 flex justify-end">
-              <button type="button" className={btnSecondary} onClick={() => setPreview(null)}>
-                关闭
-              </button>
-            </div>
-          </div>
-        </div>
+        <BatchQuestionPreview
+          questions={preview}
+          onClose={() => setPreview(null)}
+        />
       )}
+
+      {/* 试题篮悬浮组件 */}
+      <QuestionBasket />
     </div>
   )
 }

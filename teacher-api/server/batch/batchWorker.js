@@ -9,6 +9,7 @@ import {
 } from './batchPrompt.js'
 import { normalizeQuestionsBatch } from './questionNormalizer.js'
 import {
+  countBatchQuestionsInBank,
   countItemsByStatus,
   emergencyRecover,
   fetchPendingItems,
@@ -26,6 +27,7 @@ import {
   updateBatchProgress,
 } from './batchTaskStore.js'
 import { triggerBatchWorker } from './batchTrigger.js'
+import { countQuestionMarkers, splitChunkByQuestions } from './batchChunker.js'
 
 const CONCURRENCY = Number(process.env.BATCH_AI_CONCURRENCY || 2)
 const ITEMS_PER_INVOCATION = Number(process.env.BATCH_ITEMS_PER_RUN || 3)
@@ -136,18 +138,22 @@ async function chainNextWorker(batchId, roundNum, remainingChunks, roundItems = 
   )
 }
 
+const BATCH_MAX_TOKENS = Number(process.env.DEEPSEEK_BATCH_MAX_TOKENS || 8192)
 const AI_PARSE_FAIL_MESSAGE = 'AI 解析未返回有效题目'
 
 async function invokeAiParse(item, meta, sortOffset, useBackupPrompt) {
+  const estimatedQuestions = countQuestionMarkers(item.chunk_text)
+  const parseMeta = { ...meta, estimatedQuestions }
+
   const prompt = useBackupPrompt
-    ? backupPrompt(item.chunk_text, meta)
-    : buildBatchSplitPrompt(item.chunk_text, meta)
+    ? backupPrompt(item.chunk_text, parseMeta)
+    : buildBatchSplitPrompt(item.chunk_text, parseMeta)
 
   let aiResponse
   try {
     aiResponse = await callDeepSeekAI(BATCH_SYSTEM_PROMPT, prompt, {
       model: BATCH_MODEL,
-      maxTokens: 4096,
+      maxTokens: BATCH_MAX_TOKENS,
       label: useBackupPrompt ? 'batch-split-backup' : 'batch-split',
     })
   } catch (err) {
@@ -174,14 +180,57 @@ async function invokeAiParse(item, meta, sortOffset, useBackupPrompt) {
   console.log('[DeepSeek] 完整响应:', JSON.stringify(aiResponse, null, 2))
   console.log('[AI解析] 原始返回数据: ' + JSON.stringify(aiResponse))
 
-  const parsed = await parseBatchSplitAiResponse(aiResponse, meta, sortOffset, extractJson, safeJsonParse)
+  const parsed = await parseBatchSplitAiResponse(aiResponse, parseMeta, sortOffset, extractJson, safeJsonParse)
   return { ...parsed, aiResponse }
+}
+
+/** AI 只返回少量题目时，按题号切分后逐段再调 AI 并合并 */
+async function parseBySubQuestions(item, meta, sortOffset, batchId) {
+  const subChunks = splitChunkByQuestions(item.chunk_text)
+  if (subChunks.length <= 1) return null
+
+  console.log('[batchWorker] 按题号子切分重试', {
+    batchId,
+    itemId: item.id,
+    itemIndex: item.item_index,
+    subChunkCount: subChunks.length,
+  })
+
+  const merged = []
+  for (let i = 0; i < subChunks.length; i++) {
+    const subItem = { ...item, chunk_text: subChunks[i] }
+    try {
+      const subParsed = await invokeAiParse(subItem, meta, sortOffset + merged.length, false)
+      if (subParsed.questions?.length) {
+        merged.push(...subParsed.questions)
+      }
+    } catch (err) {
+      console.warn('[batchWorker] 子切分 AI 失败', {
+        batchId,
+        itemId: item.id,
+        subIndex: i,
+        message: err instanceof Error ? err.message : String(err),
+      })
+    }
+    if (i < subChunks.length - 1) await sleep(500)
+  }
+
+  if (!merged.length) return null
+
+  return {
+    questions: merged,
+    rawQuestions: merged,
+    extractPath: 'sub_question_split',
+    parsed: merged,
+    aiResponse: null,
+  }
 }
 
 /**
  * 调用 AI 并解析题目：主 prompt 一次 + backupPrompt 重试一次；仍为空则 markBatchFailed
  */
 async function callAiParseWithRetry(item, meta, sortOffset, batchId) {
+  const estimatedQuestions = countQuestionMarkers(item.chunk_text)
   let lastResult = null
 
   for (const [attemptIndex, useBackup] of [[0, false], [1, true]]) {
@@ -220,7 +269,17 @@ async function callAiParseWithRetry(item, meta, sortOffset, batchId) {
           : Array.isArray(parsed.parsed) ? [`array(${parsed.parsed.length})`] : [],
       })
 
-      if (parsed.questions?.length > 0) return parsed
+      if (parsed.questions?.length > 0) {
+        const got = parsed.questions.length
+        const shouldSubSplit = estimatedQuestions >= 2
+          && got < estimatedQuestions
+          && got <= Math.max(1, Math.floor(estimatedQuestions * 0.6))
+        if (shouldSubSplit) {
+          const subResult = await parseBySubQuestions(item, meta, sortOffset, batchId)
+          if (subResult?.questions?.length > got) return subResult
+        }
+        return parsed
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       const detail = serializeError(err)
@@ -237,6 +296,9 @@ async function callAiParseWithRetry(item, meta, sortOffset, batchId) {
       }
     }
   }
+
+  const subResult = await parseBySubQuestions(item, meta, sortOffset, batchId)
+  if (subResult?.questions?.length) return subResult
 
   const detail = {
     batchId,
@@ -361,10 +423,11 @@ async function persistItemQuestions(batchId, teacherId, itemId, rawQuestions, ta
   return insertResult.count ?? 0
 }
 
-async function runPool(items, meta, startSort, batchId, teacherId, taskMeta) {
+async function runPool(items, meta, batchId, teacherId, taskMeta) {
   const results = []
+  const itemIndexById = new Map(items.map((it) => [it.id, it.item_index ?? 0]))
 
-  // Phase 1: 并发 AI（不穿插入库，控制单轮耗时）
+  // Phase 1: 并发 AI（sortOffset 在入库阶段统一分配）
   for (let i = 0; i < items.length; i += CONCURRENCY) {
     const slice = items.slice(i, i + CONCURRENCY)
     console.log('[batchWorker] 并发批次 AI 调用', {
@@ -372,7 +435,7 @@ async function runPool(items, meta, startSort, batchId, teacherId, taskMeta) {
       batchSize: slice.length,
       itemIndexes: slice.map((it) => it.item_index),
     })
-    const settled = await Promise.all(slice.map((item) => processOneItem(item, meta, startSort, batchId)))
+    const settled = await Promise.all(slice.map((item) => processOneItem(item, meta, 0, batchId)))
     results.push(...settled)
     console.log('[batchWorker] 并发批次 AI 调用完成', {
       batchId,
@@ -389,16 +452,23 @@ async function runPool(items, meta, startSort, batchId, teacherId, taskMeta) {
 
   if (results.some((r) => r.failTask)) return results
 
-  // Phase 2: 本轮全部 AI 完成后统一入库（每轮仅一次 COUNT 同步）
-  const successItems = results.filter((r) => r.success && r.rawQuestions?.length)
+  // Phase 2: 按分块顺序统一分配 sort_order 后入库
+  const successItems = results
+    .filter((r) => r.success && r.rawQuestions?.length)
+    .sort((a, b) => (itemIndexById.get(a.itemId) ?? 0) - (itemIndexById.get(b.itemId) ?? 0))
+
   if (successItems.length) {
+    let sortCursor = await countBatchQuestionsInBank(batchId)
     console.log('[batchWorker] 本轮统一入库', {
       batchId,
       itemCount: successItems.length,
       totalQuestions: successItems.reduce((n, r) => n + r.rawQuestions.length, 0),
+      startSort: sortCursor,
     })
     for (const item of successItems) {
-      await persistItemQuestions(batchId, teacherId, item.itemId, item.rawQuestions, taskMeta)
+      const { valid: normalizedQuestions } = normalizeQuestionsBatch(item.rawQuestions, meta, sortCursor)
+      await persistItemQuestions(batchId, teacherId, item.itemId, normalizedQuestions, taskMeta)
+      sortCursor += normalizedQuestions.length
     }
     await syncImportedQuestionsFromBank(batchId)
     console.log('[batchWorker] 本轮入库完成，已同步任务题目数', { batchId })
@@ -465,8 +535,7 @@ async function runBatchWorkerCore(batchId) {
     return { done: true, status: finalStatus ?? task.status, counts }
   }
 
-  const startSort = task.total_questions ?? 0
-  const roundResults = await runPool(pending, meta, startSort, batchId, task.teacher_id, meta)
+  const roundResults = await runPool(pending, meta, batchId, task.teacher_id, meta)
 
   const counts = await countItemsByStatus(batchId)
   const doneChunks = counts.completed + counts.failed
