@@ -64,8 +64,14 @@ export default async function handler(req, res) {
       await admin.from('batch_question_bank').delete().eq('batch_id', testBatchId)
     }
 
-    // 7. 检查 RLS 状态
-    const { data: rlsData, error: rlsErr } = await admin.rpc('check_rls_status', { table_name: 'batch_question_bank' }).catch(() => ({ data: null, error: { message: 'rpc not available' } }))
+    // 7. 检查 RLS 状态（rpc 可能不存在，忽略错误）
+    let rlsData = { error: 'rpc not available' }
+    try {
+      const { data, error } = await admin.rpc('check_rls_status', { table_name: 'batch_question_bank' })
+      rlsData = error ? { error: error.message } : { data }
+    } catch (rpcErr) {
+      rlsData = { error: 'rpc not available: ' + (rpcErr instanceof Error ? rpcErr.message : String(rpcErr)) }
+    }
 
     return res.status(200).json({
       success: true,
