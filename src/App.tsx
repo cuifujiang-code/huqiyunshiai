@@ -20,6 +20,7 @@ import TeacherPlanningPage from './pages/TeacherPlanningPage'
 import TeacherQuestionBankPage from './pages/TeacherQuestionBankPage'
 import TeacherTaskCenterPage from './pages/TeacherTaskCenterPage'
 import TeacherBatchDecomposePage from './pages/TeacherBatchDecomposePage'
+import BatchUploadPage from './pages/teacher/BatchUploadPage'
 
 export default function App() {
   return (
@@ -67,6 +68,14 @@ export default function App() {
               element={
                 <ProtectedRoute requiredRole="teacher">
                   <TeacherTaskCenterPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/teacher/batch-upload"
+              element={
+                <ProtectedRoute requiredRole="teacher">
+                  <BatchUploadPage />
                 </ProtectedRoute>
               }
             />

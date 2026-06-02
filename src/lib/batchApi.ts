@@ -171,10 +171,19 @@ export async function uploadBatchTask(
   examFileName: string,
   subject: string,
   grade: string,
+  options?: { autoStart?: boolean; knowledgeCoverage?: string },
 ) {
   const data = await callBatch<Record<string, unknown>>(
     batchApiUrl('batch/upload'),
-    { teacherId, examFileBase64, examFileName, subject, grade, autoStart: true },
+    {
+      teacherId,
+      examFileBase64,
+      examFileName,
+      subject,
+      grade,
+      autoStart: options?.autoStart ?? true,
+      ...(options?.knowledgeCoverage ? { knowledgeCoverage: options.knowledgeCoverage } : {}),
+    },
     '批量上传',
   )
   const normalized = normalizeBatchUploadResponse(data)

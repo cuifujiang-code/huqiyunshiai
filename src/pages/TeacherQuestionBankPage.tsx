@@ -215,7 +215,7 @@ export default function TeacherQuestionBankPage() {
             </>
           )}
           <Link to="/teacher/task-center" className={btnSecondary}>查看拆题任务</Link>
-          <Link to="/teacher/batch-decompose" className={btnPrimary}>大批量拆题（100～1000题）</Link>
+          <Link to="/teacher/batch-upload" className={btnPrimary}>大批量拆题（100～1000题）</Link>
         </div>
 
         {/* 批量操作栏 */}
