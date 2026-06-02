@@ -7,6 +7,7 @@ import decomposeStatus from '../api/decompose-status.js'
 import decomposeTasks from '../api/decompose-tasks.js'
 import decomposeProcess from '../api/decompose-process.js'
 import debugTasks from '../api/debug-tasks.js'
+import ocrCorrectApi from './batch/ocrCorrectApi.js'
 
 function getRequestPathname(req) {
   if (typeof req.url !== 'string' || !req.url) return '/'
@@ -62,6 +63,9 @@ export async function dispatchApiRequest(req, res) {
   if (pathname === '/api/decompose-tasks') return decomposeTasks(req, res)
   if (pathname === '/api/decompose-process') return decomposeProcess(req, res)
   if (pathname === '/api/debug-tasks') return debugTasks(req, res)
+
+  // OCR 精修校正路由
+  if (pathname === '/api/teacher/questions/ocr-correct') return ocrCorrectApi(req, res)
 
   const segments = getTeacherApiPathSegments(req)
   if (segments.length > 0) {
