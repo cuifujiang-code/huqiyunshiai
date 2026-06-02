@@ -17,7 +17,7 @@ const DIFFICULTY_COLORS: Record<string, string> = {
 }
 
 export default function QuestionBasket() {
-  const { items, count, removeItem, clearBasket, groupedByType } = useQuestionBasket()
+  const { count, removeItem, clearBasket, groupedByType } = useQuestionBasket()
   const [expanded, setExpanded] = useState(false)
   const navigate = useNavigate()
 

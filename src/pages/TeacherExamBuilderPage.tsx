@@ -29,7 +29,7 @@ export default function TeacherExamBuilderPage() {
   const [exam, setExam] = useState<BuiltExam | null>(null)
   const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
-  const { items: basketItems, count: basketCount } = useQuestionBasket()
+  const { count: basketCount } = useQuestionBasket()
 
   const totalScore = rows.reduce((s, r) => s + r.count * r.scorePerQuestion, 0)
 
