@@ -15,12 +15,20 @@ export async function listQuestions(teacherId, filters = {}) {
   const from = (page - 1) * pageSize
   const to = from + pageSize - 1
 
+  const visibility = filters.visibility || 'personal'
+
   let query = admin
     .from(TABLE)
     .select('*', { count: 'exact' })
-    .eq('teacher_id', teacherId)
     .order('updated_at', { ascending: false })
     .range(from, to)
+
+  // 可见性过滤
+  if (visibility === 'public') {
+    query = query.eq('visibility', 'public')
+  } else {
+    query = query.eq('teacher_id', teacherId)
+  }
 
   if (filters.subject) query = query.eq('subject', filters.subject)
   if (filters.grade) query = query.eq('grade', filters.grade)
@@ -32,12 +40,13 @@ export async function listQuestions(teacherId, filters = {}) {
 
   const { data, error, count } = await query
   if (error) throw new Error(error.message)
-  return { items: data ?? [], total: count ?? 0, page, pageSize }
+  return { items: data ?? [], total: count ?? 0, page, pageSize, visibility }
 }
 
 export async function getQuestion(teacherId, id) {
   const admin = getSupabaseAdmin()
-  const { data, error } = await admin.from(TABLE).select('*').eq('id', id).eq('teacher_id', teacherId).maybeSingle()
+  // 公域题目所有人可读
+  const { data, error } = await admin.from(TABLE).select('*').eq('id', id).or(`teacher_id.eq.${teacherId},visibility.eq.public`).maybeSingle()
   if (error) throw new Error(error.message)
   return data
 }
@@ -57,6 +66,7 @@ export async function createQuestion(teacherId, payload) {
     analysis: payload.analysis || '',
     source: payload.source || '手动录入',
     tags: payload.tags ?? [],
+    visibility: payload.visibility || 'personal',
     updated_at: nowIso(),
   }
   const { data, error } = await admin.from(TABLE).insert(row).select('*').single()
@@ -78,6 +88,7 @@ export async function createQuestionsBatch(teacherId, questions) {
     analysis: q.analysis || '',
     source: q.source || '试卷导入',
     tags: q.tags ?? [],
+    visibility: q.visibility || 'personal',
     updated_at: nowIso(),
   }))
   const admin = getSupabaseAdmin()
@@ -117,10 +128,23 @@ export async function updateQuestionsTags(teacherId, ids, tags) {
 
 export async function pickQuestionsForExam(teacherId, criteria) {
   const admin = getSupabaseAdmin()
-  let query = admin.from(TABLE).select('*').eq('teacher_id', teacherId)
+  // 组卷：个人题库 + 公域题库
+  let query = admin.from(TABLE).select('*')
+    .or(`teacher_id.eq.${teacherId},visibility.eq.public`)
   if (criteria.subject) query = query.eq('subject', criteria.subject)
   if (criteria.grade) query = query.eq('grade', criteria.grade)
   const { data, error } = await query.limit(500)
   if (error) throw new Error(error.message)
   return data ?? []
+}
+
+/** 批量修改题目可见性 */
+export async function updateQuestionsVisibility(teacherId, ids, visibility) {
+  const admin = getSupabaseAdmin()
+  const { error } = await admin
+    .from(TABLE)
+    .update({ visibility, updated_at: nowIso() })
+    .eq('teacher_id', teacherId)
+    .in('id', ids)
+  if (error) throw new Error(error.message)
 }

@@ -1,7 +1,7 @@
 import '../../server/applyUrlShim.js'
 import { setNoCacheHeaders } from '../../server/apiResponse.js'
-import { triggerBatchWorker } from '../../server/batch/batchTrigger.js'
-import { getBatchTaskForTeacher, isBatchStoreConfigured, markBatchRunning } from '../../server/batch/batchTaskStore.js'
+import { startBatchProcessing } from '../../server/batch/batchStart.js'
+import { getBatchTaskForTeacher, isBatchStoreConfigured } from '../../server/batch/batchTaskStore.js'
 
 export default async function handler(req, res) {
   setNoCacheHeaders(res)
@@ -24,23 +24,30 @@ export default async function handler(req, res) {
     if (!task) {
       return res.status(404).json({ success: false, message: '任务不存在或无权访问' })
     }
-    if (task.status === 'completed' || task.status === 'running') {
+    if (task.status === 'completed') {
       return res.status(200).json({
-        success: true,
-        batchId,
-        status: task.status,
-        message: task.status === 'running' ? '任务已在处理中' : '任务已完成',
+        success: true, batchId, status: 'completed',
+        message: '任务已完成',
       })
     }
 
-    await markBatchRunning(batchId)
-    triggerBatchWorker(batchId)
+    // 使用统一的 startBatchProcessing，内部自动 waitUntil
+    const result = await startBatchProcessing(batchId, teacherId, req)
+
+    if (!result.ok) {
+      return res.status(result.httpStatus || 500).json({
+        success: false, batchId,
+        status: result.taskStatus || 'failed',
+        message: result.message || '启动失败',
+      })
+    }
 
     return res.status(200).json({
-      success: true,
-      batchId,
-      status: 'running',
-      message: '后台批量拆题已启动，请通过 /api/batch/progress 查看进度',
+      success: true, batchId,
+      status: result.taskStatus || 'running',
+      message: result.skipped
+        ? `${result.message || '任务已在处理中'}`
+        : '后台批量拆题已启动，请通过 /api/batch/progress 查看进度',
     })
   } catch (error) {
     console.error('[batch/start]', error)
@@ -52,5 +59,5 @@ export default async function handler(req, res) {
 }
 
 export const config = {
-  maxDuration: 10,
+  maxDuration: 30,
 }

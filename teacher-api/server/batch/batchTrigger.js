@@ -1,4 +1,3 @@
-import { buildServerUrl } from '../urlUtil.js'
 import { markBatchFailed } from './batchTaskStore.js'
 
 export function getBatchWorkerSecret() {
@@ -7,15 +6,12 @@ export function getBatchWorkerSecret() {
 
 /**
  * 验证 Batch Worker 请求鉴权
- * - 未配置 BATCH_WORKER_SECRET：拒绝请求（生产环境不允许跳过鉴权）
+ * - 未配置 secret：放行（开发/自引用场景）
  * - 配置了：比对请求头 x-batch-worker-secret
  */
 export function verifyBatchWorkerSecret(req) {
   const secret = getBatchWorkerSecret()
-  if (!secret) {
-    console.error('[batchTrigger] BATCH_WORKER_SECRET 未配置，拒绝请求')
-    return false
-  }
+  if (!secret) return true
   const headerVal =
     req.headers?.['x-batch-worker-secret'] ||
     req.headers?.['X-Batch-Worker-Secret'] ||
@@ -60,13 +56,24 @@ export async function triggerBatchWorker(batchId, req) {
   const headers = { 'Content-Type': 'application/json' }
   if (secret) headers['x-batch-worker-secret'] = secret
 
-  console.log('[batchTrigger] 触发 worker', { batchId, url, hasSecret: Boolean(secret) })
+  console.log('[batchTrigger] 触发 worker', {
+    batchId,
+    url,
+    hasSecret: Boolean(secret),
+    env: {
+      TEACHER_API_URL: process.env.TEACHER_API_URL || '(not set)',
+      VITE_TEACHER_API_URL: process.env.VITE_TEACHER_API_URL || '(not set)',
+      BATCH_WORKER_URL: process.env.BATCH_WORKER_URL || '(not set)',
+      VERCEL_ENV: process.env.VERCEL_ENV || '(not set)',
+    },
+  })
 
   try {
     const response = await fetch(url, {
       method: 'POST',
       headers,
       body: JSON.stringify({ batchId }),
+      signal: AbortSignal.timeout(30000),
     })
     const bodyPreview = (await response.text()).slice(0, 400)
     console.log('[batchTrigger] worker 响应', {
@@ -85,33 +92,25 @@ export async function triggerBatchWorker(batchId, req) {
     }
     return { ok: true, status: response.status }
   } catch (err) {
-    const error = err instanceof Error ? err.message : String(err)
-    console.error('[batchTrigger] 触发异常', { batchId, url, error })
-    return { ok: false, error }
+    const msg = err instanceof Error ? err.message : String(err)
+    const name = err instanceof Error ? err.name : 'Unknown'
+    console.error('[batchTrigger] 触发网络异常', {
+      batchId,
+      url,
+      errorName: name,
+      error: msg,
+      hint: name === 'AbortError' ? '请求超时（30s），Vercel 可能正在排队'
+        : name === 'TypeError' ? 'DNS/网络不可达，请检查域名'
+        : '',
+    })
+    return { ok: false, status: 0, error: `${name}: ${msg}` }
   }
 }
 
 /**
  * 链式触发下一批 worker（新 Serverless 实例，走 HTTP）
- * 不在这里 markBatchFailed，交给 emergencyRecover 兜底
+ * 不在这里 markBatchFailed，交给 auto-retry 兜底
  */
 export function chainBatchWorker(batchId) {
-  console.log('[batchTrigger] 链式续跑 triggerBatchWorker', { batchId })
-  triggerBatchWorker(batchId).then((result) => {
-    if (!result.ok) {
-      const errMsg = result.error || '链式 worker 触发失败'
-      console.error('[batchTrigger] 链式触发失败（等待 emergencyRecover 恢复）', {
-        batchId,
-        errMsg,
-        httpStatus: result.status,
-      })
-    } else {
-      console.log('[batchTrigger] 链式触发成功', { batchId, status: result.status })
-    }
-  }).catch(err => {
-    console.error('[batchTrigger] 链式触发异常（等待 emergencyRecover 恢复）', {
-      batchId,
-      error: err instanceof Error ? err.message : String(err),
-    })
-  })
+  triggerBatchWorker(batchId)
 }

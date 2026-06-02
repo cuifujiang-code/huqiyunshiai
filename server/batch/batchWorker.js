@@ -16,60 +16,50 @@ import {
 } from './batchTaskStore.js'
 import { triggerBatchWorker } from './batchTrigger.js'
 
-const CONCURRENCY = Number(process.env.BATCH_AI_CONCURRENCY || 3)
-const ITEMS_PER_INVOCATION = Number(process.env.BATCH_ITEMS_PER_RUN || 5)
+const CONCURRENCY = Number(process.env.BATCH_AI_CONCURRENCY || 4)
+const ITEMS_PER_INVOCATION = Number(process.env.BATCH_ITEMS_PER_RUN || 10)
 const BATCH_MODEL = process.env.DEEPSEEK_BATCH_MODEL || process.env.DEEPSEEK_MODEL || 'deepseek-chat'
 
-const CHAIN_INITIAL_DELAY_MS = 2000
-const CHAIN_RETRY_DELAY_STEP_MS = 2000
+const CHAIN_INITIAL_DELAY_MS = 3000
+const CHAIN_RETRY_DELAY_STEP_MS = 3000
 const CHAIN_MAX_RETRIES = 2
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
-/** 链式触发下一轮 worker：先延迟 2s，失败最多重试 2 次（每次间隔递增 2s） */
+/** 链式触发下一轮 worker：先延迟，失败最多重试 2 次。
+ *  重试全部失败时不标记任务 failed，而是保持 running 让 auto-retry 接管恢复。 */
 async function chainNextWorker(batchId, roundNum, remainingChunks) {
-  console.log(`[batchWorker] 第${roundNum}轮完成，剩余${remainingChunks}个分块`, { batchId })
+  console.log(`[batchWorker] 第${roundNum}轮完成，剩余${remainingChunks}个分块，触发链式下一轮`, { batchId })
 
   let delayMs = CHAIN_INITIAL_DELAY_MS
   let lastError = '链式 worker 触发失败'
 
   for (let attempt = 0; attempt <= CHAIN_MAX_RETRIES; attempt++) {
-    console.log('[batchWorker] 链式触发下一轮', {
-      batchId,
-      roundNum,
-      attempt: attempt + 1,
-      maxAttempts: CHAIN_MAX_RETRIES + 1,
-      delayMs,
-    })
     await sleep(delayMs)
     delayMs += CHAIN_RETRY_DELAY_STEP_MS
 
     const result = await triggerBatchWorker(batchId)
     if (result.ok) {
       console.log('[batchWorker] 链式触发成功', {
-        batchId,
-        roundNum,
-        attempt: attempt + 1,
-        httpStatus: result.status,
+        batchId, roundNum, attempt: attempt + 1, httpStatus: result.status,
       })
       return
     }
 
     lastError = result.error || lastError
     console.error('[batchWorker] 链式触发失败', {
-      batchId,
-      roundNum,
-      attempt: attempt + 1,
-      httpStatus: result.status,
-      error: lastError,
+      batchId, roundNum, attempt: attempt + 1,
+      httpStatus: result.status, error: lastError,
     })
   }
 
-  const errMsg = `链式 worker 触发失败（batchId=${batchId}，已重试 ${CHAIN_MAX_RETRIES} 次）：${lastError}`
-  console.error('[batchWorker] 链式触发全部失败，标记任务 failed', { batchId, errMsg })
-  await markBatchFailed(batchId, errMsg)
+  // 所有重试失败：不标记任务 failed，保持 running 由 auto-retry 接管恢复
+  console.error(`[batchWorker] 链式触发全部失败（batchId=${batchId}），任务保持 running，等待 auto-retry 恢复`, {
+    batchId, lastError, remainingChunks,
+  })
+  // 注意：此处不调用 markBatchFailed，让任务保持 running 状态
 }
 
 async function processOneItem(item, meta, sortOffset) {

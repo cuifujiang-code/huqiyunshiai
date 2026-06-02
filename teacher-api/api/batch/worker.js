@@ -12,13 +12,48 @@ function resolveBatchId(req) {
   return String(raw).trim()
 }
 
+function getEnvSummary() {
+  const vars = {
+    SUPABASE_URL: process.env.SUPABASE_URL,
+    SUPABASE_SERVICE_ROLE_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY ? '***configured***' : null,
+    DEEPSEEK_API_KEY: process.env.DEEPSEEK_API_KEY ? '***configured***' : null,
+    BATCH_WORKER_SECRET: process.env.BATCH_WORKER_SECRET ? '***configured***' : null,
+    TEACHER_API_URL: process.env.TEACHER_API_URL || process.env.VITE_TEACHER_API_URL || '(not set)',
+    VERCEL_ENV: process.env.VERCEL_ENV || '(not set)',
+  }
+  const missing = Object.entries(vars)
+    .filter(([, v]) => v === null)
+    .map(([k]) => k)
+  return { vars, missing, allOk: missing.length === 0 }
+}
+
+async function handleWorkerFatalError(batchId, error) {
+  const msg = error instanceof Error ? error.message : String(error)
+  const stack = error instanceof Error ? error.stack : undefined
+  console.error('=== Worker 处理遇到未捕获异常 ===')
+  console.error(msg)
+  console.error(stack)
+  if (batchId) {
+    try {
+      const { markBatchFailed } = await import('../../server/batch/batchTaskStore.js')
+      await markBatchFailed(String(batchId).trim(), msg)
+    } catch (markErr) {
+      console.error('[batch/worker] markBatchFailed 失败', {
+        batchId,
+        err: markErr instanceof Error ? markErr.message : String(markErr),
+      })
+    }
+  }
+}
+
 export default async function handler(req, res) {
+  let batchId = null
   // 最外层 try-catch：捕获所有未处理的同步/异步异常
   try {
     if (handleOptions(req, res)) return
     applyApiHeaders(req, res)
 
-    const batchId = resolveBatchId(req)
+    batchId = resolveBatchId(req)
 
   console.log('[batch/worker] === 收到请求 ===', {
     method: req.method,
@@ -41,6 +76,17 @@ export default async function handler(req, res) {
     return res.status(401).json({ success: false, message: 'Unauthorized' })
   }
 
+  // 环境诊断：缺少关键环境变量时记录警告但不拒绝
+  // Worker 内部会在实际操作失败时自然报错
+  const env = getEnvSummary()
+  if (!env.allOk) {
+    console.warn('[batch/worker] 关键环境变量可能缺失', {
+      batchId,
+      missing: env.missing,
+    })
+  }
+  console.log('[batch/worker] 受理请求', { batchId, env: env.missing.length === 0 ? 'all ok' : `missing: ${env.missing.join(',')}` })
+
   if (!batchId) {
     return res.status(400).json({ success: false, message: '缺少 batchId（支持 JSON body 或 query 参数）' })
   }
@@ -52,11 +98,7 @@ export default async function handler(req, res) {
         const result = await safeRunBatchWorker(batchId)
         console.log(`[Worker] 后台处理结束 batchId=${batchId}`, { result })
       } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err)
-        console.error(`[Worker] 后台处理异常 batchId=${batchId}`, {
-          msg,
-          stack: err instanceof Error ? err.stack : undefined,
-        })
+        await handleWorkerFatalError(batchId, err)
       }
     })(),
   )
@@ -69,24 +111,11 @@ export default async function handler(req, res) {
     message: 'Worker 已受理，正在后台并发处理',
   })
   } catch (fatalErr) {
-    // 最外层兜底：捕获所有未处理的异常（包括 waitUntil 外的同步错误）
+    await handleWorkerFatalError(batchId, fatalErr)
     const msg = fatalErr instanceof Error ? fatalErr.message : String(fatalErr)
-    console.error('[batch/worker] 致命错误（最外层 catch）', {
-      batchId,
-      msg,
-      stack: fatalErr instanceof Error ? fatalErr.stack : undefined,
-    })
-    // 如果还没返回响应，返回 500
     if (!res.headersSent) {
       try {
         res.status(500).json({ success: false, message: msg })
-      } catch {}
-    }
-    // 尝试标记任务失败（markBatchFailed 内部会检查 bank 是否已有题）
-    if (batchId) {
-      try {
-        const { markBatchFailed } = await import('../../server/batch/batchTaskStore.js')
-        await markBatchFailed(String(batchId).trim(), `[worker.handler 致命错误] ${msg}`)
       } catch {}
     }
   }

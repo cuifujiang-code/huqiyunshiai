@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>WMF Browser Test</title></head>
+<body>
+<h3>WMF Browser Rendering Test</h3>
+<p>This tests if your browser can render WMF images via various methods.</p>
+
+<h4>Method 1: &lt;img&gt; tag with data URI</h4>
+<div id="result1" style="border:1px solid red;min-height:30px;padding:5px;"></div>
+
+<h4>Method 2: &lt;object&gt; tag</h4>
+<div id="result2" style="border:1px solid blue;min-height:30px;padding:5px;"></div>
+
+<h4>Method 3: Canvas Image() object</h4>
+<div id="result3" style="border:1px solid green;min-height:30px;padding:5px;"></div>
+
+<script>
+// Hardcoded WMF base64 (small MathType formula)
+const WMF_B64 = "183GmgAAAAAAACAVwAIACQAAAADxSQEACQAAA8IDAAAEAO4AAAAAAAUAAAACAQEAAAAFAAAAAQL///8ABQAAAC4BGQAAAAUAAAAL";
+
+async function runTests() {
+  // Method 1: img tag
+  const img1 = new Image();
+  img1.src = 'data:image/x-wmf;base64,' + WMF_B64;
+  img1.style.maxWidth = '300px';
+  const r1 = document.getElementById('result1');
+
+  await new Promise(resolve => {
+    img1.onload = () => { r1.innerHTML = '<span style="color:green">✅ img tag WORKS</span>'; r1.appendChild(img1); resolve(); };
+    img1.onerror = () => { r1.innerHTML = '<span style="color:red">❌ img tag FAILED</span>'; resolve(); };
+    setTimeout(() => { if (!r1.innerHTML) { r1.innerHTML = '<span style="color:orange">⏳ Timeout</span>'; resolve(); } }, 3000);
+  });
+
+  // Method 2: object tag
+  const obj = document.createElement('object');
+  obj.data = 'data:image/x-wmf;base64,' + WMF_B64;
+  obj.type = 'image/x-wmf';
+  obj.style.width = '300px';
+  obj.style.height = '60px';
+  document.getElementById('result2').appendChild(obj);
+  document.getElementById('result2').innerHTML += '<br><small>If you see the formula above, object tag works</small>';
+
+  // Method 3: Canvas
+  const canvas = document.createElement('canvas');
+  canvas.width = 300;
+  canvas.height = 60;
+  const ctx = canvas.getContext('2d');
+  const img3 = new Image();
+  img3.src = 'data:image/x-wmf;base64,' + WMF_B64;
+  const r3 = document.getElementById('result3');
+
+  await new Promise(resolve => {
+    img3.onload = () => {
+      try {
+        ctx.drawImage(img3, 0, 0, 300, 60);
+        r3.innerHTML = '<span style="color:green">✅ Canvas works</span><br>';
+        r3.appendChild(canvas);
+      } catch(e) {
+        r3.innerHTML = '<span style="color:red">❌ Canvas draw failed: ' + e.message + '</span>';
+      }
+      resolve();
+    };
+    img3.onerror = () => { r3.innerHTML = '<span style="color:red">❌ Canvas Image load FAILED</span>'; resolve(); };
+    setTimeout(() => { if (!r3.innerHTML) { r3.innerHTML = '<span style="color:orange">⏳ Timeout</span>'; resolve(); } }, 3000);
+  });
+}
+
+runTests().then(() => {
+  document.body.innerHTML += '<hr><p><strong>Summary:</strong> If all tests show FAILED, this browser does not support WMF rendering natively.</p>';
+});
+</script>
+</body>
+</html>

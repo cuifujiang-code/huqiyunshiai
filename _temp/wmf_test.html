@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>WMF Test</title></head>
+<body>
+<h3>Test 1: img with WMF base64</h3>
+<div id="test1"></div>
+<h3>Test 2: object with WMF base64</h3>
+<div id="test2"></div>
+<h3>Test 3: embed with WMF base64</h3>
+<div id="test3"></div>
+<h3>Test 4: canvas attempt</h3>
+<canvas id="c4" width="200" height="50"></canvas>
+<script>
+// We'll load the WMF base64 from a JSON file
+async function test() {
+  const resp = await fetch('test_wmf.json');
+  const data = await resp.json();
+  const uri = 'data:image/x-wmf;base64,' + data.b64;
+
+  // Test 1: img tag
+  const img1 = document.createElement('img');
+  img1.src = uri;
+  img1.style.border = '1px solid red';
+  img1.style.maxWidth = '200px';
+  img1.onload = () => { document.getElementById('test1').innerHTML += '<br>img loaded OK'; };
+  img1.onerror = () => { document.getElementById('test1').innerHTML += '<br>img FAILED'; };
+  document.getElementById('test1').appendChild(img1);
+
+  // Test 2: object tag
+  const obj = document.createElement('object');
+  obj.data = uri;
+  obj.type = 'image/x-wmf';
+  obj.style.border = '1px solid blue';
+  obj.style.width = '200px';
+  obj.style.height = '50px';
+  document.getElementById('test2').appendChild(obj);
+
+  // Test 3: embed tag
+  const emb = document.createElement('embed');
+  emb.src = uri;
+  emb.type = 'image/x-wmf';
+  emb.style.border = '1px solid green';
+  emb.style.width = '200px';
+  emb.style.height = '50px';
+  document.getElementById('test3').appendChild(emb);
+
+  document.getElementById('test1').innerHTML += '<br><small>If image shows, WMF is supported!</small>';
+}
+test();
+</script>
+</body>
+</html>

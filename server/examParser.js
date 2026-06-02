@@ -1,19 +1,18 @@
 import './applyUrlShim.js'
 import mammoth from 'mammoth'
 import AdmZip from 'adm-zip'
-import { createRequire } from 'node:module'
+import { getSupabaseAdmin } from './supabaseAdmin.js'
 import { logStepError } from './apiErrorUtil.js'
-
-const require = createRequire(import.meta.url)
 
 const MAX_EXAM_FILE_BYTES = 8 * 1024 * 1024
 
 /** 懒加载 pdf-parse，绕过 index.js 在 Serverless 下误触发测试代码的问题 */
 let pdfParseFn = null
-
 function getPdfParse() {
   if (!pdfParseFn) {
-    pdfParseFn = require('pdf-parse/lib/pdf-parse.js')
+    const { createRequire } = require('node:module')
+    const req = createRequire(import.meta.url)
+    pdfParseFn = req('pdf-parse/lib/pdf-parse.js')
   }
   if (typeof pdfParseFn !== 'function') {
     throw new Error('pdf-parse 模块加载异常，请检查依赖安装')
@@ -22,87 +21,287 @@ function getPdfParse() {
 }
 
 /**
- * 从 docx XML 中提取纯文本，同时将 OMML 公式替换为 【公式】 占位符。
- *
- * 问题：mammoth 默认忽略 Word 数学公式（m:oMath / m:oMathPara），
- *       导致所有数学公式内容完全丢失，AI 无法正确拆题。
- *
- * 方案：
- * 1. 用 AdmZip 解压 docx，读取 word/document.xml
- * 2. 将所有 <m:oMath>...</m:oMath> 替换为 <w:r><w:t>【公式】</w:t></w:r>
- * 3. 将所有 <m:oMathPara>...</m:oMathPara> 替换为 <w:r><w:t>【公式块】</w:t></w:r>
- * 4. 重新打包后交给 mammoth 解析
- *
- * 公式占位符保留，方便 AI 识别公式位置。
- * 后续可结合 Vision API 读取原图补全公式内容。
+ * 从 DOCX ZIP 中提取嵌入的图片，上传到 Supabase Storage，
+ * 返回 { [imagePath]: publicUrl } 映射。
  */
-async function parseDocxWithOMML(buffer, fileName) {
-  console.log('[试卷解析] 开始 Word (含公式提取)', { fileName, bytes: buffer.length })
+async function extractAndUploadImages(zipBuffer) {
+  const imageMap = {}
+  try {
+    const zip = new AdmZip(zipBuffer)
+    const entries = zip.getEntries()
+    const imageEntries = entries.filter((e) => {
+      const name = (e.entryName || '').toLowerCase()
+      return name.startsWith('word/media/') && !e.isDirectory &&
+        /\.(png|jpg|jpeg|gif|bmp|tiff|webp|svg|emf)$/i.test(name)
+    })
 
-  let text = ''
+    if (imageEntries.length === 0) return imageMap
+    console.log('[试卷解析] 发现嵌入图片', { count: imageEntries.length })
+
+    const admin = getSupabaseAdmin()
+    const bucketName = 'exam-images'
+
+    // 确保 bucket 存在
+    const { data: buckets } = await admin.storage.listBuckets()
+    if (!buckets?.find((b) => b.name === bucketName)) {
+      await admin.storage.createBucket(bucketName, { public: true })
+      console.log('[试卷解析] 创建 storage bucket:', bucketName)
+    }
+
+    for (const entry of imageEntries) {
+      try {
+        const fileName = entry.entryName.replace(/^word\/media\//, '')
+        const ext = (fileName.split('.').pop() || 'png').toLowerCase()
+        const mimeMap = {
+          png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg',
+          gif: 'image/gif', bmp: 'image/bmp', tiff: 'image/tiff',
+          webp: 'image/webp', svg: 'image/svg+xml',
+        }
+        const contentType = mimeMap[ext] || 'image/png'
+
+        // 跳过 WMF/EMF（浏览器不支持）
+        if (ext === 'emf' || ext === 'wmf') continue
+
+        const imageData = entry.getData()
+        const timestamp = Date.now()
+        const random = Math.random().toString(36).slice(2, 8)
+        const uploadPath = `${timestamp}_${random}_${fileName}`
+
+        const { data: uploadData, error: uploadError } = await admin.storage
+          .from(bucketName)
+          .upload(uploadPath, imageData, {
+            contentType,
+            upsert: true,
+          })
+
+        if (uploadError) {
+          console.warn('[试卷解析] 图片上传失败', { fileName, error: uploadError.message })
+          continue
+        }
+
+        const { data: urlData } = admin.storage
+          .from(bucketName)
+          .getPublicUrl(uploadPath)
+
+        if (urlData?.publicUrl) {
+          imageMap[entry.entryName] = urlData.publicUrl
+        }
+      } catch (imgErr) {
+        console.warn('[试卷解析] 图片处理异常', {
+          entry: entry.entryName,
+          error: imgErr instanceof Error ? imgErr.message : String(imgErr),
+        })
+      }
+    }
+
+    console.log('[试卷解析] 图片上传完成', { uploaded: Object.keys(imageMap).length })
+  } catch (err) {
+    console.warn('[试卷解析] 图片提取整体失败（不影响文本解析）', {
+      error: err instanceof Error ? err.message : String(err),
+    })
+  }
+  return imageMap
+}
+
+/**
+ * 预处理 DOCX XML：
+ * 1. 将 OMML 公式 (m:oMath/m:oMathPara) 替换为 【公式】占位符
+ * 2. 将图片 (w:drawing) 替换为 【图片】占位符（保留 rId 供后续映射）
+ */
+function preprocessDocxXml(docXml) {
+  // 1. 替换 OMML 公式
+  let replacedPara = 0
+  docXml = docXml.replace(/<m:oMathPara>[\s\S]*?<\/m:oMathPara>/g, () => {
+    replacedPara++
+    return '<w:r><w:rPr/><w:t xml:space="preserve">【公式块】</w:t></w:r>'
+  })
+
+  let replacedMath = 0
+  docXml = docXml.replace(/<m:oMath>[\s\S]*?<\/m:oMath>/g, () => {
+    replacedMath++
+    return '<w:r><w:rPr/><w:t xml:space="preserve">【公式】</w:t></w:r>'
+  })
+
+  // 2. 替换图片为占位符（保留 rId 用于后续替换）
+  let replacedImg = 0
+  docXml = docXml.replace(/<wp:inline[\s\S]*?<\/wp:inline>/g, (match) => {
+    const rIdMatch = match.match(/r:embed="([^"]+)"/)
+    const rId = rIdMatch ? rIdMatch[1] : ''
+    replacedImg++
+    return `<w:r><w:rPr/><w:t xml:space="preserve">【图片:${rId}】</w:t></w:r>`
+  })
+  docXml = docXml.replace(/<wp:anchor[\s\S]*?<\/wp:anchor>/g, (match) => {
+    const rIdMatch = match.match(/r:embed="([^"]+)"/)
+    const rId = rIdMatch ? rIdMatch[1] : ''
+    replacedImg++
+    return `<w:r><w:rPr/><w:t xml:space="preserve">【图片:${rId}】</w:t></w:r>`
+  })
+
+  console.log('[试卷解析] XML 预处理完成', { replacedMath, replacedPara, replacedImg })
+  return docXml
+}
+
+/**
+ * 从 DOCX 解析获得 HTML（保留表格、图片占位符、公式占位符）
+ * 然后：
+ * 1. 提取嵌入图片并上传至 Supabase Storage
+ * 2. 将图片占位符替换为实际 <img> 标签
+ */
+async function parseDocxToHtml(buffer, fileName) {
+  console.log('[试卷解析] 开始 Word 解析（含表格+图片）', { fileName, bytes: buffer.length })
 
   try {
-    // 1. 读取原始 XML
+    // 1. 预处理 XML（公式→【公式】、图片→【图片:rId】）
     const zip = new AdmZip(buffer)
     let docXml = zip.readAsText('word/document.xml')
+    docXml = preprocessDocxXml(docXml)
 
-    const ommlCount = (docXml.match(/<m:oMath>/g) || []).length
-    const ommlParaCount = (docXml.match(/<m:oMathPara>/g) || []).length
-    console.log('[试卷解析] OMML 公式统计', { fileName, ommlCount, ommlParaCount })
-
-    // 2. 替换 OMML 公式为 Word 文本元素（mammoth 可识别）
-    //    先替换 oMathPara（更大范围），再替换 oMath
-    let replacedPara = 0
-    docXml = docXml.replace(/<m:oMathPara>[\s\S]*?<\/m:oMathPara>/g, () => {
-      replacedPara++
-      return '<w:r><w:rPr/><w:t xml:space="preserve">【公式块】</w:t></w:r>'
-    })
-
-    let replacedMath = 0
-    docXml = docXml.replace(/<m:oMath>[\s\S]*?<\/m:oMath>/g, () => {
-      replacedMath++
-      return '<w:r><w:rPr/><w:t xml:space="preserve">【公式】</w:t></w:r>'
-    })
-
-    console.log('[试卷解析] OMML 替换完成', {
-      fileName,
-      replacedMath,
-      replacedPara,
-    })
-
-    // 3. 重新打包并交给 mammoth
+    // 2. 重新打包交给 mammoth（HTML 模式保留表格）
     const cleanZip = new AdmZip(buffer)
     cleanZip.updateFile('word/document.xml', Buffer.from(docXml, 'utf-8'))
     const cleanBuffer = cleanZip.toBuffer()
 
-    const result = await mammoth.extractRawText({ buffer: cleanBuffer })
-    text = (result.value || '').trim()
+    // 3. 用 mammoth HTML 模式解析（保留表格结构）
+    const result = await mammoth.convertToHtml(
+      { buffer: cleanBuffer },
+      {
+        // 自定义样式映射：保留表格
+        styleMap: [
+          "p[style-name='Question'] => p.question",
+          "p[style-name='Answer'] => p.answer",
+          "p[style-name='Analysis'] => p.analysis",
+        ],
+      },
+    )
 
-    if (!text) {
-      throw new Error('Word 试卷未能提取到文字，请检查文件内容')
+    let html = (result.value || '').trim()
+    if (!html || html === '<p></p>') {
+      // HTML 模式无内容时降级为纯文本
+      const textResult = await mammoth.extractRawText({ buffer: cleanBuffer })
+      const text = (textResult.value || '').trim()
+      if (!text) throw new Error('Word 试卷未能提取到文字')
+      console.log('[试卷解析] HTML 模式无内容，降级为纯文本', { textLength: text.length })
+      return { text, type: 'docx', images: {} }
     }
 
-    const formulaMarkers = (text.match(/【公式】/g) || []).length
-    console.log('[试卷解析] Word 完成 (含公式占位)', {
+    // 4. 提取并上传 DOCX 中的嵌入图片
+    const imageMap = await extractAndUploadImages(buffer)
+
+    // 5. 将图片占位符替换为实际 <img> 标签
+    //    先处理有 rId 的占位符
+    const rels = extractImageRels(buffer)
+    html = html.replace(/【图片:([^】]*)】/g, (match, rId) => {
+      if (!rId) return '【图片】'
+      // 通过 rId 查找关系文件中的图片路径
+      const imagePath = rels[rId]
+      if (imagePath && imageMap[imagePath]) {
+        return `<img src="${imageMap[imagePath]}" alt="题目图片" style="max-width:100%;height:auto;" />`
+      }
+      // 尝试直接匹配
+      for (const [key, url] of Object.entries(imageMap)) {
+        if (key.includes(rId) || rId.includes(key.split('/').pop()?.split('.')[0] || '')) {
+          return `<img src="${url}" alt="题目图片" style="max-width:100%;height:auto;" />`
+        }
+      }
+      return '【图片】'
+    })
+
+    // 6. 处理无 rId 的普通【图片】占位符
+    const remainingImages = Object.entries(imageMap).filter(([key]) => {
+      return !html.includes(imageMap[key])
+    })
+    let imgIndex = 0
+    html = html.replace(/【图片】/g, () => {
+      if (imgIndex < remainingImages.length) {
+        const url = remainingImages[imgIndex][1]
+        imgIndex++
+        return `<img src="${url}" alt="题目图片" style="max-width:100%;height:auto;" />`
+      }
+      return '【图片】'
+    })
+
+    // 7. 提取纯文本（给 chunker 用）+ 也保留 HTML 版本在 meta 中
+    const textResult = await mammoth.extractRawText({ buffer: cleanBuffer })
+    const text = (textResult.value || '').trim()
+
+    // 清理 HTML 中的 mammoth 包装标签但保留核心结构
+    html = cleanHtml(html)
+
+    console.log('[试卷解析] Word 完成（HTML模式）', {
       fileName,
       textLength: text.length,
-      formulaMarkers,
+      htmlLength: html.length,
+      imagesUploaded: Object.keys(imageMap).length,
     })
-  } catch (ommlErr) {
-    // OMML 解析失败时降级为普通 mammoth 解析
-    console.warn('[试卷解析] OMML 解析失败，降级为纯文本', {
-      fileName,
-      error: ommlErr instanceof Error ? ommlErr.message : String(ommlErr),
-    })
-    const result = await mammoth.extractRawText({ buffer })
-    text = (result.value || '').trim()
-    if (!text) {
-      throw new Error('Word 试卷未能提取到文字，请检查文件内容')
-    }
-    console.log('[试卷解析] Word 降级完成', { fileName, textLength: text.length })
-  }
 
-  return { text, type: 'docx' }
+    return { text, html, type: 'docx', images: imageMap }
+  } catch (err) {
+    console.warn('[试卷解析] HTML 模式失败，降级为纯文本', {
+      fileName,
+      error: err instanceof Error ? err.message : String(err),
+    })
+    // 降级：普通 mammoth 纯文本
+    const zip = new AdmZip(buffer)
+    let docXml = zip.readAsText('word/document.xml')
+    docXml = preprocessDocxXml(docXml)
+    const cleanZip = new AdmZip(buffer)
+    cleanZip.updateFile('word/document.xml', Buffer.from(docXml, 'utf-8'))
+    const result = await mammoth.extractRawText({ buffer: cleanZip.toBuffer() })
+    const text = (result.value || '').trim()
+    if (!text) throw new Error('Word 试卷未能提取到文字')
+    return { text, type: 'docx', images: {} }
+  }
+}
+
+/**
+ * 从 DOCX ZIP 中提取图片关系映射 (rId → image path)
+ */
+function extractImageRels(zipBuffer) {
+  const rels = {}
+  try {
+    const zip = new AdmZip(zipBuffer)
+    const relsEntry = zip.getEntry('word/_rels/document.xml.rels')
+    if (!relsEntry) return rels
+
+    const relsXml = relsEntry.getData().toString('utf-8')
+    const relationshipRegex = /<Relationship[^>]*Id="([^"]*)"[^>]*Target="([^"]*)"[^>]*\/>/g
+    let match
+    while ((match = relationshipRegex.exec(relsXml)) !== null) {
+      const rId = match[1]
+      let target = match[2]
+      // 将相对路径转换为 word/media/xxx
+      if (target.startsWith('media/')) {
+        target = 'word/' + target
+      }
+      rels[rId] = target
+    }
+  } catch {
+    // 忽略关系解析错误
+  }
+  return rels
+}
+
+/** 清理 mammoth 生成的 HTML，保留表格和结构 */
+function cleanHtml(html) {
+  return html
+    // 去掉 mammoth 的包装层
+    .replace(/<html[^>]*>/g, '')
+    .replace(/<\/html>/g, '')
+    .replace(/<head>[\s\S]*?<\/head>/g, '')
+    .replace(/<body[^>]*>/g, '')
+    .replace(/<\/body>/g, '')
+    .replace(/<meta[^>]*>/g, '')
+    // 保留表格结构
+    .replace(/<table>/g, '<table border="1" style="border-collapse:collapse;">')
+    // 清理多余空白
+    .replace(/\n\s*\n/g, '\n')
+    .trim()
+}
+
+/** 对旧接口的兼容包装：返回 { text, type } */
+async function parseDocxWithOMML(buffer, fileName) {
+  const result = await parseDocxToHtml(buffer, fileName)
+  return { text: result.text, type: 'docx', _html: result.html, _images: result.images }
 }
 
 async function parseDocx(buffer, fileName) {
@@ -127,6 +326,8 @@ async function parsePdf(buffer, fileName) {
 
 /**
  * 解析标准试卷：Word(.docx) 或 PDF
+ * 对于 DOCX：返回 { text, html?, type, images? }
+ * 对于 PDF：返回 { text, type }
  */
 export async function parseExamFile(buffer, fileName) {
   if (!buffer?.length) {

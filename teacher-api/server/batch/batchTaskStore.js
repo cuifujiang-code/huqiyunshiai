@@ -61,7 +61,13 @@ function normalizeBankInsertRow(q, batchId, teacherId, itemId, fallbackIndex, ta
   const rawContent = String(q?.content ?? q?.question ?? q?.title ?? '').trim()
   const questionNumber = String(q?.question_number ?? q?.questionNumber ?? q?.number ?? '').trim() || String(sortOrder)
 
-  const VALID_TYPES = new Set(['选择题', '填空题', '计算题', '证明题', '实验题', '应用题'])
+  const VALID_TYPES = new Set([
+    '选择题', '填空题', '计算题', '证明题', '实验题', '应用题', '解答题',
+    '作图题', '识图题', '推断题',
+    '阅读理解', '文言文阅读', '古诗词鉴赏', '语言运用', '默写', '作文',
+    '完形填空', '七选五', '语法填空', '短文改错', '书面表达', '听力',
+    '材料分析题', '论述题', '综合题', '读图题',
+  ])
   const VALID_DIFFICULTY = new Set(['基础', '中等', '拔高'])
 
   let questionType = String(q?.question_type ?? q?.type ?? '').trim() || '应用题'
@@ -104,6 +110,7 @@ function normalizeBankInsertRow(q, batchId, teacherId, itemId, fallbackIndex, ta
     tags,
     sort_order: sortOrder,
     question_number: questionNumber,
+    visibility: 'personal',
   }
 }
 

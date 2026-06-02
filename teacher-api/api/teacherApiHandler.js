@@ -72,6 +72,13 @@ export async function handleTeacherApi(req, res, pathSegments = []) {
       return res.status(200).json({ success: true })
     }
 
+    if (path === 'questions/batch-visibility' && method === 'POST') {
+      const teacherId = requireTeacher(body, query)
+      const vis = body.visibility === 'public' ? 'public' : 'personal'
+      await questionBank.updateQuestionsVisibility(teacherId, body.ids ?? [], vis)
+      return res.status(200).json({ success: true })
+    }
+
     if (path === 'questions/batch' && method === 'POST') {
       const teacherId = requireTeacher(body, query)
       const data = await questionBank.createQuestionsBatch(teacherId, body.questions ?? [])

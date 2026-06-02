@@ -1,12 +1,35 @@
 export const TEACHER_SUBJECTS = ['语文', '数学', '英语', '物理', '化学', '生物', '历史', '地理'] as const
 export const TEACHER_GRADES = ['七年级', '八年级', '九年级', '高一', '高二', '高三'] as const
-export const QUESTION_TYPES = ['选择题', '填空题', '计算题', '证明题', '实验题', '应用题'] as const
 export const DIFFICULTIES = ['基础', '中等', '拔高'] as const
 export const QUESTION_SOURCES = ['手动录入', '试卷导入', 'AI生成'] as const
 
+/** 每科专属题型 */
+export const SUBJECT_QUESTION_TYPES: Record<string, readonly string[]> = {
+  '语文':   ['选择题', '填空题', '阅读理解', '文言文阅读', '古诗词鉴赏', '语言运用', '默写', '作文', '解答题'],
+  '数学':   ['选择题', '填空题', '计算题', '证明题', '解答题', '应用题', '作图题'],
+  '英语':   ['选择题', '完形填空', '阅读理解', '七选五', '语法填空', '短文改错', '书面表达', '听力'],
+  '物理':   ['选择题', '填空题', '实验题', '计算题', '解答题', '作图题'],
+  '化学':   ['选择题', '填空题', '实验题', '计算题', '推断题', '解答题'],
+  '生物':   ['选择题', '填空题', '实验题', '解答题', '识图题'],
+  '历史':   ['选择题', '材料分析题', '论述题', '解答题'],
+  '地理':   ['选择题', '综合题', '解答题', '读图题'],
+} as const
+
+/** 全部科目+题型通用列表 */
+export const ALL_QUESTION_TYPES = [
+  '选择题', '填空题', '计算题', '证明题', '解答题', '应用题', '实验题',
+  '作图题', '识图题', '推断题',
+  '阅读理解', '文言文阅读', '古诗词鉴赏', '语言运用', '默写', '作文',
+  '完形填空', '七选五', '语法填空', '短文改错', '书面表达', '听力',
+  '材料分析题', '论述题', '综合题', '读图题',
+] as const
+
+/** 旧版兼容 */
+export const QUESTION_TYPES = ALL_QUESTION_TYPES
+
 export type TeacherSubject = (typeof TEACHER_SUBJECTS)[number]
 export type TeacherGrade = (typeof TEACHER_GRADES)[number]
-export type QuestionType = (typeof QUESTION_TYPES)[number]
+export type QuestionType = (typeof ALL_QUESTION_TYPES)[number]
 export type QuestionDifficulty = (typeof DIFFICULTIES)[number]
 export type QuestionSource = (typeof QUESTION_SOURCES)[number]
 
@@ -24,6 +47,7 @@ export interface BankQuestion {
   analysis: string
   source: QuestionSource | string
   tags: string[]
+  visibility?: 'personal' | 'public'
   created_at?: string
   updated_at?: string
 }

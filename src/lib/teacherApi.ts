@@ -34,7 +34,7 @@ export async function fetchQuestions(
     }
   }
   const url = `${teacherApiUrl('questions')}?${params}`
-  const r = await postApiJson<{ success: boolean; items: BankQuestion[]; total: number; page: number; pageSize: number }>(
+  const r = await postApiJson<{ success: boolean; items: BankQuestion[]; total: number; page: number; pageSize: number; visibility: string }>(
     url,
     null,
     '题库列表',
@@ -87,6 +87,16 @@ export async function batchUpdateTags(teacherId: string, ids: string[], tags: st
   )
   if (r.kind === 'success' && r.data.success) return
   throw new Error(r.kind === 'fallback' ? r.reason : '更新标签失败')
+}
+
+export async function batchUpdateVisibility(teacherId: string, ids: string[], visibility: 'personal' | 'public') {
+  const r = await postApiJson<{ success: boolean }>(
+    teacherApiUrl('questions/batch-visibility'),
+    { teacherId, ids, visibility },
+    '修改可见性',
+  )
+  if (r.kind === 'success' && r.data.success) return
+  throw new Error(r.kind === 'fallback' ? r.reason : '修改可见性失败')
 }
 
 export async function batchImportQuestions(teacherId: string, questions: Partial<BankQuestion>[]) {

@@ -37,14 +37,23 @@ export async function triggerBatchWorker(batchId) {
   const headers = { 'Content-Type': 'application/json' }
   if (secret) headers['x-batch-worker-secret'] = secret
 
-  console.log('[batchTrigger] 触发 worker', { batchId, url })
+  console.log('[batchTrigger] 触发 worker', {
+    batchId,
+    url,
+    hasSecret: Boolean(secret),
+    env: {
+      VERCEL_URL: process.env.VERCEL_URL || '(not set)',
+      BATCH_WORKER_BASE_URL: process.env.BATCH_WORKER_BASE_URL || '(not set)',
+      VERCEL_ENV: process.env.VERCEL_ENV || '(not set)',
+    },
+  })
 
   try {
     const response = await fetch(url, {
       method: 'POST',
       headers,
       body: JSON.stringify({ batchId }),
-      signal: AbortSignal.timeout(15000),
+      signal: AbortSignal.timeout(30000),
     })
 
     if (response.ok) {
@@ -57,12 +66,20 @@ export async function triggerBatchWorker(batchId) {
       batchId,
       status: response.status,
       body: body.slice(0, 500),
+      url,
     })
-    return { ok: false, status: response.status, error: `HTTP ${response.status}` }
+    return { ok: false, status: response.status, error: `HTTP ${response.status}: ${body.slice(0, 200)}` }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
-    console.error('[batchTrigger] Worker 触发网络异常', { batchId, error: msg, url })
-    return { ok: false, status: 0, error: msg }
+    const name = err instanceof Error ? err.name : 'Unknown'
+    console.error('[batchTrigger] Worker 触发网络异常', {
+      batchId,
+      errorName: name,
+      error: msg,
+      url,
+      hint: name === 'AbortError' ? '请求超时（30s），Vercel 可能正在排队' : name === 'TypeError' ? 'DNS/网络不可达，请检查域名' : '',
+    })
+    return { ok: false, status: 0, error: `${name}: ${msg}` }
   }
 }
 
