@@ -5,8 +5,15 @@
 
 import { IMAGE_PLACEHOLDER, FORMULA_PLACEHOLDER } from './batchQualityPrompts.js'
 import { enrichQuestionOptions, extractOptionsFromContent, isIncompleteQuestion } from './questionCompleteness.js'
+import { buildImageTag } from './imageExtractor.js'
 
-const VALID_TYPES = new Set(['选择题', '填空题', '计算题', '证明题', '实验题', '应用题'])
+const VALID_TYPES = new Set([
+  '选择题', '填空题', '计算题', '证明题', '实验题', '应用题', '解答题',
+  '作图题', '识图题', '推断题',
+  '阅读理解', '文言文阅读', '古诗词鉴赏', '语言运用', '默写', '作文',
+  '完形填空', '七选五', '语法填空', '短文改错', '书面表达', '听力',
+  '材料分析题', '论述题', '综合题', '读图题',
+])
 const VALID_DIFFICULTY = new Set(['基础', '中等', '拔高'])
 const EMPTY_OPTION_RE = /^[A-Fa-f][\.．、\)）]?\s*$/
 
@@ -96,7 +103,25 @@ function normalizeQuestionType(raw) {
   if (/计算|calc/.test(lower)) return '计算题'
   if (/证明|proof/.test(lower)) return '证明题'
   if (/实验|experiment/.test(lower)) return '实验题'
-  return '应用题'
+  if (/解答|简答|问答|综合/.test(lower)) return '解答题'
+  if (/作图|画图|绘图/.test(lower)) return '作图题'
+  if (/识图|看图/.test(lower)) return '识图题'
+  if (/推断|推测/.test(lower)) return '推断题'
+  if (/阅读|read/.test(lower)) return '阅读理解'
+  if (/文言/.test(lower)) return '文言文阅读'
+  if (/诗词|古诗|鉴赏/.test(lower)) return '古诗词鉴赏'
+  if (/语言运用|语用/.test(lower)) return '语言运用'
+  if (/默写|背诵/.test(lower)) return '默写'
+  if (/作文|写作|书面表达/.test(lower)) return '作文'
+  if (/完形|cloze/.test(lower)) return '完形填空'
+  if (/七选五|7选5/.test(lower)) return '七选五'
+  if (/语法填空|语法/.test(lower)) return '语法填空'
+  if (/短文改错|改错/.test(lower)) return '短文改错'
+  if (/听力|listen/.test(lower)) return '听力'
+  if (/材料分析|材料/.test(lower)) return '材料分析题'
+  if (/论述|essay/.test(lower)) return '论述题'
+  if (/读图/.test(lower)) return '读图题'
+  return '解答题'
 }
 
 function normalizeDifficulty(raw) {
@@ -184,19 +209,10 @@ function replaceFormulaPlaceholders(text, formulaImages, startIndex = 0) {
     const h = fi.height || 'auto'
     const fmt = fi.format || 'png'
 
-    // 根据格式选择 MIME 类型
-    const mimeMap = {
-      wmf: 'image/x-wmf',
-      emf: 'image/x-emf',
-      png: 'image/png',
-      jpg: 'image/jpeg',
-      jpeg: 'image/jpeg',
-      gif: 'image/gif',
-      svg: 'image/svg+xml',
-    }
-    const mime = mimeMap[fmt] || 'image/' + fmt
-
-    return `<img src="data:${mime};base64,${safeB64}" alt="公式" style="display:inline-block;vertical-align:middle;max-width:100%;height:auto;" width="${w}" height="${h}" data-formula-idx="${idx - 1}" data-format="${fmt}" />`
+    return buildImageTag(
+      { ...fi, png_base64: safeB64, base64: safeB64, format: fmt, width: w, height: h },
+      { inline: true, kind: 'formula' },
+    )
   })
 
   return { text, replacedCount: replaced, nextIndex: idx }
@@ -221,17 +237,9 @@ function replaceImagePlaceholders(text, images, startIndex = 0) {
     if (replaced >= MAX_IMG_PER_QUESTION) return '[图片占位符]' // 超出限制
     const img = images[idx]
     idx++
-    if (img && img.base64) {
+    if (img && (img.url || img.base64)) {
       replaced++
-      const mime = img.mime || 'image/png'
-      // 限制 base64 长度
-      const MAX_B64_LEN = 50000
-      let b64 = img.base64
-      if (b64.length > MAX_B64_LEN) {
-        console.warn('[normalizer] 图片 base64 过长，截断', { idx: idx - 1, len: b64.length })
-        b64 = b64.slice(0, MAX_B64_LEN)
-      }
-      return `<img src="data:${mime};base64,${b64}" alt="插图" style="display:block;max-width:100%;height:auto;margin:8px 0;" />`
+      return buildImageTag(img, { inline: false, kind: 'image' })
     }
     return '[图片占位符]'
   })

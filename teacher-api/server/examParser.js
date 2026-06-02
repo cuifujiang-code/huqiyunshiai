@@ -2,6 +2,7 @@ import './applyUrlShim.js'
 import mammoth from 'mammoth'
 import { createRequire } from 'node:module'
 import { logStepError } from './apiErrorUtil.js'
+import { extractImagesFromDocx, extractImagesFromPdf } from './batch/imageExtractor.js'
 import fs from 'fs/promises'
 import path from 'path'
 import os from 'os'
@@ -22,6 +23,122 @@ function getPdfParse() {
     throw new Error('pdf-parse 模块加载异常，请检查依赖安装')
   }
   return pdfParseFn
+}
+
+/** mammoth 无 convertTableToText 选项；通过 convertToHtml 保留表格结构 */
+const MAMMOTH_TABLE_OPTIONS = {
+  convertTableToText: false,
+}
+
+function escapeXmlText(s) {
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+}
+
+/** 将 w:tbl XML 转为 [表格] 标记的纯文本（行换行、列制表符） */
+function wTblToPlainText(tblXml) {
+  const rows = []
+  for (const tr of tblXml.matchAll(/<w:tr[\s\S]*?<\/w:tr>/g)) {
+    const cells = []
+    for (const tc of tr[0].matchAll(/<w:tc[\s\S]*?<\/w:tc>/g)) {
+      const cellText = [...tc[0].matchAll(/<w:t(?:\s[^>]*)?>([\s\S]*?)<\/w:t>/g)]
+        .map((m) => m[1]
+          .replace(/&lt;/g, '<')
+          .replace(/&gt;/g, '>')
+          .replace(/&amp;/g, '&'))
+        .join('')
+      cells.push(cellText.trim())
+    }
+    if (cells.some(Boolean)) rows.push(cells.join('\t'))
+  }
+  if (!rows.length) return '[表格]'
+  return `[表格]\n${rows.join('\n')}\n[/表格]`
+}
+
+/** 在 mammoth 解析前，将 DOCX 表格替换为带 [表格] 标记的文本段落 */
+function preserveTablesInDocxXml(xml) {
+  return xml.replace(/<w:tbl[\s\S]*?<\/w:tbl>/g, (tblXml) => {
+    const tableText = wTblToPlainText(tblXml)
+    return `<w:p><w:r><w:t xml:space="preserve">${escapeXmlText(tableText)}</w:t></w:r></w:p>`
+  })
+}
+
+/** HTML 表格 → [表格] 标记文本（行换行、列制表符） */
+function htmlTableToMarkedText(tableHtml) {
+  const rows = []
+  const trMatches = tableHtml.match(/<tr[\s\S]*?<\/tr>/gi) || []
+  for (const tr of trMatches) {
+    const cells = []
+    const cellMatches = tr.match(/<t[dh][^>]*>([\s\S]*?)<\/t[dh]>/gi) || []
+    for (const cell of cellMatches) {
+      const inner = cell
+        .replace(/<t[dh][^>]*>/i, '')
+        .replace(/<\/t[dh]>/i, '')
+        .replace(/<br\s*\/?>/gi, ' ')
+        .replace(/<[^>]+>/g, '')
+        .replace(/&nbsp;/g, ' ')
+        .trim()
+      cells.push(inner)
+    }
+    if (cells.some(Boolean)) rows.push(cells.join('\t'))
+  }
+  if (!rows.length) return '\n[表格]\n[/表格]\n'
+  return `\n[表格]\n${rows.join('\n')}\n[/表格]\n`
+}
+
+/** mammoth HTML 输出转纯文本，保留表格结构 */
+function htmlToPlainWithTables(html) {
+  let s = String(html || '')
+  s = s.replace(/<table[\s\S]*?<\/table>/gi, (tableHtml) => htmlTableToMarkedText(tableHtml))
+  s = s
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/p>/gi, '\n')
+    .replace(/<\/div>/gi, '\n')
+    .replace(/<\/li>/gi, '\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+  return s
+}
+
+/** PDF 文本后处理：识别多列行并转为 [表格] 标记（列用制表符） */
+function enhancePdfTableText(text) {
+  const lines = String(text || '').split('\n')
+  const out = []
+  let tableBuffer = []
+
+  function flushTable() {
+    if (tableBuffer.length >= 2) {
+      out.push('[表格]')
+      for (const line of tableBuffer) {
+        const cols = line.trim().split(/\s{2,}/).map((c) => c.trim()).filter(Boolean)
+        out.push(cols.length >= 2 ? cols.join('\t') : line.trim())
+      }
+      out.push('[/表格]')
+    } else {
+      out.push(...tableBuffer)
+    }
+    tableBuffer = []
+  }
+
+  for (const line of lines) {
+    const trimmed = line.trim()
+    const cols = trimmed.split(/\s{2,}/).filter((c) => c.length > 0)
+    if (cols.length >= 2 && trimmed.length > 0) {
+      tableBuffer.push(line)
+    } else {
+      flushTable()
+      out.push(line)
+    }
+  }
+  flushTable()
+  return out.join('\n').trim()
 }
 
 /** 判断文件是否为图片格式 */
@@ -223,6 +340,8 @@ function preprocessDocxXml(buffer) {
     const relsMap = parseDocxRels(zip)
 
     let xml = docEntry.getData().toString('utf8')
+    // 保留表格结构（convertTableToText: false 的等效实现）
+    xml = preserveTablesInDocxXml(xml)
     let modifications = 0
     let formulaIdx = 0
     let imageIdx = 0
@@ -371,24 +490,49 @@ function preprocessDocxXml(buffer) {
 async function parseDocx(buffer, fileName) {
   console.log('[试卷解析] 开始 Word', { fileName, bytes: buffer.length })
 
-  // 预处理：替换 MathType OLE 公式和图片为占位符，同时提取 base64
-  const { buffer: preprocessed, formulaImages, images } = preprocessDocxXml(buffer)
+  const { buffer: preprocessed, formulaImages: preFormulas, images: preImages } = preprocessDocxXml(buffer)
+  const extracted = extractImagesFromDocx(buffer)
+  const formulaImages = preFormulas.length > 0 ? preFormulas : extracted.formulaImages
+  const images = preImages.length > 0 ? preImages : extracted.images
 
-  const result = await mammoth.extractRawText({ buffer: preprocessed })
-  const text = (result.value || '').trim()
+  let text = ''
+  try {
+    const htmlResult = await mammoth.convertToHtml(
+      { buffer: preprocessed },
+      MAMMOTH_TABLE_OPTIONS,
+    )
+    text = htmlToPlainWithTables(htmlResult.value)
+    if (htmlResult.messages?.length) {
+      console.log('[试卷解析] mammoth convertToHtml 提示', {
+        count: htmlResult.messages.length,
+        sample: htmlResult.messages.slice(0, 3).map((m) => m.message),
+      })
+    }
+  } catch (htmlErr) {
+    console.warn('[试卷解析] convertToHtml 失败，回退 extractRawText', {
+      error: htmlErr instanceof Error ? htmlErr.message : String(htmlErr),
+    })
+  }
+
+  if (!text) {
+    const result = await mammoth.extractRawText({ buffer: preprocessed }, MAMMOTH_TABLE_OPTIONS)
+    text = (result.value || '').trim()
+  }
+
   if (!text) {
     throw new Error('Word 试卷未能提取到文字，请检查文件内容')
   }
 
-  // 统计预处理效果
   const formulaCount = (text.match(/【公式】/g) || []).length
   const imageCount = (text.match(/\[图片占位符\]/g) || []).length
+  const tableCount = (text.match(/\[表格\]/g) || []).length
 
   console.log('[试卷解析] Word 完成', {
     fileName,
     textLength: text.length,
     formulaMarkers: formulaCount,
     imagePlaceholders: imageCount,
+    tableMarkers: tableCount,
     formulasExtracted: formulaImages.length,
     imagesExtracted: images.length,
   })
@@ -411,11 +555,14 @@ async function parsePdf(buffer, fileName) {
   console.log('[试卷解析] 开始 PDF', { fileName, bytes: buffer.length })
   const pdfParse = getPdfParse()
   const data = await pdfParse(buffer)
-  const text = (data.text || '').trim()
+  let text = enhancePdfTableText((data.text || '').trim())
+  const pdfImages = await extractImagesFromPdf(buffer)
   console.log('[试卷解析] PDF 完成', {
     fileName,
     textLength: text.length,
     pages: data.numpages,
+    tableMarkers: (text.match(/\[表格\]/g) || []).length,
+    pdfImages: pdfImages.length,
   })
 
   // 文字层内容过少 → 判定为扫描版 PDF
@@ -426,7 +573,7 @@ async function parsePdf(buffer, fileName) {
     )
   }
 
-  return { text, type: 'pdf' }
+  return { text, type: 'pdf', ...(pdfImages.length ? { images: pdfImages } : {}) }
 }
 
 /**

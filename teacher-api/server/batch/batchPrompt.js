@@ -1,7 +1,7 @@
 /** 专业教育题库拆题 Prompt：LaTeX 公式、几何图形、空间图形全支持 */
 
 import { extractJsonFromAiText } from './safeJson.js'
-import { IMAGE_PLACEHOLDER, FORMULA_PLACEHOLDER, IMAGE_PLACEHOLDER_RULE, JSON_EXAMPLE_WITH_LATEX, LATEX_STRICT_RULE, COMPLETE_EXTRACTION_RULE } from './batchQualityPrompts.js'
+import { IMAGE_PLACEHOLDER, FORMULA_PLACEHOLDER, IMAGE_PLACEHOLDER_RULE, JSON_EXAMPLE_WITH_LATEX, LATEX_STRICT_RULE, COMPLETE_EXTRACTION_RULE, ANALYSIS_PRESERVATION_RULE } from './batchQualityPrompts.js'
 
 const JSON_PARSE_RETRY_DELAY_MS = 2000
 
@@ -105,6 +105,11 @@ export async function parseJsonFromAiTextWithRetry(rawText, safeJsonParseFn) {
 
 export const BATCH_SYSTEM_PROMPT = `你是 K12 专业题库拆题引擎，对标学科网组卷网的 AI 识别标准。
 
+【角色定位】
+你是题目整理助手，不是题目解答助手。你的首要任务是忠实整理原文，而非重新解题。
+
+${ANALYSIS_PRESERVATION_RULE}
+
 【最高优先级：题目完整性 - 零碎片化】
 这是一条你必须无条件遵守的硬性规则，优先级高于一切：
 - 一道大题 = 一个 JSON 对象。无论该大题包含多少个子问题（(1)(2)(3)…），它们都属于同一道大题，必须放在同一个 content 字段内。
@@ -134,7 +139,7 @@ export const BATCH_SYSTEM_PROMPT = `你是 K12 专业题库拆题引擎，对标
 6. 根据题目的数学语境推断：如数列题中的【公式】通常是 $a_n$、$S_n$、$d$、$q$ 等
 7. 几何图形、函数图像用 geometry_desc 字段详细描述（形状、标记、坐标、标注）
 8. 无法识别的图片在 content 中插入 ${IMAGE_PLACEHOLDER}，analysis 说明「此题包含图片，需手动处理」
-9. 表格内容完整保留，用 Markdown 表格或 geometry_desc 描述
+9. 表格内容完整保留：原文中的 [表格]...[/表格] 块必须原样保留在 content 中，禁止省略表格文字
 
 【输出格式 - 必须严格遵守】
 1. 只输出一个 JSON 数组，以 [ 开头、以 ] 结尾
@@ -146,12 +151,20 @@ export const BATCH_SYSTEM_PROMPT = `你是 K12 专业题库拆题引擎，对标
 
 【内容规则】
 1. content：题干全文（含所有子问题、公式、图形描述、表格），禁止省略
-2. answer：标准答案（含公式，禁止"略"或"见解析"）
-3. analysis：详细解析（含公式推导步骤）
+2. answer：标准答案（含公式）；原文已有答案则原样复制，禁止改写
+3. analysis：详细解析（含公式推导步骤）；原文已有解析则原样复制，禁止 AI 重写
 4. options：选择题为字符串数组；非选择题为 []
 5. geometry_desc：图形描述（无图形则为 ""）
 6. latex_blocks：本题涉及的所有 LaTeX 片段数组（不含 $ 分隔符）
-7. question_type：选择题/填空题/计算题/证明题/实验题/应用题
+7. question_type 根据学科选择：
+   - 语文：选择题/填空题/阅读理解/文言文阅读/古诗词鉴赏/语言运用/默写/作文/解答题
+   - 数学：选择题/填空题/计算题/证明题/解答题/应用题/作图题
+   - 英语：选择题/完形填空/阅读理解/七选五/语法填空/短文改错/书面表达/听力
+   - 物理：选择题/填空题/实验题/计算题/解答题/作图题
+   - 化学：选择题/填空题/实验题/计算题/推断题/解答题
+   - 生物：选择题/填空题/实验题/解答题/识图题
+   - 历史：选择题/材料分析题/论述题/解答题
+   - 地理：选择题/综合题/解答题/读图题
 8. difficulty：基础/中等/拔高
 9. knowledge_point：知识点名称（如"一元二次方程"）
 10. tags：相关标签数组（如 ["二次函数", "最值问题"]）
@@ -166,6 +179,8 @@ export function buildBatchSplitPrompt(chunkText, meta) {
   return `将以下试卷文本拆分为独立题目，完整保留数学表达式与图形信息。
 ${countHint}
 ${COMPLETE_EXTRACTION_RULE}
+
+${ANALYSIS_PRESERVATION_RULE}
 
 学科：${meta.subject || '数学'}
 年级：${meta.grade || '八年级'}
@@ -197,6 +212,10 @@ ${IMAGE_PLACEHOLDER_RULE}
 - 描述内容：图形类型、标记条件、角度/边长数值、坐标位置
 - 示例："图：直角三角形 ABC，∠C=90°，AC=3，BC=4，求 AB"
 
+【表格处理要求】
+- 原文中的 [表格]...[/表格] 块必须完整保留在 content 中
+- 表格内行用换行分隔、列用制表符分隔，禁止省略表格文字
+
 试卷片段：
 ${chunkText}
 
@@ -216,6 +235,8 @@ export function backupPrompt(chunkText, meta) {
   return `【强制 JSON 数组模式 - 违反任何一条均视为失败】
 ${countHint}
 ${COMPLETE_EXTRACTION_RULE}
+
+${ANALYSIS_PRESERVATION_RULE}
 
 【题目完整性 - 不可违反】
 - 一道大题包含多个(1)(2)(3)子问题时，所有子问题必须在同一个对象的 content 中

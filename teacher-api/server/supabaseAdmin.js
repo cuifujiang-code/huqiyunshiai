@@ -84,3 +84,59 @@ export function createServiceRoleClient() {
 export function getSupabaseAdmin() {
   return createServiceRoleClient()
 }
+
+const BATCH_IMAGES_BUCKET = process.env.SUPABASE_BATCH_IMAGES_BUCKET || 'batch-exam-images'
+
+/** Storage 是否可用（依赖 service_role 客户端） */
+export function isSupabaseStorageConfigured() {
+  return isSupabaseAdminConfigured()
+}
+
+export function getBatchImagesBucket() {
+  return BATCH_IMAGES_BUCKET
+}
+
+/** 确保批量拆题图片 bucket 存在（service_role 需有 storage 管理权限） */
+export async function ensureBatchImagesBucket() {
+  const admin = createServiceRoleClient()
+  const { data: bucket, error: getErr } = await admin.storage.getBucket(BATCH_IMAGES_BUCKET)
+  if (bucket) return bucket
+  if (getErr && !/not found|404/i.test(getErr.message)) {
+    console.warn('[Supabase Storage] getBucket 异常，尝试创建', { message: getErr.message })
+  }
+  const { data: created, error: createErr } = await admin.storage.createBucket(BATCH_IMAGES_BUCKET, {
+    public: true,
+    fileSizeLimit: 10 * 1024 * 1024,
+  })
+  if (createErr && !/already exists|duplicate/i.test(createErr.message)) {
+    throw new Error(`创建 Storage bucket 失败：${createErr.message}`)
+  }
+  console.log('[Supabase Storage] bucket 就绪', { bucket: BATCH_IMAGES_BUCKET, created: Boolean(created) })
+  return created ?? { name: BATCH_IMAGES_BUCKET }
+}
+
+/**
+ * 上传批量拆题图片到 Supabase Storage
+ * @returns {string} 公开访问 URL
+ */
+export async function uploadBatchImage(batchId, index, buffer, mimeType, kind = 'image') {
+  if (!buffer?.length) throw new Error('图片 buffer 为空')
+  const admin = createServiceRoleClient()
+  await ensureBatchImagesBucket()
+
+  const ext = (mimeType || 'image/png').split('/').pop()?.replace(/[^a-z0-9]/gi, '') || 'png'
+  const objectPath = `${String(batchId).trim()}/${kind}_${index}.${ext}`
+
+  const { error: uploadErr } = await admin.storage
+    .from(BATCH_IMAGES_BUCKET)
+    .upload(objectPath, buffer, { contentType: mimeType || 'image/png', upsert: true })
+
+  if (uploadErr) {
+    throw new Error(`Storage 上传失败：${uploadErr.message}`)
+  }
+
+  const { data: urlData } = admin.storage.from(BATCH_IMAGES_BUCKET).getPublicUrl(objectPath)
+  const publicUrl = urlData?.publicUrl
+  if (!publicUrl) throw new Error('无法获取 Storage 公开 URL')
+  return publicUrl
+}

@@ -12,6 +12,7 @@ import {
   reconcileBatchTaskFromBank,
 } from '../../server/batch/batchTaskStore.js'
 import { startBatchProcessing } from '../../server/batch/batchStart.js'
+import { persistExamImages } from '../../server/batch/imageExtractor.js'
 
 function buildUploadPayload({
   batchId,
@@ -179,12 +180,27 @@ export default async function handler(req, res) {
     const batchId = randomUUID()
 
     // 合并：优先使用前端传入的 imagesJson，其次使用后端自动提取的
-    const effectiveFormulaImages = (imagesJson?.formulas?.length > 0)
+    let effectiveFormulaImages = (imagesJson?.formulas?.length > 0)
       ? imagesJson.formulas
       : autoFormulaImages || []
-    const effectiveImages = (imagesJson?.images?.length > 0)
+    let effectiveImages = (imagesJson?.images?.length > 0)
       ? imagesJson.images
       : autoImages || []
+
+    // 上传图片到 Supabase Storage，替换为公开 URL（失败时保留 base64）
+    try {
+      const persisted = await persistExamImages(batchId, {
+        formulaImages: effectiveFormulaImages,
+        images: effectiveImages,
+      })
+      effectiveFormulaImages = persisted.formulaImages
+      effectiveImages = persisted.images
+    } catch (imgErr) {
+      console.warn('[batch/upload] 图片上传 Storage 失败，使用 base64 回退', {
+        batchId,
+        error: imgErr instanceof Error ? imgErr.message : String(imgErr),
+      })
+    }
 
     console.log('[batch/upload] 创建任务 → batch_decompose_tasks', {
       batchId,
