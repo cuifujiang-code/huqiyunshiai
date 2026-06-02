@@ -111,14 +111,23 @@ export default async function handler(req, res) {
     try {
       const tasks = await listBatchTasksByTeacher(teacherId)
       console.log('[batch/upload] 任务列表', { teacherId, count: tasks.length })
-      const summaries = await Promise.all(
-        tasks.map(async (t) => {
+      const summaries = []
+      for (const t of tasks) {
+        try {
           const reconciled = await reconcileBatchTaskFromBank(t.batch_id)
           const taskRow = reconciled ?? t
           const counts = await countItemsByStatus(t.batch_id)
-          return formatBatchProgress(taskRow, counts)
-        }),
-      )
+          summaries.push(formatBatchProgress(taskRow, counts))
+        } catch (taskErr) {
+          const msg = taskErr instanceof Error ? taskErr.message : String(taskErr)
+          console.warn('[batch/upload] 单任务 reconcile 失败，使用原始数据', {
+            batchId: t.batch_id,
+            msg,
+          })
+          const counts = await countItemsByStatus(t.batch_id).catch(() => ({}))
+          summaries.push(formatBatchProgress(t, counts))
+        }
+      }
       return res.status(200).json({ success: true, tasks: summaries })
     } catch (error) {
       const msg = error instanceof Error ? error.message : '查询失败'

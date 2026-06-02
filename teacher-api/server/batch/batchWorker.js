@@ -14,6 +14,7 @@ import {
   markItemProcessing,
   recoverTaskStatusFromBankCount,
   resetStuckProcessingItems,
+  forceResetAllProcessingItems,
   syncImportedQuestionsFromBank,
   updateBatchProgress,
 } from './batchTaskStore.js'
@@ -317,7 +318,31 @@ async function runBatchWorkerCore(batchId) {
   console.log('[batchWorker] 待处理分块', { batchId, pendingCount: pending.length })
 
   if (!pending.length) {
-    const counts = await countItemsByStatus(batchId)
+    let counts = await countItemsByStatus(batchId)
+
+    // 无 pending 但有 processing：重置卡住分块并链式续跑，避免任务永久「处理中」
+    if (counts.processing > 0) {
+      let resetCount = await resetStuckProcessingItems(batchId, 1)
+      counts = await countItemsByStatus(batchId)
+
+      if (counts.processing > 0 && counts.pending === 0) {
+        const forced = await forceResetAllProcessingItems(batchId)
+        resetCount += forced
+        counts = await countItemsByStatus(batchId)
+        console.log('[batchWorker] 无 pending，强制重置 processing→pending', {
+          batchId,
+          resetCount,
+          forced,
+          counts,
+        })
+      }
+
+      if (counts.pending > 0) {
+        await chainNextWorker(batchId, 1, counts.pending + counts.processing, [], [])
+        return { continued: true, counts, reason: 'processing_recovery' }
+      }
+    }
+
     const finalStatus = await resolveFinalBatchStatus(batchId, counts)
     console.log('[batchWorker] 无待处理分块，收尾', { batchId, finalStatus, counts })
     return { done: true, status: finalStatus ?? task.status, counts }

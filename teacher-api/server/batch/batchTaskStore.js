@@ -258,6 +258,19 @@ export async function resetStuckProcessingItems(batchId, staleMinutes = 10) {
   return data?.length ?? 0
 }
 
+/** 无 pending 但仍有 processing 时，强制全部重置为 pending（用于 worker 续跑） */
+export async function forceResetAllProcessingItems(batchId) {
+  const admin = getSupabaseAdmin()
+  const { data, error } = await admin
+    .from(ITEMS)
+    .update({ status: 'pending', error_message: null, updated_at: nowIso() })
+    .eq('batch_id', batchId)
+    .eq('status', 'processing')
+    .select('id')
+  if (error) throw new Error(error.message)
+  return data?.length ?? 0
+}
+
 export async function listBatchTasksByTeacher(teacherId, limit = 30) {
   const admin = getSupabaseAdmin()
   const { data, error } = await admin
