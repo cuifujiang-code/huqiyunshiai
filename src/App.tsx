@@ -22,6 +22,7 @@ import TeacherTaskCenterPage from './pages/TeacherTaskCenterPage'
 import TeacherBatchDecomposePage from './pages/TeacherBatchDecomposePage'
 import BatchUploadPage from './pages/teacher/BatchUploadPage'
 import QuestionLibraryPage from './pages/teacher/QuestionLibraryPage'
+import ExamLayoutPage from './pages/teacher/ExamLayoutPage'
 
 export default function App() {
   return (
@@ -109,6 +110,14 @@ export default function App() {
               element={
                 <ProtectedRoute requiredRole="teacher">
                   <TeacherExamBuilderPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/teacher/exam-layout"
+              element={
+                <ProtectedRoute requiredRole="teacher">
+                  <ExamLayoutPage />
                 </ProtectedRoute>
               }
             />

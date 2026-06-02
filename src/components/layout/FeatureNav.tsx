@@ -11,6 +11,7 @@ const teacherLinks = [
   { to: '/teacher/task-center', label: '拆题任务' },
   { to: '/teacher/lesson-prep', label: '智能备课' },
   { to: '/teacher/exam-builder', label: '智能组卷' },
+  { to: '/teacher/exam-layout', label: '组卷排版' },
   { to: '/teacher/handout-builder', label: '讲义制作' },
   { to: '/teacher/book-builder', label: '辅导书' },
   { to: '/teacher/planning', label: '教育规划' },

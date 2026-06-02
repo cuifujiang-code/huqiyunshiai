@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import DashboardHeader from '../components/layout/DashboardHeader'
 import MathRenderer from '../components/common/MathRenderer'
 import { useAuth } from '../context/AuthContext'
@@ -7,6 +8,7 @@ import QuestionBasket from '../components/batch/QuestionBasket'
 import { exportHtmlAsWord, questionsToHtml } from '../lib/exportDoc'
 import { exportToPdf } from '../lib/exportPdf'
 import { buildExam } from '../lib/teacherApi'
+import { builtExamToLayoutData, saveLayoutExamData } from '../types/examLayout'
 import type { BuiltExam, ExamTypeRow } from '../types/teacher'
 import { SUBJECT_QUESTION_TYPES, TEACHER_GRADES, TEACHER_SUBJECTS, btnPrimary, btnSecondary, inputClass } from '../types/teacher'
 
@@ -20,6 +22,7 @@ const defaultRow = (): ExamTypeRow => ({
 export default function TeacherExamBuilderPage() {
   const { profile } = useAuth()
   const teacherId = profile?.id ?? ''
+  const navigate = useNavigate()
   const previewRef = useRef<HTMLDivElement>(null)
 
   const [title, setTitle] = useState('单元测试卷')
@@ -208,7 +211,17 @@ export default function TeacherExamBuilderPage() {
               </div>
             )}
             {exam && (
-              <div className="mt-4 flex gap-2">
+              <div className="mt-4 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  className={btnPrimary}
+                  onClick={() => {
+                    saveLayoutExamData(builtExamToLayoutData(exam))
+                    navigate('/teacher/exam-layout', { state: { exam } })
+                  }}
+                >
+                  排版导出
+                </button>
                 <button type="button" className={btnSecondary} onClick={() => exportHtmlAsWord(questionsToHtml(exam.title, exam.sections), exam.title)}>导出 Word</button>
                 <button type="button" className={btnSecondary} onClick={() => previewRef.current && exportToPdf(previewRef.current, `${exam.title}.pdf`)}>导出 PDF</button>
               </div>

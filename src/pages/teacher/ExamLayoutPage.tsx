@@ -1,0 +1,415 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
+import DashboardHeader from '../../components/layout/DashboardHeader'
+import ExamLayoutPreview from '../../components/exam/ExamLayoutPreview'
+import { useQuestionBasket } from '../../context/QuestionBasketContext'
+import { exportExamLayoutWord } from '../../lib/examLayoutExport'
+import { exportToPdf } from '../../lib/exportPdf'
+import type { BuiltExam } from '../../types/teacher'
+import {
+  DEFAULT_EXAM_LAYOUT,
+  EXAM_FONT_FAMILIES,
+  EXAM_FONT_SIZES,
+  EXAM_LINE_HEIGHTS,
+  basketToLayoutData,
+  builtExamToLayoutData,
+  loadLayoutExamData,
+  saveLayoutExamData,
+  type ExamAnswerMode,
+  type ExamColumnMode,
+  type ExamLayoutConfig,
+  type ExamNumberStyle,
+  type ExamOptionsLayout,
+  type ExamTextAlign,
+  type LayoutExamData,
+} from '../../types/examLayout'
+import { btnPrimary, btnSecondary, inputClass } from '../../types/teacher'
+
+type LocationState = { exam?: BuiltExam }
+
+function ToggleGroup<T extends string>({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string
+  value: T
+  options: { id: T; label: string }[]
+  onChange: (v: T) => void
+}) {
+  return (
+    <div>
+      <label className="mb-1.5 block text-xs font-medium text-slate-400">{label}</label>
+      <div className="flex flex-wrap gap-1">
+        {options.map((opt) => (
+          <button
+            key={opt.id}
+            type="button"
+            onClick={() => onChange(opt.id)}
+            className={`rounded-lg px-2.5 py-1.5 text-xs transition ${
+              value === opt.id
+                ? 'bg-cyan-500/20 text-cyan-200 ring-1 ring-cyan-500/40'
+                : 'bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-slate-200'
+            }`}
+          >
+            {opt.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function MarginSlider({
+  label,
+  value,
+  onChange,
+}: {
+  label: string
+  value: number
+  onChange: (v: number) => void
+}) {
+  return (
+    <div>
+      <div className="mb-1 flex items-center justify-between text-xs text-slate-400">
+        <span>{label}</span>
+        <span className="text-slate-300">{value}px</span>
+      </div>
+      <input
+        type="range"
+        min={24}
+        max={120}
+        step={4}
+        value={value}
+        onChange={(e) => onChange(Number(e.target.value))}
+        className="w-full accent-cyan-500"
+      />
+    </div>
+  )
+}
+
+function HeaderFooterControl({
+  title,
+  config,
+  onChange,
+}: {
+  title: string
+  config: ExamLayoutConfig['header']
+  onChange: (next: ExamLayoutConfig['header']) => void
+}) {
+  return (
+    <div className="rounded-lg border border-slate-700 bg-slate-800/40 p-3">
+      <div className="mb-2 flex items-center justify-between">
+        <span className="text-xs font-medium text-slate-300">{title}</span>
+        <label className="flex items-center gap-1.5 text-xs text-slate-400">
+          <input
+            type="checkbox"
+            checked={config.visible}
+            onChange={(e) => onChange({ ...config, visible: e.target.checked })}
+            className="accent-cyan-500"
+          />
+          显示
+        </label>
+      </div>
+      <input
+        className={`${inputClass} mb-2 py-2 text-sm`}
+        placeholder={`${title}文字`}
+        value={config.text}
+        disabled={!config.visible}
+        onChange={(e) => onChange({ ...config, text: e.target.value })}
+      />
+      <div className="flex gap-1">
+        {(['left', 'center', 'right'] as ExamTextAlign[]).map((align) => (
+          <button
+            key={align}
+            type="button"
+            disabled={!config.visible}
+            onClick={() => onChange({ ...config, align })}
+            className={`flex-1 rounded py-1 text-xs ${
+              config.align === align
+                ? 'bg-cyan-500/20 text-cyan-200'
+                : 'bg-slate-700 text-slate-400'
+            } disabled:opacity-40`}
+          >
+            {align === 'left' ? '居左' : align === 'center' ? '居中' : '居右'}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+export default function ExamLayoutPage() {
+  const location = useLocation()
+  const navigate = useNavigate()
+  const previewRef = useRef<HTMLDivElement>(null)
+  const { items: basketItems } = useQuestionBasket()
+
+  const [layout, setLayout] = useState<ExamLayoutConfig>(DEFAULT_EXAM_LAYOUT)
+  const [exam, setExam] = useState<LayoutExamData | null>(null)
+  const [exporting, setExporting] = useState<'pdf' | 'word' | null>(null)
+  const [message, setMessage] = useState<string | null>(null)
+
+  const resolveExamData = useCallback((): LayoutExamData | null => {
+    const state = (location.state as LocationState | null)?.exam
+    if (state) {
+      const data = builtExamToLayoutData(state)
+      saveLayoutExamData(data)
+      return data
+    }
+    const stored = loadLayoutExamData()
+    if (stored) return stored
+    if (basketItems.length > 0) return basketToLayoutData(basketItems)
+    return null
+  }, [location.state, basketItems])
+
+  useEffect(() => {
+    setExam(resolveExamData())
+  }, [resolveExamData])
+
+  const patchLayout = useCallback((patch: Partial<ExamLayoutConfig>) => {
+    setLayout((prev) => ({ ...prev, ...patch }))
+  }, [])
+
+  const patchMargins = useCallback((key: keyof ExamLayoutConfig['margins'], value: number) => {
+    setLayout((prev) => ({
+      ...prev,
+      margins: { ...prev.margins, [key]: value },
+    }))
+  }, [])
+
+  const answerModeOptions = useMemo(
+    () => [
+      { id: 'practice' as ExamAnswerMode, label: '纯练习卷' },
+      { id: 'lecture' as ExamAnswerMode, label: '随堂讲解卷' },
+      { id: 'homework' as ExamAnswerMode, label: '课后作业卷' },
+    ],
+    [],
+  )
+
+  const confirmExport = () => {
+    return window.confirm('请确认右侧预览效果无误，导出文件将与预览 1:1 还原。是否继续？')
+  }
+
+  const handleExportPdf = async () => {
+    if (!exam || !previewRef.current) return
+    const paper = previewRef.current.querySelector('#exam-layout-preview-paper') as HTMLElement | null
+    if (!paper) {
+      setMessage('未找到预览区域')
+      return
+    }
+    if (!confirmExport()) return
+
+    setExporting('pdf')
+    setMessage(null)
+    try {
+      await exportToPdf(paper, `${exam.title}.pdf`)
+      setMessage('PDF 导出成功')
+    } catch (e) {
+      setMessage(e instanceof Error ? e.message : 'PDF 导出失败')
+    } finally {
+      setExporting(null)
+    }
+  }
+
+  const handleExportWord = () => {
+    if (!exam) return
+    if (!confirmExport()) return
+
+    setExporting('word')
+    setMessage(null)
+    try {
+      exportExamLayoutWord(exam, layout)
+      setMessage('Word 导出成功')
+    } catch (e) {
+      setMessage(e instanceof Error ? e.message : 'Word 导出失败')
+    } finally {
+      setExporting(null)
+    }
+  }
+
+  return (
+    <div className="flex min-h-screen flex-col bg-slate-950 text-white">
+      <DashboardHeader title="组卷排版" backTo="/teacher/exam-builder" backLabel="返回组卷" featureNavRole="teacher" />
+
+      {message && (
+        <p className="mx-4 mt-3 shrink-0 rounded-lg border border-blue-500/30 bg-blue-500/10 px-3 py-2 text-sm text-blue-200">
+          {message}
+        </p>
+      )}
+
+      <main className="mx-auto flex min-h-0 w-full max-w-[1600px] flex-1 gap-0 px-4 py-4">
+        {/* 左侧参数面板 35% */}
+        <aside className="flex w-[35%] min-w-[300px] flex-col rounded-xl border border-slate-700 bg-slate-900/60">
+          <div className="border-b border-slate-700 px-4 py-3">
+            <h2 className="font-semibold text-white">排版参数</h2>
+            <p className="mt-1 text-xs text-slate-500">修改后右侧实时刷新</p>
+          </div>
+
+          <div className="flex-1 space-y-4 overflow-y-auto p-4">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="mb-1.5 block text-xs font-medium text-slate-400">字体类型</label>
+                <select
+                  className={`${inputClass} py-2 text-sm`}
+                  value={layout.fontFamily}
+                  onChange={(e) => patchLayout({ fontFamily: e.target.value as ExamLayoutConfig['fontFamily'] })}
+                >
+                  {EXAM_FONT_FAMILIES.map((f) => (
+                    <option key={f} value={f}>{f}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="mb-1.5 block text-xs font-medium text-slate-400">字体大小</label>
+                <select
+                  className={`${inputClass} py-2 text-sm`}
+                  value={layout.fontSize}
+                  onChange={(e) => patchLayout({ fontSize: e.target.value as ExamLayoutConfig['fontSize'] })}
+                >
+                  {EXAM_FONT_SIZES.map((s) => (
+                    <option key={s} value={s}>{s}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div>
+              <div className="mb-1 flex items-center justify-between text-xs text-slate-400">
+                <span>全局行距</span>
+                <span className="text-slate-300">{layout.lineHeight} 倍</span>
+              </div>
+              <input
+                type="range"
+                min={0}
+                max={EXAM_LINE_HEIGHTS.length - 1}
+                step={1}
+                value={Math.max(0, EXAM_LINE_HEIGHTS.findIndex((lh) => lh === layout.lineHeight))}
+                onChange={(e) => patchLayout({ lineHeight: EXAM_LINE_HEIGHTS[Number(e.target.value)] })}
+                className="w-full accent-cyan-500"
+              />
+              <div className="mt-1 flex justify-between text-[10px] text-slate-600">
+                {EXAM_LINE_HEIGHTS.map((lh) => (
+                  <span key={lh}>{lh}</span>
+                ))}
+              </div>
+            </div>
+
+            <ToggleGroup<ExamColumnMode>
+              label="分栏模式"
+              value={layout.columnMode}
+              options={[
+                { id: 'single', label: '单栏' },
+                { id: 'double', label: '双栏' },
+              ]}
+              onChange={(v) => patchLayout({ columnMode: v })}
+            />
+
+            <div>
+              <label className="mb-2 block text-xs font-medium text-slate-400">页边距（像素）</label>
+              <div className="grid grid-cols-2 gap-3">
+                <MarginSlider label="上" value={layout.margins.top} onChange={(v) => patchMargins('top', v)} />
+                <MarginSlider label="下" value={layout.margins.bottom} onChange={(v) => patchMargins('bottom', v)} />
+                <MarginSlider label="左" value={layout.margins.left} onChange={(v) => patchMargins('left', v)} />
+                <MarginSlider label="右" value={layout.margins.right} onChange={(v) => patchMargins('right', v)} />
+              </div>
+            </div>
+
+            <ToggleGroup<ExamNumberStyle>
+              label="题目序号样式"
+              value={layout.numberStyle}
+              options={[
+                { id: 'dot', label: '1.' },
+                { id: 'paren', label: '(1)' },
+                { id: 'bracket', label: '【1】' },
+              ]}
+              onChange={(v) => patchLayout({ numberStyle: v })}
+            />
+
+            <ToggleGroup<ExamOptionsLayout>
+              label="选项排列"
+              value={layout.optionsLayout}
+              options={[
+                { id: 'horizontal', label: '横向' },
+                { id: 'vertical', label: '竖向' },
+              ]}
+              onChange={(v) => patchLayout({ optionsLayout: v })}
+            />
+
+            <ToggleGroup<ExamAnswerMode>
+              label="答案展示模式"
+              value={layout.answerMode}
+              options={answerModeOptions}
+              onChange={(v) => patchLayout({ answerMode: v })}
+            />
+
+            <HeaderFooterControl
+              title="页眉"
+              config={layout.header}
+              onChange={(header) => patchLayout({ header })}
+            />
+            <HeaderFooterControl
+              title="页脚"
+              config={layout.footer}
+              onChange={(footer) => patchLayout({ footer })}
+            />
+          </div>
+
+          <div className="flex shrink-0 gap-2 border-t border-slate-700 p-4">
+            <button
+              type="button"
+              className={`${btnSecondary} flex-1 text-sm`}
+              disabled={!exam || exporting !== null}
+              onClick={() => void handleExportPdf()}
+            >
+              {exporting === 'pdf' ? '导出中…' : '导出 PDF'}
+            </button>
+            <button
+              type="button"
+              className={`${btnPrimary} flex-1 text-sm`}
+              disabled={!exam || exporting !== null}
+              onClick={handleExportWord}
+            >
+              {exporting === 'word' ? '导出中…' : '导出 Word'}
+            </button>
+          </div>
+        </aside>
+
+        {/* 右侧预览 65% */}
+        <section className="flex w-[65%] flex-col pl-4">
+          <div className="mb-2 flex items-center justify-between">
+            <h2 className="text-sm font-medium text-slate-300">实时预览</h2>
+            {exam && (
+              <span className="text-xs text-slate-500">
+                {exam.sections.reduce((n, s) => n + s.questions.length, 0)} 题 · {exam.title}
+              </span>
+            )}
+          </div>
+
+          <div ref={previewRef} className="min-h-0 flex-1 rounded-xl border border-slate-700 bg-slate-800/30 p-4">
+            {!exam ? (
+              <div className="flex h-full min-h-[400px] flex-col items-center justify-center text-center">
+                <p className="text-slate-400">暂无试卷数据</p>
+                <p className="mt-2 text-sm text-slate-500">
+                  请先在
+                  <Link to="/teacher/exam-builder" className="mx-1 text-cyan-400 hover:underline">智能组卷</Link>
+                  生成试卷，或将题目加入试题篮
+                </p>
+                <button
+                  type="button"
+                  className={`${btnSecondary} mt-4`}
+                  onClick={() => navigate('/teacher/exam-builder')}
+                >
+                  前往组卷
+                </button>
+              </div>
+            ) : (
+              <ExamLayoutPreview exam={exam} layout={layout} className="h-full" />
+            )}
+          </div>
+        </section>
+      </main>
+    </div>
+  )
+}
