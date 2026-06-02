@@ -1,4 +1,5 @@
 import batchRouter from '../api/batch/[...path].js'
+import catalogRouter from '../api/catalog/[...path].js'
 import { handleTeacherApi } from '../api/teacherApiHandler.js'
 import { getTeacherApiPathSegments } from './urlUtil.js'
 import decomposeSubmit from '../api/decompose-submit.js'
@@ -16,6 +17,17 @@ function getRequestPathname(req) {
   } catch {
     return req.url.split('?')[0] || '/'
   }
+}
+
+function ensureCatalogPathQuery(req) {
+  const pathname = getRequestPathname(req)
+  const match = pathname.match(/^\/api\/catalog\/?(.*)$/)
+  if (!match) return false
+  const rest = (match[1] || '').split('?')[0].replace(/\/$/, '')
+  if (rest && !req.query?.path) {
+    req.query = { ...(req.query ?? {}), path: rest }
+  }
+  return true
 }
 
 function ensureBatchPathQuery(req) {
@@ -37,6 +49,11 @@ export async function dispatchApiRequest(req, res) {
   if (pathname.startsWith('/api/batch')) {
     ensureBatchPathQuery(req)
     return batchRouter(req, res)
+  }
+
+  if (pathname.startsWith('/api/catalog')) {
+    ensureCatalogPathQuery(req)
+    return catalogRouter(req, res)
   }
 
   // decompose-* 独立路由
