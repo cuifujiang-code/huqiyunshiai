@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import type { BatchQuestion } from '../../lib/batchApi'
 import { questionHasImagePlaceholder } from '../../lib/batchApi'
 import { useQuestionBasket } from '../../context/QuestionBasketContext'
-import QuestionContent from '../QuestionContent'
+import MathRenderer from '../MathRenderer'
 
 const PLACEHOLDER_KP = new Set(['未分类', '测试', '未知', '无', ''])
 
@@ -127,7 +127,7 @@ function QuestionCard({ question, index }: { question: BatchQuestion; index: num
         </div>
       )}
       <div className="mb-4 text-sm leading-relaxed text-slate-100">
-        <QuestionContent text={question.content} className="text-slate-100" />
+        <MathRenderer text={question.content} className="text-slate-100" />
       </div>
 
       {/* 选项（组卷网风格：两列网格） */}
@@ -141,7 +141,7 @@ function QuestionCard({ question, index }: { question: BatchQuestion; index: num
               <span className="mt-px shrink-0 flex h-5 w-5 items-center justify-center rounded border border-slate-600 text-xs font-medium text-slate-400 group-hover:border-cyan-500/50 group-hover:text-cyan-400">
                 {OPTION_LABELS[oi]}
               </span>
-              <QuestionContent text={opt.replace(/^[A-F][.、)\s]+/, '')} className="text-slate-200" />
+              <MathRenderer text={opt.replace(/^[A-F][.、)\s]+/, '')} className="text-slate-200" />
             </div>
           ))}
         </div>
@@ -177,7 +177,7 @@ function QuestionCard({ question, index }: { question: BatchQuestion; index: num
                 <div>
                   <span className="mb-1.5 block text-xs font-semibold text-emerald-400">正确答案</span>
                   <div className="text-sm text-slate-200">
-                    <QuestionContent text={question.answer} />
+                    <MathRenderer text={question.answer} />
                   </div>
                 </div>
               )}
@@ -185,7 +185,7 @@ function QuestionCard({ question, index }: { question: BatchQuestion; index: num
                 <div>
                   <span className="mb-1.5 block text-xs font-semibold text-slate-400">解析</span>
                   <div className="text-sm leading-relaxed text-slate-300">
-                    <QuestionContent text={question.analysis} />
+                    <MathRenderer text={question.analysis} />
                   </div>
                 </div>
               )}

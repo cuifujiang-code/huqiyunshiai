@@ -12,12 +12,14 @@ body {
 }
 
 /* KaTeX 公式在深色题目预览中的可读性 */
-.question-content .katex {
+.question-content .katex,
+.math-renderer .katex {
   color: inherit;
   font-size: 1.05em;
 }
 
-.question-content .katex-display {
+.question-content .katex-display,
+.math-renderer .katex-display {
   display: block;
   margin: 0.75em 0;
   overflow-x: auto;
@@ -25,7 +27,8 @@ body {
   text-align: center;
 }
 
-.question-content .katex-display > .katex {
+.question-content .katex-display > .katex,
+.math-renderer .katex-display > .katex {
   display: inline-block;
   text-align: initial;
 }
