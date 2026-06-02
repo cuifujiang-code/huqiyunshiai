@@ -140,3 +140,32 @@ export async function uploadBatchImage(batchId, index, buffer, mimeType, kind = 
   if (!publicUrl) throw new Error('无法获取 Storage 公开 URL')
   return publicUrl
 }
+
+/**
+ * 上传题库编辑图片到 Supabase Storage
+ * @returns {string} 公开访问 URL
+ */
+export async function uploadQuestionImage(teacherId, buffer, mimeType, fileName = 'image.png') {
+  if (!buffer?.length) throw new Error('图片 buffer 为空')
+  const admin = createServiceRoleClient()
+  await ensureBatchImagesBucket()
+
+  const safeName = String(fileName).replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 80)
+  const ext = safeName.includes('.')
+    ? safeName.split('.').pop()
+    : (mimeType || 'image/png').split('/').pop()?.replace(/[^a-z0-9]/gi, '') || 'png'
+  const objectPath = `questions/${String(teacherId).trim()}/${Date.now()}_${safeName || `img.${ext}`}`
+
+  const { error: uploadErr } = await admin.storage
+    .from(BATCH_IMAGES_BUCKET)
+    .upload(objectPath, buffer, { contentType: mimeType || 'image/png', upsert: true })
+
+  if (uploadErr) {
+    throw new Error(`Storage 上传失败：${uploadErr.message}`)
+  }
+
+  const { data: urlData } = admin.storage.from(BATCH_IMAGES_BUCKET).getPublicUrl(objectPath)
+  const publicUrl = urlData?.publicUrl
+  if (!publicUrl) throw new Error('无法获取 Storage 公开 URL')
+  return publicUrl
+}

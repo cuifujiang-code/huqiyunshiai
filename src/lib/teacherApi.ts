@@ -68,6 +68,44 @@ export async function updateQuestion(teacherId: string, id: string, question: Pa
   throw new Error(r.kind === 'fallback' ? r.reason : '更新失败')
 }
 
+export async function uploadQuestionImage(
+  teacherId: string,
+  fileBase64: string,
+  fileName: string,
+  mimeType: string,
+) {
+  const r = await postApiJson<{ success: boolean; url: string }>(
+    teacherApiUrl('questions/upload-image'),
+    { teacherId, fileBase64, fileName, mimeType },
+    '上传题目图片',
+    { timeoutMs: 60000 },
+  )
+  if (r.kind === 'success' && r.data.success) return r.data.url
+  throw new Error(r.kind === 'fallback' ? r.reason : '图片上传失败')
+}
+
+export async function ocrCorrectQuestion(params: {
+  content: string
+  options?: string[]
+  answer: string
+  analysis: string
+  subject?: string
+  grade?: string
+  question_type?: string
+}) {
+  const r = await postApiJson<{
+    success: boolean
+    question: Pick<BankQuestion, 'content' | 'options' | 'answer' | 'analysis'>
+  }>(
+    teacherApiUrl('questions/ocr-correct'),
+    params,
+    'AI OCR 校正',
+    { timeoutMs: 90000 },
+  )
+  if (r.kind === 'success' && r.data.success) return r.data.question
+  throw new Error(r.kind === 'fallback' ? r.reason : 'OCR 校正失败')
+}
+
 export async function deleteQuestions(teacherId: string, ids: string[]) {
   const r = await postApiJson<{ success: boolean }>(
     teacherApiUrl('questions'),

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import DashboardHeader from '../../components/layout/DashboardHeader'
 import BatchQuestionCard from '../../components/batch/BatchQuestionCard'
 import QuestionBasket from '../../components/batch/QuestionBasket'
-import MathRenderer from '../../components/MathRenderer'
+import QuestionEditModal from '../../components/QuestionEditModal'
 import { useAuth } from '../../context/AuthContext'
 import {
   addQuestionToCatalog,
@@ -225,16 +225,12 @@ export default function QuestionLibraryPage() {
     setDropTargetId(null)
   }
 
-  const handleSaveEdit = async () => {
-    if (!editing?.id || !userId) return
-    try {
-      await updateQuestion(userId, editing.id, editing)
-      setEditing(null)
-      setMessage('保存成功')
-      loadQuestions()
-    } catch (e) {
-      setMessage(e instanceof Error ? e.message : '保存失败')
-    }
+  const handleSaveEdit = async (updated: BankQuestion) => {
+    if (!updated.id || !userId) return
+    await updateQuestion(userId, updated.id, updated)
+    setEditing(null)
+    setMessage('保存成功')
+    loadQuestions()
   }
 
   return (
@@ -406,21 +402,12 @@ export default function QuestionLibraryPage() {
       )}
 
       {editing && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
-          <div className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-slate-700 bg-slate-900 p-6">
-            <h3 className="mb-4 text-lg font-semibold">编辑题目</h3>
-            <textarea className={`${inputClass} mb-3`} rows={4} value={editing.content} onChange={(e) => setEditing({ ...editing, content: e.target.value })} />
-            <div className="mb-3 rounded-lg border border-slate-700 bg-slate-800/50 p-3 text-sm">
-              <MathRenderer text={editing.content} />
-            </div>
-            <input className={`${inputClass} mb-3`} placeholder="答案" value={editing.answer} onChange={(e) => setEditing({ ...editing, answer: e.target.value })} />
-            <textarea className={`${inputClass} mb-4`} rows={3} placeholder="解析" value={editing.analysis} onChange={(e) => setEditing({ ...editing, analysis: e.target.value })} />
-            <div className="flex justify-end gap-2">
-              <button type="button" className={btnSecondary} onClick={() => setEditing(null)}>取消</button>
-              <button type="button" className={btnPrimary} onClick={handleSaveEdit}>保存</button>
-            </div>
-          </div>
-        </div>
+        <QuestionEditModal
+          question={editing}
+          teacherId={userId}
+          onSave={handleSaveEdit}
+          onCancel={() => setEditing(null)}
+        />
       )}
 
       <QuestionBasket />

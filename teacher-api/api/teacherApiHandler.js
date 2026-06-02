@@ -1,4 +1,4 @@
-import { isSupabaseAdminConfigured } from '../server/supabaseAdmin.js'
+import { isSupabaseAdminConfigured, uploadQuestionImage } from '../server/supabaseAdmin.js'
 import * as questionBank from '../server/teacher/questionBankStore.js'
 import { splitExamToQuestions } from '../server/teacher/questionImportService.js'
 import { buildSmartExam } from '../server/teacher/examBuilderService.js'
@@ -19,7 +19,9 @@ function notConfigured(res) {
 }
 
 function needsSupabase(path) {
-  return !path.startsWith('questions-import/') && path !== 'questions/generate'
+  return !path.startsWith('questions-import/')
+    && path !== 'questions/generate'
+    && path !== 'questions/ocr-correct'
 }
 
 /** 独立教师 API 路由（部署于 api.huqiyunshiai.online） */
@@ -93,6 +95,34 @@ export async function handleTeacherApi(req, res, pathSegments = []) {
       const buffer = Buffer.from(examFileBase64, 'base64')
       const questions = await splitExamToQuestions(buffer, examFileName, { subject, grade })
       return res.status(200).json({ success: true, questions })
+    }
+
+    if (path === 'questions/upload-image' && method === 'POST') {
+      const teacherId = requireTeacher(body, query)
+      const { fileBase64, fileName, mimeType } = body
+      if (!fileBase64) {
+        return res.status(400).json({ success: false, message: '缺少 fileBase64' })
+      }
+      const buffer = Buffer.from(fileBase64, 'base64')
+      const url = await uploadQuestionImage(teacherId, buffer, mimeType || 'image/png', fileName || 'image.png')
+      return res.status(200).json({ success: true, url })
+    }
+
+    if (path === 'questions/ocr-correct' && method === 'POST') {
+      const { content, options, answer, analysis, subject, grade, question_type } = body
+      const system = `你是 K12 题目 OCR/LaTeX 校正专家。修复 OCR 乱码、错误字符、缺失标点、LaTeX 公式格式（行内 $...$，独立 $$...$$），保留原意与选项结构。只输出 JSON：{"content":"...","options":["..."],"answer":"...","analysis":"..."}`
+      const user = JSON.stringify({ content, options, answer, analysis, subject, grade, question_type })
+      const raw = await callDeepSeekAI(system, user)
+      const fixed = JSON.parse(extractJson(raw))
+      return res.status(200).json({
+        success: true,
+        question: {
+          content: String(fixed.content ?? content ?? ''),
+          options: Array.isArray(fixed.options) ? fixed.options.map(String) : (options ?? []),
+          answer: String(fixed.answer ?? answer ?? ''),
+          analysis: String(fixed.analysis ?? analysis ?? ''),
+        },
+      })
     }
 
     if (path === 'questions/generate' && method === 'POST') {
