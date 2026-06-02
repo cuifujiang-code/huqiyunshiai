@@ -1,4 +1,3 @@
-import { waitUntil } from '@vercel/functions'
 import { serializeError } from '../deepseekClient.js'
 import { forceDecomposeAndInsert } from './robustDecomposer.js'
 import {
@@ -18,16 +17,13 @@ import {
   syncImportedQuestionsFromBank,
   updateBatchProgress,
 } from './batchTaskStore.js'
-import { triggerBatchWorker } from './batchTrigger.js'
 
-const ITEMS_PER_INVOCATION = Math.min(Number(process.env.BATCH_ITEMS_PER_RUN || 1), 2)
+const ITEMS_PER_ROUND = Math.min(Number(process.env.BATCH_ITEMS_PER_RUN || 2), 10)
+const BATCH_MAX_DURATION_SEC = Number(process.env.BATCH_MAX_DURATION || 300)
+const SAFE_TIMEOUT_MS = Math.max((BATCH_MAX_DURATION_SEC - 30) * 1000, 30 * 1000)
 
-const CHAIN_INITIAL_DELAY_MS = 2000
-const CHAIN_RETRY_DELAY_STEP_MS = 2000
-const CHAIN_MAX_RETRIES = 2
-
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms))
+function isTimeUp(startMs) {
+  return Date.now() - startMs > SAFE_TIMEOUT_MS
 }
 
 /** 标记 failed 前先查 batch_question_bank，有题则强制 completed */
@@ -35,18 +31,14 @@ async function safeMarkBatchFailed(batchId, message, counts = {}) {
   try {
     const recovery = await recoverTaskStatusFromBankCount(batchId, counts)
     if (recovery.corrected) {
-      console.log('[batchWorker] 跳过 markBatchFailed，已由数据库兜底修正', {
-        batchId,
-        realCount: recovery.realCount,
-        status: recovery.status,
-        originalMessage: message,
+      console.log('[batchWorker] 跳过 markBatchFailed，数据库兜底已修正', {
+        batchId, realCount: recovery.realCount, status: recovery.status,
       })
       return recovery.status
     }
   } catch (err) {
     console.error('[batchWorker] recoverTaskStatusFromBankCount 失败', {
-      batchId,
-      err: err instanceof Error ? err.message : String(err),
+      batchId, err: err instanceof Error ? err.message : String(err),
     })
   }
   await markBatchFailed(batchId, message)
@@ -55,15 +47,10 @@ async function safeMarkBatchFailed(batchId, message, counts = {}) {
 
 /** 完全基于 batch_question_bank 真实 COUNT 判断任务最终状态 */
 async function resolveFinalBatchStatus(batchId, counts) {
-  if (counts.pending > 0 || counts.processing > 0) {
-    return null
-  }
-
+  if (counts.pending > 0 || counts.processing > 0) return null
   try {
     const { realCount, status } = await finalizeBatchTaskFromDatabase(batchId, counts)
-    if (realCount > 0 && status !== 'failed') {
-      return status
-    }
+    if (realCount > 0 && status !== 'failed') return status
     const recovery = await recoverTaskStatusFromBankCount(batchId, counts)
     if (recovery.corrected) return recovery.status
     return status
@@ -74,227 +61,84 @@ async function resolveFinalBatchStatus(batchId, counts) {
   }
 }
 
-/** 链式触发下一轮 worker（HTTP 优先，失败则 waitUntil 直调兜底） */
-async function chainNextWorker(batchId, roundNum, remainingChunks, roundItems = [], roundResults = []) {
-  const chunkSummary = roundItems.map((item, idx) => {
-    const result = roundResults[idx]
-    return {
-      itemIndex: item.item_index,
-      itemId: item.id,
-      status: result?.success ? 'completed' : (result?.error ? 'failed' : 'unknown'),
-      questionCount: result?.insertedCount ?? 0,
-    }
-  })
-  console.log(`[batchWorker] 第${roundNum}轮完成，剩余${remainingChunks}个分块`, {
-    batchId,
-    roundNum,
-    remainingChunks,
-    chunkSummary,
-  })
-
-  let delayMs = CHAIN_INITIAL_DELAY_MS
-  let lastError = '链式 worker 触发失败'
-
-  for (let attempt = 0; attempt <= CHAIN_MAX_RETRIES; attempt++) {
-    console.log('[batchWorker] 链式触发下一轮', {
-      batchId,
-      roundNum,
-      attempt: attempt + 1,
-      maxAttempts: CHAIN_MAX_RETRIES + 1,
-      delayMs,
-      remainingChunks,
-    })
-    await sleep(delayMs)
-    delayMs += CHAIN_RETRY_DELAY_STEP_MS
-
-    const result = await triggerBatchWorker(batchId)
-    if (result.ok) {
-      console.log('[batchWorker] 链式 HTTP 触发成功', { batchId, roundNum, attempt: attempt + 1 })
-      return
-    }
-
-    lastError = result.error || lastError
-    console.error('[batchWorker] 链式 HTTP 触发失败', { batchId, roundNum, attempt: attempt + 1, error: lastError })
-  }
-
-  console.warn('[batchWorker] 链式 HTTP 全部失败，改用 waitUntil 直调下一轮', { batchId, roundNum, lastError })
-  waitUntil(
-    (async () => {
-      console.log(`[Worker] waitUntil 链式续跑开始 batchId=${batchId}，第${roundNum + 1}轮`)
-      await safeRunBatchWorker(batchId)
-    })(),
-  )
-}
-
 /** 单分块：调用稳健拆题核心 forceDecomposeAndInsert */
 async function processOneItem(item, meta, batchId, teacherId) {
-  console.log('[batchWorker] 开始处理分块（robustDecomposer）', {
-    itemId: item.id,
-    itemIndex: item.item_index,
+  console.log('[batchWorker] 开始处理分块', {
+    itemId: item.id, itemIndex: item.item_index,
     chunkLength: item.chunk_text?.length ?? 0,
   })
   await markItemProcessing(item.id)
 
   try {
     const result = await forceDecomposeAndInsert(
-      batchId,
-      teacherId,
-      item.chunk_text,
-      meta.subject,
-      meta.grade,
-      {
-        itemId: item.id,
-        formulaImages: meta.formulaImages,
-        images: meta.images,
-      },
+      batchId, teacherId, item.chunk_text, meta.subject, meta.grade,
+      { itemId: item.id, formulaImages: meta.formulaImages, images: meta.images },
     )
 
-    console.log('[batchWorker] forceDecomposeAndInsert 结果', {
-      batchId,
-      itemId: item.id,
-      itemIndex: item.item_index,
-      success: result.success,
-      skipped: result.skipped ?? false,
-      insertedCount: result.insertedCount,
-      parsedCount: result.parsedCount,
-      realCount: result.realCount,
-      status: result.status,
-      model: result.model,
+    console.log('[batchWorker] decompose 结果', {
+      batchId, itemId: item.id, itemIndex: item.item_index,
+      success: result.success, skipped: result.skipped ?? false,
+      insertedCount: result.insertedCount, model: result.model,
       error: result.error ?? null,
     })
 
     if (result.skipped || result.skippedFragment) {
       await markItemCompleted(item.id, [])
-      return {
-        success: true,
-        skipped: true,
-        itemId: item.id,
-        insertedCount: 0,
-        questions: [],
-      }
+      return { success: true, skipped: true, itemId: item.id, insertedCount: 0, questions: [] }
     }
 
     if (!result.success || result.insertedCount === 0) {
-      // 如果 AI 层面已经重试过但失败了，不再重复
       const detailMsg = result.error || '稳健拆题未返回有效题目'
       await markItemFailed(item.id, detailMsg)
-      return {
-        success: false,
-        error: detailMsg,
-        itemId: item.id,
-        insertedCount: 0,
-        questions: [],
-        skipTaskFail: true,
-      }
+      return { success: false, error: detailMsg, itemId: item.id, insertedCount: 0, questions: [], skipTaskFail: true }
     }
 
     await markItemCompleted(item.id, result.questions)
-    return {
-      success: true,
-      itemId: item.id,
-      insertedCount: result.insertedCount,
-      questions: result.questions,
-    }
+    return { success: true, itemId: item.id, insertedCount: result.insertedCount, questions: result.questions }
   } catch (error) {
     const msg = error instanceof Error ? error.message : '拆题失败'
-    const detail = serializeError(error)
-    console.error('[batchWorker] 分块处理失败', {
-      itemId: item.id,
-      itemIndex: item.item_index,
-      batchId,
-      msg,
-      detail,
-    })
-    // 不立即 markItemFailed，而是将其保持 processing 状态
-    // 让 auto-retry cron 在下一轮扫描时重置并重试
-    // 仅当明确是数据问题（如文本为空）时才直接标记 failed
+    console.error('[batchWorker] 分块处理异常', { itemId: item.id, batchId, msg, detail: serializeError(error) })
     const isDataIssue = /文本为空|缺少 batchId|缺少 teacherId|chunk_text/i.test(msg)
     if (isDataIssue) {
       await markItemFailed(item.id, msg)
     } else {
-      // 保持 processing 状态，等待 auto-retry cron 超时后重置重试
-      console.warn('[batchWorker] 分块保持 processing 状态，等待 auto-retry 恢复', {
-        itemId: item.id,
-        batchId,
-        msg,
-      })
+      // 保持 processing 状态，等待 auto-retry cron 恢复
+      console.warn('[batchWorker] 分块保持 processing，等待 auto-retry', { itemId: item.id, batchId, msg })
     }
-    return {
-      success: false,
-      error: msg,
-      itemId: item.id,
-      insertedCount: 0,
-      questions: [],
-      skipTaskFail: !isDataIssue, // 非数据问题：跳过任务级 failed
-    }
+    return { success: false, error: msg, itemId: item.id, insertedCount: 0, questions: [], skipTaskFail: !isDataIssue }
   }
 }
 
+/** 串行处理一批分块（避免 DeepSeek 并发超时） */
 async function runPool(items, meta, batchId, teacherId) {
   const results = []
-
-  // 稳健拆题必须串行：避免 DeepSeek 并发超时 + sort_order 竞态
   for (const item of items) {
-    console.log('[batchWorker] 串行稳健拆题', {
-      itemIndex: item.item_index,
-      chunkLength: item.chunk_text?.length ?? 0,
-    })
-
     const outcome = await processOneItem(item, meta, batchId, teacherId)
     results.push(outcome)
-
-    console.log('[batchWorker] 分块处理完成', {
-      batchId,
-      itemIndex: item.item_index,
-      itemId: outcome.itemId,
-      success: outcome.success,
-      skipped: outcome.skipped ?? false,
-      insertedCount: outcome.insertedCount ?? 0,
-      error: outcome.error ?? null,
-    })
+    console.log('[batchWorker] 分块完成', { batchId, itemIndex: item.item_index, success: outcome.success, insertedCount: outcome.insertedCount ?? 0 })
   }
-
   await syncImportedQuestionsFromBank(batchId)
-  console.log('[batchWorker] 本轮已同步任务题目数', { batchId })
-
   return results
 }
 
 /**
- * 核心 Worker：每轮处理 ITEMS_PER_INVOCATION 个 pending 分块，调用稳健拆题核心
+ * 核心 Worker：单次函数调用内循环处理所有 pending 分块
+ * 不再依赖 HTTP 链式触发，避免 Vercel Hobby Plan 并发排队死锁
  */
-export async function runBatchWorker(batchId) {
-  try {
-    return await runBatchWorkerCore(batchId)
-  } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error)
-    console.error('[batchWorker] === 全局异常捕获 ===', {
-      batchId,
-      msg,
-      stack: error instanceof Error ? error.stack : undefined,
-    })
-    return emergencyRecover(batchId, msg)
-  }
-}
-
 async function runBatchWorkerCore(batchId) {
   console.log(`[Worker] 开始处理 batchId=${batchId}`)
+  try {
+  const startMs = Date.now()
+  let totalProcessed = 0
+  let roundNum = 0
 
   const resetCount = await resetStuckProcessingItems(batchId, Number(process.env.BATCH_STALE_MINUTES || 3))
-  if (resetCount > 0) {
-    console.log('[batchWorker] 已重置卡住分块', { batchId, resetCount })
-  }
+  if (resetCount > 0) console.log('[batchWorker] 已重置卡住分块', { batchId, resetCount })
 
   const task = await getBatchTask(batchId)
   if (!task) throw new Error('批量任务不存在')
 
-  console.log('[batchWorker] 任务快照', {
-    batchId,
-    status: task.status,
-    totalItems: task.total_items,
-    teacherId: task.teacher_id,
-    importedQuestions: task.imported_questions,
-  })
+  console.log('[batchWorker] 任务快照', { batchId, status: task.status, totalItems: task.total_items, teacherId: task.teacher_id, importedQuestions: task.imported_questions })
 
   if (task.status === 'completed') {
     console.log('[batchWorker] 任务已完成，跳过', { batchId })
@@ -302,9 +146,7 @@ async function runBatchWorkerCore(batchId) {
   }
 
   const meta = {
-    subject: task.subject,
-    grade: task.grade,
-    // 从 task.meta 读取预提取的图片映射
+    subject: task.subject, grade: task.grade,
     formulaImages: (task.meta?.formulaImages || task.meta?.formula_images || []),
     images: (task.meta?.images || task.meta?.extracted_images || []),
   }
@@ -314,70 +156,102 @@ async function runBatchWorkerCore(batchId) {
     await markBatchRunning(batchId)
   }
 
-  const pending = await fetchPendingItems(batchId, ITEMS_PER_INVOCATION)
-  console.log('[batchWorker] 待处理分块', { batchId, pendingCount: pending.length })
+  // === 主循环：处理所有 pending 分块 ===
+  while (true) {
+    roundNum++
 
-  if (!pending.length) {
-    let counts = await countItemsByStatus(batchId)
-
-    // 无 pending 但有 processing：重置卡住分块并链式续跑，避免任务永久「处理中」
-    if (counts.processing > 0) {
-      let resetCount = await resetStuckProcessingItems(batchId, 1)
-      counts = await countItemsByStatus(batchId)
-
-      if (counts.processing > 0 && counts.pending === 0) {
-        const forced = await forceResetAllProcessingItems(batchId)
-        resetCount += forced
-        counts = await countItemsByStatus(batchId)
-        console.log('[batchWorker] 无 pending，强制重置 processing→pending', {
-          batchId,
-          resetCount,
-          forced,
-          counts,
-        })
-      }
-
-      if (counts.pending > 0) {
-        await chainNextWorker(batchId, 1, counts.pending + counts.processing, [], [])
-        return { continued: true, counts, reason: 'processing_recovery' }
-      }
+    // 超时检查：在超时前 30 秒停止处理新分块，留出收尾时间
+    if (isTimeUp(startMs)) {
+      console.warn('[batchWorker] 即将超时，停止处理新分块', {
+        batchId, roundNum, elapsedSec: Math.round((Date.now() - startMs) / 1000),
+        totalProcessed, maxDurationSec: BATCH_MAX_DURATION_SEC,
+      })
+      break
     }
 
-    const finalStatus = await resolveFinalBatchStatus(batchId, counts)
-    console.log('[batchWorker] 无待处理分块，收尾', { batchId, finalStatus, counts })
-    return { done: true, status: finalStatus ?? task.status, counts }
+    const pending = await fetchPendingItems(batchId, ITEMS_PER_ROUND)
+    if (!pending.length) {
+      // 检查是否有卡住的 processing 分块
+      const counts = await countItemsByStatus(batchId)
+      if (counts.processing > 0) {
+        const forced = await resetStuckProcessingItems(batchId, 1)
+        if (forced > 0) {
+          console.log('[batchWorker] 重置卡住分块后继续', { batchId, forced })
+          continue // retry with newly reset items
+        }
+        // 仍有 processing 但无法重置：强制全部重置
+        const forcedAll = await forceResetAllProcessingItems(batchId)
+        if (forcedAll > 0) {
+          console.log('[batchWorker] 强制重置全部 processing→pending', { batchId, forcedAll })
+          continue
+        }
+      }
+
+      // 完成收尾
+      const finalStatus = await resolveFinalBatchStatus(batchId, counts)
+      console.log('[batchWorker] 全部完成', { batchId, finalStatus, counts, totalProcessed, roundNum })
+      return { done: true, status: finalStatus ?? task.status, counts, totalProcessed }
+    }
+
+    console.log(`[batchWorker] 第${roundNum}轮，处理${pending.length}个分块`, { batchId })
+    const roundResults = await runPool(pending, meta, batchId, task.teacher_id)
+    totalProcessed += pending.length
+
+    const counts = await countItemsByStatus(batchId)
+    const doneChunks = counts.completed + counts.failed
+    await updateBatchProgress(batchId, { completedItems: doneChunks, status: 'running' })
+
+    const elapsedSec = Math.round((Date.now() - startMs) / 1000)
+    console.log(`[batchWorker] 第${roundNum}轮完成，进度=${doneChunks}/${(task.total_items||0)}，耗时=${elapsedSec}s`, {
+      batchId, counts, remaining: counts.pending + counts.processing,
+    })
+
+    if (counts.pending === 0 && counts.processing === 0) {
+      const finalStatus = await resolveFinalBatchStatus(batchId, counts)
+      console.log('[batchWorker] 全部完成（无剩余分块）', { batchId, finalStatus, totalProcessed, roundNum })
+      return { done: true, status: finalStatus ?? task.status, counts, totalProcessed }
+    }
   }
 
-  const roundResults = await runPool(pending, meta, batchId, task.teacher_id)
-
-  const counts = await countItemsByStatus(batchId)
-  const doneChunks = counts.completed + counts.failed
-  const roundNum = Math.max(1, Math.ceil(doneChunks / ITEMS_PER_INVOCATION))
-  const remainingChunks = counts.pending + counts.processing
-  console.log('[batchWorker] 本轮完成，更新进度', { batchId, counts, roundNum, remainingChunks })
-  await updateBatchProgress(batchId, {
-    completedItems: doneChunks,
-    status: 'running',
+  // 超时安全退出：统计当前状态
+  const finalCounts = await countItemsByStatus(batchId)
+  console.log('[batchWorker] 超时安全退出', {
+    batchId, totalProcessed, roundNum,
+    remaining: finalCounts.pending + finalCounts.processing,
+    elapsedSec: Math.round((Date.now() - startMs) / 1000),
   })
 
-  if (counts.pending > 0 || counts.processing > 0) {
-    await chainNextWorker(batchId, roundNum, remainingChunks, pending, roundResults)
-    return { continued: true, processed: pending.length, counts, roundNum, remainingChunks }
+  if (totalProcessed === 0) {
+    // 一个都没处理成功，标记失败
+    await markBatchFailed(batchId, 'Worker 超时：未完成任何分块处理')
+    return { done: true, status: 'failed', counts: finalCounts, totalProcessed: 0, timeout: true }
   }
 
-  const finalStatus = await resolveFinalBatchStatus(batchId, counts)
-  console.log('[batchWorker] 全部完成', { batchId, finalStatus, counts })
-  return { done: true, status: finalStatus ?? 'failed', counts }
+  // 有部分完成：保持 running，等待 auto-retry 或者用户手动触发
+  return { done: true, status: 'running', counts: finalCounts, totalProcessed, timeout: true, message: '部分完成（超时），剩余分块等待下次触发' }
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error)
+    const stack = error instanceof Error ? error.stack : undefined
+    console.error('=== Worker 主循环遇到未捕获异常 ===')
+    console.error(msg)
+    console.error(stack)
+    try {
+      await markBatchFailed(batchId, msg)
+    } catch (markErr) {
+      console.error('[batchWorker] markBatchFailed 失败', {
+        batchId,
+        err: markErr instanceof Error ? markErr.message : String(markErr),
+      })
+    }
+    return { done: true, status: 'failed', message: msg }
+  }
 }
 
 export async function safeRunBatchWorker(batchId) {
-  console.log(`[Worker] 开始处理 batchId=${batchId}`)
+  console.log(`[Worker] safeRun 开始 batchId=${batchId}`)
   try {
-    const result = await runBatchWorker(batchId)
-    const isFailed = result?.status === 'failed'
-      || (result?.recovered === false && result?.status === 'failed')
-      || result?.success === false
-
+    const result = await runBatchWorkerCore(batchId)
+    const isFailed = result?.status === 'failed' || result?.success === false
     if (isFailed) {
       const msg = result?.message || 'Worker 处理失败'
       console.error(`[Worker] 处理失败 batchId=${batchId}`, { result, msg })
@@ -386,24 +260,27 @@ export async function safeRunBatchWorker(batchId) {
         return { ...result, status: correctedStatus, recovered: true }
       }
     } else {
-      console.log(`[Worker] 处理完成 batchId=${batchId}`, { result })
+      console.log(`[Worker] 处理完成 batchId=${batchId}`, {
+        status: result?.status, totalProcessed: result?.totalProcessed, timeout: result?.timeout,
+      })
     }
     return result
   } catch (error) {
-    const msg = error instanceof Error ? error.message : 'Worker 异常'
-    console.error(`[Worker] 处理失败 batchId=${batchId}`, { msg, stack: error instanceof Error ? error.stack : undefined })
+    const msg = error instanceof Error ? error.message : String(error)
+    const stack = error instanceof Error ? error.stack : undefined
+    console.error('=== Worker 处理遇到未捕获异常 ===')
+    console.error(`batchId=${batchId}`)
+    console.error(msg)
+    console.error(stack)
     try {
-      await safeMarkBatchFailed(batchId, msg)
+      await markBatchFailed(batchId, msg)
     } catch (markErr) {
-      console.error('[Worker] markBatchFailed 失败', { batchId, markErr })
-    }
-    try {
-      return await emergencyRecover(batchId, msg)
-    } catch (recoverErr) {
-      console.error('[batchWorker] emergencyRecover 也失败', {
+      console.error('[batchWorker] markBatchFailed 失败', {
         batchId,
-        msg: recoverErr instanceof Error ? recoverErr.message : String(recoverErr),
+        err: markErr instanceof Error ? markErr.message : String(markErr),
       })
+    }
+    try { return await emergencyRecover(batchId, msg) } catch {
       return { success: false, message: msg, status: 'failed', recovered: false }
     }
   }
