@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import GeoGebraBoardModal from './GeoGebraBoardModal'
 import LatexPanel from './LatexPanel'
 import MathRenderer from './MathRenderer'
 import { fileToBase64 } from '../lib/fileBase64'
@@ -52,6 +53,7 @@ export default function QuestionEditModal({
   const [correcting, setCorrecting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [latexOpen, setLatexOpen] = useState(false)
+  const [geoBoardOpen, setGeoBoardOpen] = useState(false)
   const [activeField, setActiveField] = useState<EditField>('content')
 
   const contentRef = useRef<HTMLTextAreaElement>(null)
@@ -64,11 +66,11 @@ export default function QuestionEditModal({
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !latexOpen) onCancel()
+      if (e.key === 'Escape' && !latexOpen && !geoBoardOpen) onCancel()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [latexOpen, onCancel])
+  }, [latexOpen, geoBoardOpen, onCancel])
 
   const getFieldRef = useCallback((field: EditField) => {
     if (field === 'content') return contentRef
@@ -132,12 +134,23 @@ export default function QuestionEditModal({
     }
   }, [activeField, draft, getFieldRef, updateField])
 
-  const insertImageMarkdown = useCallback((url: string) => {
-    const md = `\n![题目图片](${url})\n`
-    const field = activeField === 'answer' || activeField === 'analysis' ? activeField : 'content'
+  const getFieldValue = useCallback((field: EditField, data: BankQuestion) => {
+    if (field === 'content') return data.content
+    if (field === 'answer') return data.answer
+    if (field === 'analysis') return data.analysis
+    if (field.startsWith('option-')) {
+      const idx = Number(field.slice(7))
+      return data.options?.[idx] ?? ''
+    }
+    return data.content
+  }, [])
+
+  const insertImageMarkdown = useCallback((url: string, alt = '几何图') => {
+    const md = `\n![${alt}](${url})\n`
+    const field = activeField
     const ref = getFieldRef(field)
     const el = ref.current
-    let value = field === 'content' ? draft.content : field === 'answer' ? draft.answer : draft.analysis
+    const value = getFieldValue(field, draft)
 
     if (el && 'selectionStart' in el) {
       const { next, cursor } = insertTextAtCursor(
@@ -150,7 +163,7 @@ export default function QuestionEditModal({
     } else {
       updateField(field, value + md)
     }
-  }, [activeField, draft, getFieldRef, updateField])
+  }, [activeField, draft, getFieldRef, getFieldValue, updateField])
 
   const handleImageUpload = async (file: File) => {
     if (!file.type.startsWith('image/')) {
@@ -163,7 +176,7 @@ export default function QuestionEditModal({
       const compressed = await compressForScene(file, 'screenshot')
       const base64 = await fileToBase64(compressed.file)
       const url = await uploadQuestionImage(teacherId, base64, compressed.file.name, compressed.file.type)
-      insertImageMarkdown(url)
+      insertImageMarkdown(url, '题目图片')
       URL.revokeObjectURL(compressed.url)
     } catch (e) {
       setError(e instanceof Error ? e.message : '图片上传失败')
@@ -316,6 +329,13 @@ export default function QuestionEditModal({
                       }}
                     />
                   </label>
+                  <button
+                    type="button"
+                    className={`${btnSecondary} text-xs py-1.5`}
+                    onClick={() => setGeoBoardOpen(true)}
+                  >
+                    📐 几何画板
+                  </button>
                 </div>
 
                 {/* 题干 */}
@@ -479,6 +499,14 @@ export default function QuestionEditModal({
         onClose={() => setLatexOpen(false)}
         onInsert={insertLatex}
         className="z-[60]"
+      />
+
+      <GeoGebraBoardModal
+        open={geoBoardOpen}
+        teacherId={teacherId}
+        onInsert={insertImageMarkdown}
+        onClose={() => setGeoBoardOpen(false)}
+        onError={(msg) => setError(msg)}
       />
     </>
   )
