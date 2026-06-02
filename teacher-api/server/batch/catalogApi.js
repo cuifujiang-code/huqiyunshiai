@@ -134,7 +134,42 @@ async function listCatalogItems(groupId) {
     .order('sort_order', { ascending: true })
     .order('created_at', { ascending: true })
   if (error) throw new Error(error.message)
-  return data ?? []
+  const items = data ?? []
+  const withCounts = await Promise.all(items.map(async (item) => {
+    const { count, error: countErr } = await admin
+      .from(QUESTION_CATALOG)
+      .select('*', { count: 'exact', head: true })
+      .eq('catalog_id', item.id)
+    if (countErr) return { ...item, question_count: 0 }
+    return { ...item, question_count: count ?? 0 }
+  }))
+  return withCounts
+}
+
+async function renameCatalogItem(id, name) {
+  const admin = getSupabaseAdmin()
+  const itemId = requireString(id, 'id')
+  const itemName = requireString(name, 'name')
+  const { data, error } = await admin
+    .from(ITEMS)
+    .update({ name: itemName, updated_at: nowIso() })
+    .eq('id', itemId)
+    .select('*')
+    .maybeSingle()
+  if (error) throw new Error(error.message)
+  if (!data) throw new Error('子目录不存在')
+  return data
+}
+
+async function listCatalogQuestionIds(catalogId) {
+  const admin = getSupabaseAdmin()
+  const cid = requireString(catalogId, 'catalogId')
+  const { data, error } = await admin
+    .from(QUESTION_CATALOG)
+    .select('question_id')
+    .eq('catalog_id', cid)
+  if (error) throw new Error(error.message)
+  return (data ?? []).map((row) => row.question_id)
 }
 
 async function deleteCatalogItem(id) {
@@ -243,6 +278,18 @@ export async function handleCatalogRequest(req, res) {
     if (method === 'GET' && resource === 'items') {
       const items = await listCatalogItems(req.query?.groupId)
       return json(res, 200, { success: true, items })
+    }
+
+    // GET /api/catalog/question-ids?catalogId=
+    if (method === 'GET' && resource === 'question-ids') {
+      const questionIds = await listCatalogQuestionIds(req.query?.catalogId)
+      return json(res, 200, { success: true, questionIds })
+    }
+
+    // PUT /api/catalog/item/:id
+    if (method === 'PUT' && resource === 'item' && resourceId) {
+      const item = await renameCatalogItem(resourceId, req.body?.name)
+      return json(res, 200, { success: true, item })
     }
 
     // DELETE /api/catalog/item/:id

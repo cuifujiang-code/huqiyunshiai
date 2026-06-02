@@ -4,6 +4,7 @@ import DashboardHeader from '../components/layout/DashboardHeader'
 const CARDS = [
   { emoji: '📝', title: 'AI智能出题', desc: '快速生成整卷试题并导出 PDF', path: '/teacher/exam', accent: 'cyan' },
   { emoji: '📚', title: '我的题库', desc: '管理个人题目库，支持导入拆题与批量操作', path: '/teacher/question-bank', accent: 'blue' },
+  { emoji: '🗂️', title: '题库中心', desc: '目录树管理题目，筛选搜索与拖拽分类', path: '/teacher/question-library', accent: 'sky' },
   { emoji: '📥', title: '大批量拆题', desc: '上传 PDF/Word 试卷，AI 自动拆题入库', path: '/teacher/batch-upload', accent: 'teal' },
   { emoji: '📋', title: '智能备课', desc: '从题库选题或 AI 生成，保存备课方案', path: '/teacher/lesson-prep', accent: 'indigo' },
   { emoji: '📄', title: '智能组卷', desc: '按题型分布从题库智能组卷，不足 AI 补充', path: '/teacher/exam-builder', accent: 'violet' },

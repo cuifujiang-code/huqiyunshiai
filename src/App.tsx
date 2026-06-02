@@ -21,6 +21,7 @@ import TeacherQuestionBankPage from './pages/TeacherQuestionBankPage'
 import TeacherTaskCenterPage from './pages/TeacherTaskCenterPage'
 import TeacherBatchDecomposePage from './pages/TeacherBatchDecomposePage'
 import BatchUploadPage from './pages/teacher/BatchUploadPage'
+import QuestionLibraryPage from './pages/teacher/QuestionLibraryPage'
 
 export default function App() {
   return (
@@ -68,6 +69,14 @@ export default function App() {
               element={
                 <ProtectedRoute requiredRole="teacher">
                   <TeacherTaskCenterPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/teacher/question-library"
+              element={
+                <ProtectedRoute requiredRole="teacher">
+                  <QuestionLibraryPage />
                 </ProtectedRoute>
               }
             />
