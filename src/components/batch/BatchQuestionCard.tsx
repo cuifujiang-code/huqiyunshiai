@@ -90,7 +90,11 @@ export default function BatchQuestionCard({
   return (
     <article
       draggable={draggable}
-      onDragStart={() => onDragStart?.(q.id)}
+      onDragStart={(e) => {
+        e.dataTransfer.effectAllowed = 'move'
+        e.dataTransfer.setData('text/plain', q.id)
+        onDragStart?.(q.id)
+      }}
       onDragEnd={onDragEnd}
       className={`rounded-xl border bg-slate-900/60 p-5 transition-colors ${
         draggable ? 'cursor-grab border-slate-600/80 hover:border-cyan-500/40 active:cursor-grabbing' : 'border-slate-700/60 hover:border-slate-600/80'
