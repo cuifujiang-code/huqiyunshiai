@@ -35,7 +35,8 @@ export default async function handler(req, res) {
       }
     })()
 
-    if (pathname !== '/api' && pathname !== '/') {
+    const isHealthRoot = pathname === '/api' || pathname === '/' || pathname === '/api/index'
+    if (!isHealthRoot) {
       console.log('[api/index] 嵌套路由兜底转发', { pathname, url: req.url })
       const { dispatchApiRequest } = await import('../server/apiRouter.js')
       return dispatchApiRequest(req, res)

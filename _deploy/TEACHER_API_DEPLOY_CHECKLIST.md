@@ -69,7 +69,7 @@ teacher-api/
 ## 4. 部署步骤（Vercel）
 
 1. Vercel → **Add Project** 或已有 teacher-api 项目  
-2. **Root Directory** 设为 `teacher-api`（若从 monorepo 导入）  
+2. **Root Directory** 必须设为 `teacher-api`（若从 monorepo 导入；错误设为仓库根会导致 `/api/*` 返回主站 HTML）  
 3. Framework：**Other**（Serverless Functions）  
 4. 绑定域名 `api.huqiyunshiai.online`  
 5. Environment Variables：填入第 3 节  
