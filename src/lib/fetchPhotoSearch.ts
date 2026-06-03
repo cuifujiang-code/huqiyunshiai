@@ -1,4 +1,4 @@
-import type { PhotoSearchHistoryItem, PhotoSearchResult } from '../types/photoSearch'
+import type { PhotoSearchHistoryItem, PhotoSearchResult, SearchStatus } from '../types/photoSearch'
 import { postApiJson } from './postApiJson'
 
 export const PHOTO_SEARCH_API = '/api/student/photo-search'
@@ -10,6 +10,7 @@ export interface PhotoSearchResponse {
   success: boolean
   message?: string
   result?: PhotoSearchResult
+  searchStatus?: SearchStatus
 }
 
 export interface PhotoSearchHistoryResponse {
@@ -22,10 +23,26 @@ export interface PhotoSearchHistoryResponse {
   item?: PhotoSearchHistoryItem
 }
 
+/**
+ * 判断是否为网络层错误（fetch 失败、超时、CORS 等）
+ * 区别于服务器返回的 HTTP 错误（500 等）
+ */
+function isNetworkError(reason: string): boolean {
+  return (
+    reason.includes('网络错误') ||
+    reason.includes('NetworkError') ||
+    reason.includes('Failed to fetch') ||
+    reason.includes('请求超时') ||
+    reason.includes('AbortError') ||
+    reason.includes('ERR_')
+  )
+}
+
 export async function submitPhotoSearch(params: {
   userId?: string
   imageBase64: string
   imageName: string
+  editedOcrText?: string
 }): Promise<PhotoSearchResponse> {
   const r = await postApiJson<PhotoSearchResponse>(
     PHOTO_SEARCH_API,
@@ -33,12 +50,19 @@ export async function submitPhotoSearch(params: {
       userId: params.userId,
       imageBase64: params.imageBase64,
       imageName: params.imageName,
+      editedOcrText: params.editedOcrText,
     },
     '拍照搜题',
     { timeoutMs: SEARCH_TIMEOUT_MS },
   )
 
   if (r.kind === 'success') return r.data
+
+  // 网络层错误 → network_error
+  if (isNetworkError(r.reason)) {
+    return { success: false, message: '网络连接失败，请检查网络后重试', searchStatus: 'network_error' }
+  }
+
   return { success: false, message: r.reason }
 }
 

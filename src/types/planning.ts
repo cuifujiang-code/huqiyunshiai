@@ -318,6 +318,10 @@ export interface WeeklyReport {
   warnings: WarningItem[]
   unfinishedList: UnfinishedItem[]
   weekRange: { start: string; end: string }
+  studentId?: string
+  studentName?: string
+  planId?: string
+  planTitle?: string
 }
 
 export interface SubjectBreakdown {
@@ -351,6 +355,13 @@ export interface MonthlyReport {
   standardTotal: number
   suggestions: string[]
   month: string
+  studentId?: string
+  studentName?: string
+  planId?: string
+  planTitle?: string
+  /** 月度进步趋势（各周完成率） */
+  weeklyTrend?: { weekLabel: string; completed: number; total: number; rate: number }[]
+  weeklySummary?: WeeklyReport
 }
 
 /** 教师端全班概览 */

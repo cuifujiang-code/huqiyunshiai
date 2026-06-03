@@ -7,6 +7,7 @@ import { registerGenerateExamRoute } from './generateExamRoute.js'
 import { registerDiagnosisRoute } from './diagnosisRoute.js'
 import { registerDiagnosisAsyncRoutes } from './diagnosisAsyncRoute.js'
 import { registerPlanningRoute } from './planningRoute.js'
+import { registerPlanningReportsRoutes } from './planningReportsRoute.js'
 import { registerTeacherRoutes } from './teacherRoute.js'
 import { registerAdminRoutes } from './admin/adminRoute.js'
 import { registerStudentRoutes } from './studentRoute.js'
@@ -27,6 +28,7 @@ registerGenerateExamRoute(app)
 registerDiagnosisRoute(app)
 registerDiagnosisAsyncRoutes(app)
 registerPlanningRoute(app)
+registerPlanningReportsRoutes(app)
 registerTeacherRoutes(app)
 registerAdminRoutes(app)
 registerStudentRoutes(app)

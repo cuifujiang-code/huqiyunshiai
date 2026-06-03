@@ -221,12 +221,24 @@ export async function runPhotoSearch({ userId, imageBase64, imageName }) {
     throw new Error('阿里云 OCR 未配置，请联系管理员设置 ALIBABA_ACCESS_KEY_ID / ALIBABA_ACCESS_KEY_SECRET')
   }
 
-  const ocrText = await recognizeHandwritingBase64(imageBase64, {
-    fileName: imageName || 'photo.jpg',
-  })
+  let ocrText
+  try {
+    ocrText = await recognizeHandwritingBase64(imageBase64, {
+      fileName: imageName || 'photo.jpg',
+    })
+  } catch (ocrErr) {
+    // OCR 服务调用失败（网络/认证等），归为识别失败
+    console.error('[photoSearch] OCR 调用异常', ocrErr)
+    throw Object.assign(new Error('图片字迹模糊无法识别，请重新拍照或选择更清晰的图片'), {
+      searchStatus: 'blurry',
+    })
+  }
 
   if (normalizeText(ocrText).length < 8) {
-    throw new Error('未能识别到足够文字，请换一张更清晰的照片重试')
+    // OCR 返回文字过少 → 模糊
+    throw Object.assign(new Error('图片字迹模糊无法识别，请重新拍照或选择更清晰的图片'), {
+      searchStatus: 'blurry',
+    })
   }
 
   const candidates = await findSimilarBankQuestions(ocrText)
@@ -234,9 +246,18 @@ export async function runPhotoSearch({ userId, imageBase64, imageName }) {
 
   let result
   if (best && best._score >= 0.55) {
-    result = mapBankHit(best, ocrText)
+    // 题库直接命中 → success
+    result = { ...mapBankHit(best, ocrText), searchStatus: 'success' }
   } else {
-    result = await solveWithDeepSeek(ocrText, candidates)
+    // AI 兜底
+    const aiResult = await solveWithDeepSeek(ocrText, candidates)
+
+    if (aiResult.isMockFallback && (!best || best._score < 0.35)) {
+      // 题库无命中 + AI 不可用 → no_match
+      result = { ...aiResult, searchStatus: 'no_match' }
+    } else {
+      result = { ...aiResult, searchStatus: 'success' }
+    }
   }
 
   let historyId = null

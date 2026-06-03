@@ -98,14 +98,48 @@ export async function updateTaskProgress(data: { task_id: string; complete_rate?
 // 报表相关
 // ============================================================
 
-/** 获取周报 */
-export async function fetchWeeklyReport(params: { plan_id: string; user_id?: string; week_start?: string }): Promise<{ success: boolean; report: WeeklyReport }> {
-  return apiGet('/api/planning/weekly-report', params as Record<string, string>)
+function getReportApiBase(): string {
+  if (typeof window !== 'undefined') return window.location.origin
+  return API_BASE
 }
 
-/** 获取月报 */
-export async function fetchMonthlyReport(params: { plan_id: string; user_id?: string; month?: string }): Promise<{ success: boolean; report: MonthlyReport }> {
-  return apiGet('/api/planning/monthly-report', params as Record<string, string>)
+/** 获取周报（支持 studentId + weekStart，或兼容 plan_id） */
+export async function fetchWeeklyReport(params: {
+  studentId?: string
+  student_id?: string
+  plan_id?: string
+  planId?: string
+  weekStart?: string
+  week_start?: string
+}): Promise<{ success: boolean; report: WeeklyReport; message?: string }> {
+  const q: Record<string, string> = {}
+  const sid = params.studentId || params.student_id
+  if (sid) q.studentId = sid
+  if (params.plan_id || params.planId) q.planId = params.plan_id || params.planId || ''
+  if (params.weekStart || params.week_start) q.weekStart = params.weekStart || params.week_start || ''
+  const url = new URL(`${getReportApiBase()}/api/planning/weekly-report`)
+  Object.entries(q).forEach(([k, v]) => { if (v) url.searchParams.set(k, v) })
+  const r = await fetch(url.toString())
+  return r.json()
+}
+
+/** 获取月报（支持 studentId + month，或兼容 plan_id） */
+export async function fetchMonthlyReport(params: {
+  studentId?: string
+  student_id?: string
+  plan_id?: string
+  planId?: string
+  month?: string
+}): Promise<{ success: boolean; report: MonthlyReport; message?: string }> {
+  const q: Record<string, string> = {}
+  const sid = params.studentId || params.student_id
+  if (sid) q.studentId = sid
+  if (params.plan_id || params.planId) q.planId = params.plan_id || params.planId || ''
+  if (params.month) q.month = params.month
+  const url = new URL(`${getReportApiBase()}/api/planning/monthly-report`)
+  Object.entries(q).forEach(([k, v]) => { if (v) url.searchParams.set(k, v) })
+  const r = await fetch(url.toString())
+  return r.json()
 }
 
 /** 获取教师端全班概览 */
