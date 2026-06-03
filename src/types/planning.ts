@@ -400,3 +400,91 @@ export interface InviteCode {
   code: string
   expires_at: string
 }
+
+// ============================================================
+// 学生详细信息（教育规划增强版）
+// ============================================================
+
+export interface StudentSchoolInfo {
+  province: string      // 省份
+  city: string          // 地级市
+  district: string      // 区/县
+  schoolName: string    // 学校名称
+  grade: string         // 年级
+  className: string     // 班级
+}
+
+export interface StudentRanking {
+  classRank: number | null      // 班级排名
+  classTotal: number | null     // 班级总人数
+  schoolRank: number | null     // 校级排名
+  schoolTotal: number | null    // 年级总人数
+}
+
+export interface SubjectScore {
+  subject: string          // 学科名称
+  score: number | null     // 最近一次考试分数
+  fullScore: number        // 满分
+  classRank: number | null // 该科目班级排名
+  schoolRank: number | null // 该科目校级排名
+  scoreTrend: 'up' | 'stable' | 'down' // 分数趋势
+}
+
+export interface StudentSpecialty {
+  type: 'art' | 'music' | 'sports' | 'technology' | 'literature' | 'other'
+  name: string          // 特长名称，如"钢琴十级"
+  level: string         // 等级，如"十级"/"省级一等奖"
+  yearsOfExperience: number  // 学习年限
+  description: string   // 详细描述
+}
+
+export interface ExamDataReference {
+  province: string
+  city: string
+  year: number
+  examType: '中考' | '高考'
+  subjects: {
+    subject: string
+    avgScore: number
+    topScore: number
+    cutoffLines: { tier: string; score: number }[]
+  }[]
+  keySchools: { name: string; minScore: number; ranking: number }[]
+  updatedAt: string
+  source: string
+}
+
+// 教育规划完整表单（增强版）
+export interface EnhancedPlanningFormData {
+  // 基本信息
+  studentName: string
+  gender: '男' | '女' | ''
+  birthDate: string
+  
+  // 学校信息
+  schoolInfo: StudentSchoolInfo
+  
+  // 排名信息
+  ranking: StudentRanking
+  
+  // 目标
+  goalDirections: GoalDirection[]
+  targetSchools: string[]    // 目标学校名称列表
+  scoreLevel: ScoreLevel
+  
+  // 各科成绩
+  subjectScores: SubjectScore[]
+  
+  // 兴趣特长
+  interests: InterestTag[]
+  specialties: StudentSpecialty[]
+  
+  // 家长期望
+  parentExpectations: string
+  specialNotes: string
+  
+  // 考试数据（AI获取）
+  examDataRef?: ExamDataReference
+  
+  createdByRole?: 'teacher' | 'student'
+}

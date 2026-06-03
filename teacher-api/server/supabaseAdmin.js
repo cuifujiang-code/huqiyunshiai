@@ -9,7 +9,6 @@ export function getServiceRoleKey() {
   // 支持多种常见拼写变体
   return (
     process.env.SUPABASE_SERVICE_ROLE_KEY ||
-    process.env.SUPABASE_SERVICE_ROLE_KEY ||
     process.env.SUPABASE_SERVICE_KEY ||
     ''
   )

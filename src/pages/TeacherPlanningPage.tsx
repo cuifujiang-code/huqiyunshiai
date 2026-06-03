@@ -1,6 +1,6 @@
 import { useRef, useState, useEffect, useCallback } from 'react'
 import DashboardHeader from '../components/layout/DashboardHeader'
-import PlanningInputPanel from '../components/planning/PlanningInputPanel'
+import PlanningInputPanel, { defaultEnhancedForm } from '../components/planning/PlanningInputPanel'
 import PlanningPreviewPanel from '../components/planning/PlanningPreviewPanel'
 import PlanningReportView from '../components/planning/PlanningReportView'
 import GanttChart from '../components/planning/GanttChart'
@@ -16,30 +16,19 @@ import {
   fetchWeeklyReport, fetchMonthlyReport,
 } from '../lib/educationPlanning'
 import type {
-  PlanningFormData, PlanningReport, PlanRoute, GanttData,
+  EnhancedPlanningFormData, PlanningReport, PlanRoute, GanttData,
   WeeklyReport as WeeklyReportType, MonthlyReport as MonthlyReportType,
   TeacherStudentItem, PlanRouteCode,
 } from '../types/planning'
 
 type Tab = 'create' | 'overview' | 'detail' | 'reports' | 'binding'
 
-const defaultForm: PlanningFormData = {
-  studentName: '',
-  grade: '初二',
-  goalDirections: ['中考'],
-  scoreLevel: '良好',
-  interests: ['数学', '物理'],
-  parentExpectations: '希望冲击重点高中，同时保持学习兴趣和身心健康。',
-  specialNotes: '',
-  createdByRole: 'teacher',
-}
-
 export default function TeacherPlanningPage() {
   const { profile } = useAuth()
   const reportRef = useRef<HTMLDivElement>(null)
 
   const [tab, setTab] = useState<Tab>('create')
-  const [form, setForm] = useState<PlanningFormData>(defaultForm)
+  const [form, setForm] = useState<EnhancedPlanningFormData>(defaultEnhancedForm)
   const [report, setReport] = useState<PlanningReport | null>(null)
   const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
@@ -93,14 +82,41 @@ export default function TeacherPlanningPage() {
     } catch { /* 静默 */ }
   }, [])
 
+  /**
+   * 生成教育规划方案
+   * 将增强版表单数据转换为后端兼容格式后调用 API
+   */
   const handleGenerate = async () => {
     if (!form.studentName.trim()) { setMessage('请填写学生姓名'); setIsWarning(true); return }
     setLoading(true)
     setMessage(null)
     setIsWarning(false)
     setSaved(false)
+
     try {
-      const payload = { ...form, createdByRole: 'teacher' as const }
+      // 构建提交 payload：将增强版字段映射到后端期望的格式
+      const payload = {
+        studentName: form.studentName,
+        grade: form.schoolInfo.grade as EnhancedPlanningFormData['schoolInfo']['grade'],
+        goalDirections: form.goalDirections,
+        scoreLevel: form.scoreLevel,
+        interests: form.interests,
+        parentExpectations: form.parentExpectations,
+        specialNotes: form.specialNotes,
+        createdByRole: 'teacher' as const,
+        // 增强版额外信息（供 AI 规划引擎使用）
+        _enhanced: {
+          gender: form.gender,
+          birthDate: form.birthDate,
+          schoolInfo: form.schoolInfo,
+          ranking: form.ranking,
+          targetSchools: form.targetSchools,
+          subjectScores: form.subjectScores,
+          specialties: form.specialties,
+          examDataRef: form.examDataRef,
+        },
+      }
+
       const data = await fetchPlanningReport(payload)
       setReport(data.report!)
       setIsWarning(!!data.isMockFallback)
@@ -124,7 +140,12 @@ export default function TeacherPlanningPage() {
     if (!report) return
     setSaving(true)
     try {
-      savePlanningRecord({ form: { ...form, createdByRole: 'teacher' }, report, createdBy: 'teacher', creatorUserId: profile?.id })
+      savePlanningRecord({
+        form: { ...form, createdByRole: 'teacher' },
+        report,
+        createdBy: 'teacher',
+        creatorUserId: profile?.id,
+      })
       setSaved(true)
       setMessage('规划方案已保存，学生可在学生端查看')
       setIsWarning(false)
@@ -150,10 +171,16 @@ export default function TeacherPlanningPage() {
         {/* Tab: 创建规划 */}
         {tab === 'create' && (
           <div className="flex flex-col gap-6 lg:flex-row lg:items-stretch">
-            <div className="w-full lg:w-[40%] lg:shrink-0">
-              <PlanningInputPanel form={form} loading={loading} onChange={setForm} onGenerate={handleGenerate} />
+            <div className="w-full lg:w-[45%] lg:shrink-0">
+              <PlanningInputPanel
+                form={form}
+                loading={loading}
+                onChange={setForm}
+                onGenerate={handleGenerate}
+                showStudentName={true}
+              />
             </div>
-            <div className="w-full lg:w-[60%]">
+            <div className="w-full lg:w-[55%]">
               <PlanningPreviewPanel
                 report={report} loading={loading} message={message} isWarning={isWarning}
                 reportRef={reportRef} onExportPdf={handleExportPdf} onSave={handleSave}
