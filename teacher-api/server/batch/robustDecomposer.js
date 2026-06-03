@@ -141,29 +141,21 @@ export function cleanAiResponseString(raw) {
   return { cleaned: s, arraySlice: s.slice(first, last + 1) }
 }
 
-/** JSON.parse 失败时使用 Function 构造器回退 */
+/** JSON 解析：safeJson（注释清理 / JSON5 / 尾随逗号容错） */
 export function parseJsonArrayWithFallback(jsonStr) {
   const str = String(jsonStr ?? '').trim()
   if (!str) return []
 
   try {
-    const parsed = JSON.parse(str)
+    const parsed = safeJsonParse(str)
     return coerceToQuestionArray(parsed)
-  } catch (jsonErr) {
-    console.warn('[robustDecomposer] JSON.parse 失败，尝试 Function 构造器回退', {
-      message: jsonErr instanceof Error ? jsonErr.message : String(jsonErr),
-      preview: str.slice(0, 300),
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    console.error('[robustDecomposer] JSON 解析失败', {
+      message: msg,
+      preview: str.slice(0, 500),
     })
-  }
-
-  try {
-    // eslint-disable-next-line no-new-func
-    const fn = new Function(`return (${str})`)
-    const parsed = fn()
-    return coerceToQuestionArray(parsed)
-  } catch (fnErr) {
-    const msg = fnErr instanceof Error ? fnErr.message : String(fnErr)
-    throw new Error(`JSON 解析失败（含 Function 回退）: ${msg}`)
+    throw err instanceof Error ? err : new Error(msg)
   }
 }
 

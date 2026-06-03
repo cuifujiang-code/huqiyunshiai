@@ -1,6 +1,6 @@
 /** 专业教育题库拆题 Prompt：LaTeX 公式、几何图形、空间图形全支持 */
 
-import { extractJsonFromAiText } from './safeJson.js'
+import { extractJsonFromAiText, sanitizeJsonForParse } from './safeJson.js'
 import { IMAGE_PLACEHOLDER, FORMULA_PLACEHOLDER, IMAGE_PLACEHOLDER_RULE, JSON_EXAMPLE_WITH_LATEX, LATEX_STRICT_RULE, COMPLETE_EXTRACTION_RULE, ANALYSIS_PRESERVATION_RULE } from './batchQualityPrompts.js'
 
 const JSON_PARSE_RETRY_DELAY_MS = 2000
@@ -60,7 +60,8 @@ export function preprocessAiJsonString(rawText) {
   }
 
   const extracted = extractJsonFromAiText(s)
-  return extracted || s
+  const slice = extracted || s
+  return sanitizeJsonForParse(slice) || slice
 }
 
 /**
@@ -99,8 +100,10 @@ export async function parseJsonFromAiTextWithRetry(rawText, safeJsonParseFn) {
     }
   }
 
-  console.error('[batchPrompt] JSON.parse 最终失败，原始内容前2000字符=', fullRaw.slice(0, 2000))
-  throw lastError instanceof Error ? lastError : new Error('JSON 解析失败')
+  const preview = fullRaw.slice(0, 500)
+  console.error('[batchPrompt] JSON.parse 最终失败，原始内容前500字符=', preview)
+  const msg = lastError instanceof Error ? lastError.message : 'JSON 解析失败'
+  throw new Error(`${msg}。原始内容前500字符: ${preview}`)
 }
 
 export const BATCH_SYSTEM_PROMPT = `你是 K12 专业题库拆题引擎，对标学科网组卷网的 AI 识别标准。

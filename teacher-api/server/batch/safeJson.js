@@ -1,17 +1,41 @@
-/** 安全 JSON 解析：清理 AI 响应后再 JSON.parse，禁止 eval / new Function */
+/** 安全 JSON 解析：清理 AI 响应后 JSON.parse / JSON5，禁止 eval / new Function */
+import JSON5 from 'json5'
+
+const PARSE_ERROR_PREVIEW_LEN = 500
+
+/**
+ * 解析前清洗：注释、尾随逗号、常见单引号 JSON
+ */
+export function sanitizeJsonForParse(jsonText) {
+  let s = String(jsonText ?? '').trim()
+  if (!s) return ''
+
+  s = s.replace(/\/\*[\s\S]*?\*\//g, '')
+  s = s.replace(/\/\/[^\n\r]*/g, '')
+  s = s.replace(/,\s*([}\]])/g, '$1')
+  s = s.replace(/([{,]\s*)'([^'\\]*(?:\\.[^'\\]*)*)'\s*:/g, '$1"$2":')
+
+  const hasDoubleQuotedKeys = /"[^"\\]*(?:\\.[^"\\]*)*"\s*:/.test(s)
+  const hasSingleQuotedKeys = /'[^'\\]*(?:\\.[^'\\]*)*'\s*:/.test(s)
+  if (!hasDoubleQuotedKeys && hasSingleQuotedKeys) {
+    s = s.replace(/'/g, '"')
+  }
+
+  return s.trim()
+}
+
+/** @deprecated 使用 sanitizeJsonForParse；保留别名兼容 */
+export function repairJsonText(jsonText) {
+  return sanitizeJsonForParse(jsonText)
+}
 
 /**
  * 从 AI 原始文本中提取可解析的 JSON 字符串
- * 1. 提取 ```json ... ``` 代码块
- * 2. 去除首尾空白
- * 3. 定位第一个 '[' 或 '{' 作为 JSON 起始
- * 4. 支持中文标点包裹的"伪代码块"
  */
 export function extractJsonFromAiText(text) {
   let s = String(text ?? '').replace(/^\uFEFF/, '').trim()
   if (!s) return ''
 
-  // 所有 markdown 代码块，优先含 json 标记或内容以 [ { 开头的
   const codeBlocks = [...s.matchAll(/```(?:json|JSON)?\s*([\s\S]*?)```/gi)]
   if (codeBlocks.length) {
     const sorted = codeBlocks
@@ -28,14 +52,12 @@ export function extractJsonFromAiText(text) {
     }
   }
 
-  // 未闭合代码块：```json\n[...  无结尾 ```
   const openBlock = s.match(/```(?:json|JSON)?\s*([\s\S]*)$/i)
   if (openBlock?.[1]) {
     const sliced = sliceJsonFromText(openBlock[1].trim())
     if (sliced) return sliced
   }
 
-  // 中文标点伪代码块：「...」、「JSON」...「/JSON」
   const cnBlock = s.match(/[「【]\s*(?:json|JSON)?\s*([\s\S]*?)[」】]/i)
   if (cnBlock?.[1]) {
     const sliced = sliceJsonFromText(cnBlock[1].trim())
@@ -45,7 +67,6 @@ export function extractJsonFromAiText(text) {
   return sliceJsonFromText(s)
 }
 
-/** 从文本中截取从第一个 [ 或 { 到对应末尾的 JSON 片段 */
 function sliceJsonFromText(text) {
   const s = String(text ?? '').trim()
   if (!s) return ''
@@ -54,23 +75,35 @@ function sliceJsonFromText(text) {
   const objStart = s.indexOf('{')
 
   if (arrStart >= 0 && (objStart < 0 || arrStart <= objStart)) {
-    // 找到匹配的 ]
-    let depth = 0; let end = -1
+    let depth = 0
+    let end = -1
     for (let i = arrStart; i < s.length; i++) {
       if (s[i] === '[') depth++
-      else if (s[i] === ']') { depth--; if (depth === 0) { end = i; break } }
+      else if (s[i] === ']') {
+        depth--
+        if (depth === 0) {
+          end = i
+          break
+        }
+      }
     }
     if (end > arrStart) return s.slice(arrStart, end + 1).trim()
-    // 降级：最后一个 ]
     const lastBracket = s.lastIndexOf(']')
     if (lastBracket > arrStart) return s.slice(arrStart, lastBracket + 1).trim()
   }
 
   if (objStart >= 0) {
-    let depth = 0; let end = -1
+    let depth = 0
+    let end = -1
     for (let i = objStart; i < s.length; i++) {
       if (s[i] === '{') depth++
-      else if (s[i] === '}') { depth--; if (depth === 0) { end = i; break } }
+      else if (s[i] === '}') {
+        depth--
+        if (depth === 0) {
+          end = i
+          break
+        }
+      }
     }
     if (end > objStart) return s.slice(objStart, end + 1).trim()
     const lastBrace = s.lastIndexOf('}')
@@ -80,29 +113,16 @@ function sliceJsonFromText(text) {
   return s
 }
 
-/** 常见 AI JSON 瑕疵修复（尾随逗号、单引号、注释等） */
-function repairJsonText(jsonText) {
-  let s = String(jsonText ?? '')
-    // 去除行注释
-    .replace(/\/\/.*$/gm, '')
-    // 去除块注释
-    .replace(/\/\*[\s\S]*?\*\//g, '')
-  // 尾随逗号
-  s = s.replace(/,\s*]/g, ']').replace(/,\s*}/g, '}')
-  // 单引号 → 双引号（仅限 key）
-  s = s.replace(/'([^']+)'\s*:/g, '"$1":')
-  return s
-}
-
-/**
- * 多层 JSON 嵌套解包：AI 有时会输出 JSON 字符串嵌套
- */
 function unwrapNestedJson(str) {
   let s = str.trim()
   for (let i = 0; i < 5; i++) {
     if ((s.startsWith('"') && s.endsWith('"')) || (s.startsWith("'") && s.endsWith("'"))) {
-      try { s = JSON.parse(s); s = typeof s === 'string' ? s.trim() : JSON.stringify(s) }
-      catch { break }
+      try {
+        s = JSON.parse(s)
+        s = typeof s === 'string' ? s.trim() : JSON.stringify(s)
+      } catch {
+        break
+      }
     } else {
       break
     }
@@ -110,66 +130,95 @@ function unwrapNestedJson(str) {
   return s
 }
 
-export function safeJsonParse(text) {
-  if (text == null || text === '') {
-    throw new Error('JSON 内容为空')
+function tryNativeParse(text) {
+  try {
+    return JSON.parse(text)
+  } catch {
+    return null
   }
+}
 
-  const candidates = [
-    String(text).trim(),
-    extractJsonFromAiText(text),
-    unwrapNestedJson(String(text).trim()),
-    sliceJsonFromText(String(text).trim()),
-  ]
+function tryJson5Parse(text) {
+  try {
+    return JSON5.parse(text)
+  } catch {
+    return null
+  }
+}
 
+function buildParseError(message, raw) {
+  const preview = String(raw ?? '').slice(0, PARSE_ERROR_PREVIEW_LEN)
+  console.error('[safeJson] JSON 解析失败', { message, preview })
+  return new Error(
+    `JSON 解析失败: ${message}。原始内容前${PARSE_ERROR_PREVIEW_LEN}字符: ${preview}`,
+  )
+}
+
+function collectParseCandidates(text) {
+  const raw = String(text ?? '').trim()
+  const base = [
+    raw,
+    extractJsonFromAiText(raw),
+    unwrapNestedJson(raw),
+    sliceJsonFromText(raw),
+  ].filter(Boolean)
+
+  const candidates = []
   const seen = new Set()
-  let lastError = null
-
-  for (let ci = 0; ci < candidates.length; ci++) {
-    const candidate = candidates[ci]
-    if (!candidate) {
-      continue
-    }
-
-    for (const attempt of [candidate, repairJsonText(candidate)]) {
-      if (!attempt || seen.has(attempt)) continue
-      seen.add(attempt)
-      try {
-        const result = JSON.parse(attempt)
-        return result
-      } catch (err) {
-        lastError = err
-      }
+  const add = (t) => {
+    const v = String(t ?? '').trim()
+    if (!v || seen.has(v)) return
+    seen.add(v)
+    candidates.push(v)
+    const sanitized = sanitizeJsonForParse(v)
+    if (sanitized && !seen.has(sanitized)) {
+      seen.add(sanitized)
+      candidates.push(sanitized)
     }
   }
 
-  throw lastError instanceof Error ? lastError : new Error('JSON 解析失败')
+  for (const item of base) add(item)
+  return { raw, candidates }
+}
+
+/**
+ * 多策略解析：JSON.parse → JSON5 → 多种清洗候选
+ */
+export function parseJsonLenient(text) {
+  const { raw, candidates } = collectParseCandidates(text)
+  if (!raw && candidates.length === 0) {
+    throw buildParseError('JSON 内容为空', text)
+  }
+
+  let lastMessage = '未知错误'
+
+  for (const attempt of candidates) {
+    const native = tryNativeParse(attempt)
+    if (native !== null) return native
+
+    const json5 = tryJson5Parse(attempt)
+    if (json5 !== null) return json5
+
+    try {
+      JSON.parse(attempt)
+    } catch (err) {
+      lastMessage = err instanceof Error ? err.message : String(err)
+    }
+    try {
+      JSON5.parse(attempt)
+    } catch (err) {
+      lastMessage = err instanceof Error ? err.message : String(err)
+    }
+  }
+
+  throw buildParseError(lastMessage, raw || text)
+}
+
+export function safeJsonParse(text) {
+  return parseJsonLenient(text)
 }
 
 /** 解析 AI 拆题响应：多候选清理 + parse */
 export function safeJsonParseAiResponse(aiText) {
-  const raw = String(aiText ?? '').trim()
-  if (!raw) throw new Error('JSON 内容为空')
-
-  const candidates = [
-    extractJsonFromAiText(raw),
-    unwrapNestedJson(raw),
-    sliceJsonFromText(raw),
-    raw,
-  ]
-
-  const seen = new Set()
-  let lastError = null
-
-  for (const candidate of candidates) {
-    if (!candidate || seen.has(candidate)) continue
-    seen.add(candidate)
-    try {
-      return safeJsonParse(candidate)
-    } catch (err) {
-      lastError = err
-    }
-  }
-
-  throw lastError instanceof Error ? lastError : new Error('JSON 解析失败')
+  return parseJsonLenient(aiText)
 }
