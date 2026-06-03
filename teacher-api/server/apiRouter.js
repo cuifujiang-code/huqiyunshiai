@@ -8,6 +8,7 @@ import decomposeTasks from '../api/decompose-tasks.js'
 import decomposeProcess from '../api/decompose-process.js'
 import debugTasks from '../api/debug-tasks.js'
 import ocrCorrectApi from './batch/ocrCorrectApi.js'
+import studentApiHandler from './batch/studentApi.js'
 
 function getRequestPathname(req) {
   if (typeof req.url !== 'string' || !req.url) return '/'
@@ -66,6 +67,11 @@ export async function dispatchApiRequest(req, res) {
 
   // OCR 精修校正路由
   if (pathname === '/api/teacher/questions/ocr-correct') return ocrCorrectApi(req, res)
+
+  // 学生端 API 路由
+  if (pathname.startsWith('/api/student/')) return studentApiHandler(req, res)
+  // 教师端查看学生规划
+  if (pathname === '/api/teacher/student-plans') return studentApiHandler(req, res)
 
   const segments = getTeacherApiPathSegments(req)
   if (segments.length > 0) {
