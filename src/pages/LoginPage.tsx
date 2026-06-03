@@ -11,12 +11,14 @@ import {
 import type { UserRole } from '../lib/supabase'
 
 function defaultDashboard(role: UserRole) {
+  if (role === 'admin') return '/admin/dashboard'
   return role === 'teacher' ? '/teacher/dashboard' : '/student/dashboard'
 }
 
 function resolveRedirect(role: UserRole, redirectParam: string | null) {
   if (!redirectParam || !redirectParam.startsWith('/')) return defaultDashboard(role)
-  if (redirectParam.startsWith('/teacher/') && role !== 'teacher') return defaultDashboard(role)
+  if (redirectParam.startsWith('/admin/') && role !== 'admin') return defaultDashboard(role)
+  if (redirectParam.startsWith('/teacher/') && role !== 'teacher' && role !== 'admin') return defaultDashboard(role)
   if (redirectParam.startsWith('/student/') && role !== 'student') return defaultDashboard(role)
   return redirectParam
 }

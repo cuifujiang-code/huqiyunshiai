@@ -87,6 +87,10 @@
     "api/batch/auto-retry.js": {
       "maxDuration": 30,
       "includeFiles": "server/**"
+    },
+    "api/admin/[...path].js": {
+      "maxDuration": 30,
+      "includeFiles": "server/**"
     }
   },
   "rewrites": [

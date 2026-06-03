@@ -1,5 +1,6 @@
 import { useNavigate } from 'react-router-dom'
 import DashboardHeader from '../components/layout/DashboardHeader'
+import { useAuth } from '../context/AuthContext'
 
 const CARDS = [
   { emoji: '📝', title: 'AI智能出题', desc: '快速生成整卷试题并导出 PDF', path: '/teacher/exam', accent: 'cyan' },
@@ -13,8 +14,18 @@ const CARDS = [
   { emoji: '🎓', title: 'AI教育规划', desc: '为学生生成个性化培养路径与阶段任务', path: '/teacher/planning', accent: 'emerald' },
 ]
 
+const ADMIN_CARD = {
+  emoji: '🛡️',
+  title: '后台管理',
+  desc: '用户统计、会员开通续费、收入概览',
+  path: '/admin/dashboard',
+  accent: 'amber',
+} as const
+
 export default function TeacherDashboard() {
   const navigate = useNavigate()
+  const { profile } = useAuth()
+  const cards = profile?.role === 'admin' ? [...CARDS, ADMIN_CARD] : CARDS
 
   return (
     <div className="min-h-screen bg-slate-950 text-white">
@@ -25,7 +36,7 @@ export default function TeacherDashboard() {
           <p className="mt-2 text-sm text-slate-400">题库 → 备课 → 组卷 → 讲义 → 辅导书，一站式教学赋能</p>
         </div>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {CARDS.map((c) => (
+          {cards.map((c) => (
             <button
               key={c.path}
               type="button"

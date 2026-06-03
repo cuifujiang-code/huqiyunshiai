@@ -8,6 +8,7 @@ import { registerDiagnosisRoute } from './diagnosisRoute.js'
 import { registerDiagnosisAsyncRoutes } from './diagnosisAsyncRoute.js'
 import { registerPlanningRoute } from './planningRoute.js'
 import { registerTeacherRoutes } from './teacherRoute.js'
+import { registerAdminRoutes } from './admin/adminRoute.js'
 import { resolveChatCompletionsUrl } from './urlUtil.js'
 
 const app = express()
@@ -25,6 +26,7 @@ registerDiagnosisRoute(app)
 registerDiagnosisAsyncRoutes(app)
 registerPlanningRoute(app)
 registerTeacherRoutes(app)
+registerAdminRoutes(app)
 
 app.post('/api/auth/ensure-mock-user', async (req, res) => {
   const { phone, role } = req.body ?? {}
@@ -32,8 +34,8 @@ app.post('/api/auth/ensure-mock-user', async (req, res) => {
   if (!phone || !role) {
     return res.status(400).json({ error: '缺少 phone 或 role 参数' })
   }
-  if (role !== 'teacher' && role !== 'student') {
-    return res.status(400).json({ error: 'role 只能是 teacher 或 student' })
+  if (role !== 'teacher' && role !== 'student' && role !== 'admin') {
+    return res.status(400).json({ error: 'role 只能是 teacher、student 或 admin' })
   }
 
   const digits = String(phone).replace(/\D/g, '').slice(-11)

@@ -19,7 +19,15 @@ export default function ProtectedRoute({ children, requiredRole }: ProtectedRout
   }
 
   if (profile && profile.role !== requiredRole) {
-    const redirectTo = profile.role === 'teacher' ? '/teacher/dashboard' : '/student/dashboard'
+    if (requiredRole === 'teacher' && profile.role === 'admin') {
+      return <>{children}</>
+    }
+    const redirectTo =
+      profile.role === 'admin'
+        ? '/admin/dashboard'
+        : profile.role === 'teacher'
+          ? '/teacher/dashboard'
+          : '/student/dashboard'
     return <Navigate to={redirectTo} replace />
   }
 

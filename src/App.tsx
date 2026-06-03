@@ -23,6 +23,8 @@ import TeacherBatchDecomposePage from './pages/TeacherBatchDecomposePage'
 import BatchUploadPage from './pages/teacher/BatchUploadPage'
 import QuestionLibraryPage from './pages/teacher/QuestionLibraryPage'
 import ExamLayoutPage from './pages/teacher/ExamLayoutPage'
+import AdminDashboardPage from './pages/admin/AdminDashboardPage'
+import ProtectedRouteAdmin from './components/ProtectedRouteAdmin'
 
 export default function App() {
   return (
@@ -111,6 +113,14 @@ export default function App() {
                 <ProtectedRoute requiredRole="teacher">
                   <TeacherExamBuilderPage />
                 </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/admin/dashboard"
+              element={
+                <ProtectedRouteAdmin>
+                  <AdminDashboardPage />
+                </ProtectedRouteAdmin>
               }
             />
             <Route

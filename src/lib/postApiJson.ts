@@ -8,6 +8,8 @@ export interface ApiRequestOptions {
   method?: 'GET' | 'POST' | 'PUT' | 'DELETE'
   /** 请求超时毫秒数，默认不限制 */
   timeoutMs?: number
+  /** 附加请求头（如 Authorization） */
+  headers?: Record<string, string>
 }
 
 function isHtmlResponse(contentType: string, text: string) {
@@ -69,6 +71,7 @@ export async function postApiJson<T>(
       headers: {
         Accept: 'application/json',
         ...(method === 'POST' || method === 'PUT' || method === 'DELETE' ? { 'Content-Type': 'application/json' } : {}),
+        ...(options.headers ?? {}),
       },
       body: method === 'POST' || method === 'PUT' || method === 'DELETE' ? (body != null ? JSON.stringify(body) : undefined) : undefined,
       signal,
