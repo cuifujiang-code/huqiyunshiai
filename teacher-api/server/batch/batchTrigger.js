@@ -1,3 +1,4 @@
+import { resolveTeacherApiBase } from '../resolveTeacherApiBase.js'
 import { markBatchFailed } from './batchTaskStore.js'
 
 export function getBatchWorkerSecret() {
@@ -33,15 +34,7 @@ export function resolveBatchWorkerUrl(req) {
     return process.env.BATCH_WORKER_URL.replace(/\/$/, '')
   }
 
-  const path = '/api/batch/worker'  // 强制使用 /api/ 前缀，确保 Vercel 路由到 Function
-
-  const apiBase = (
-    process.env.TEACHER_API_URL ||
-    process.env.VITE_TEACHER_API_URL ||
-    'https://api.huqiyunshiai.online'
-  ).replace(/\/$/, '')
-
-  return `${apiBase}${path}`
+  return `${resolveTeacherApiBase()}/api/batch/worker`
 }
 
 /**

@@ -1,3 +1,5 @@
+import { resolveTeacherApiBase } from '../resolveTeacherApiBase.js'
+
 export function getDecomposeProcessSecret() {
   return process.env.DECOMPOSE_PROCESS_SECRET || process.env.SUPABASE_SERVICE_ROLE_KEY || ''
 }
@@ -6,26 +8,15 @@ export function getDecomposeProcessSecret() {
  * 解析 decompose-process worker 绝对 URL
  * 优先级（与 batchTrigger.js 保持一致）：
  *   1. DECOMPOSE_PROCESS_URL 显式配置
- *   2. TEACHER_API_URL / VITE_TEACHER_API_URL
- *   3. VERCEL_URL（Vercel 自动注入）
- *   4. 兜底域名 https://api.huqiyunshiai.online
- * 路径强制使用 /api/decompose-process（Vercel 路由要求）
+ *   2. TEACHER_API_URL / VITE_TEACHER_API_URL / https://api.huqiyunshiai.online
+ * 不使用 VERCEL_URL（*.vercel.app 预览域易导致内部回调 401）
  */
 function resolveDecomposeProcessUrl() {
   if (process.env.DECOMPOSE_PROCESS_URL) {
     return process.env.DECOMPOSE_PROCESS_URL.replace(/\/$/, '')
   }
 
-  const path = '/api/decompose-process'
-
-  const apiBase = (
-    process.env.TEACHER_API_URL ||
-    process.env.VITE_TEACHER_API_URL ||
-    (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null) ||
-    'https://api.huqiyunshiai.online'
-  ).replace(/\/$/, '')
-
-  return `${apiBase}${path}`
+  return `${resolveTeacherApiBase()}/api/decompose-process`
 }
 
 /**
@@ -48,8 +39,8 @@ export async function triggerDecomposeProcess(taskId) {
     env: {
       TEACHER_API_URL: process.env.TEACHER_API_URL || '(not set)',
       VITE_TEACHER_API_URL: process.env.VITE_TEACHER_API_URL || '(not set)',
-      VERCEL_URL: process.env.VERCEL_URL || '(not set)',
       DECOMPOSE_PROCESS_URL: process.env.DECOMPOSE_PROCESS_URL || '(not set)',
+      resolvedBase: resolveTeacherApiBase(),
     },
   })
 

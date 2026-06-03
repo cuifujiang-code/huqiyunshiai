@@ -1,19 +1,27 @@
 import nodeUrl from 'node:url'
+import { DEFAULT_TEACHER_API_ORIGIN, resolveTeacherApiBase } from './resolveTeacherApiBase.js'
 
 let legacyUrlParseShimApplied = false
 
-/** 服务端 origin，供 WHATWG URL 解析相对路径 */
+/** 服务端 origin，供 WHATWG URL 解析相对路径（优先自定义域，不用 VERCEL_URL 预览域） */
 export function getServerOrigin(req) {
-  if (process.env.VERCEL_URL) {
-    return new URL(`https://${process.env.VERCEL_URL}`).origin
+  const configured = resolveTeacherApiBase()
+  if (process.env.TEACHER_API_URL || process.env.VITE_TEACHER_API_URL) {
+    return configured
   }
+
   const host = req?.headers?.host
   if (host) {
     const proto = req.headers['x-forwarded-proto'] === 'https' ? 'https' : 'http'
-    return new URL(`${proto}://${host}`).origin
+    const origin = `${proto}://${host}`
+    if (!host.endsWith('.vercel.app')) return origin
   }
-  const port = process.env.PORT || 3001
-  return new URL(`http://127.0.0.1:${port}`).origin
+
+  if (process.env.PORT) {
+    return new URL(`http://127.0.0.1:${process.env.PORT}`).origin
+  }
+
+  return DEFAULT_TEACHER_API_ORIGIN
 }
 
 /** 基于 WHATWG URL 拼接服务端绝对地址 */

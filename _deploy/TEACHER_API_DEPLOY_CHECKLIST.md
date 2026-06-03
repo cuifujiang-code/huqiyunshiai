@@ -55,6 +55,8 @@ teacher-api/
 | `DEEPSEEK_API_KEY` | ✅ | AI 拆题、知识图谱、OCR 校正 |
 | `DEEPSEEK_API_BASE_URL` | 建议 | 默认 `https://api.deepseek.com` |
 | `DEEPSEEK_MODEL` | 建议 | 默认 `deepseek-chat` |
+| `TEACHER_API_URL` | ✅ **必设** | `https://api.huqiyunshiai.online`；内部触发 decompose-process/worker 用，**勿依赖 VERCEL_URL** |
+| `DECOMPOSE_PROCESS_SECRET` | 建议 | 与 `SUPABASE_SERVICE_ROLE_KEY` 二选一；保护 `/api/decompose-process` |
 | `ALIBABA_ACCESS_KEY_ID` | 拆题/OCR 时需要 | 与主站诊断共用 |
 | `ALIBABA_ACCESS_KEY_SECRET` | 拆题/OCR 时需要 | 同上 |
 
