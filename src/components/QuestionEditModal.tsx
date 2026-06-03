@@ -2,6 +2,9 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import GeoGebraBoardModal from './GeoGebraBoardModal'
 import LatexPanel from './LatexPanel'
 import MathRenderer from './MathRenderer'
+import QuestionRichTextEditor, {
+  type QuestionRichTextEditorHandle,
+} from './QuestionRichTextEditor'
 import { fileToBase64 } from '../lib/fileBase64'
 import { ocrCorrectQuestion, uploadQuestionImage } from '../lib/teacherApi'
 import type { BankQuestion } from '../types/teacher'
@@ -26,17 +29,6 @@ export interface QuestionEditModalProps {
   onCancel: () => void
 }
 
-function insertTextAtCursor(
-  value: string,
-  insert: string,
-  selectionStart: number,
-  selectionEnd: number,
-): { next: string; cursor: number } {
-  const next = value.slice(0, selectionStart) + insert + value.slice(selectionEnd)
-  const cursor = selectionStart + insert.length
-  return { next, cursor }
-}
-
 export default function QuestionEditModal({
   question,
   teacherId,
@@ -56,10 +48,10 @@ export default function QuestionEditModal({
   const [geoBoardOpen, setGeoBoardOpen] = useState(false)
   const [activeField, setActiveField] = useState<EditField>('content')
 
-  const contentRef = useRef<HTMLTextAreaElement>(null)
-  const answerRef = useRef<HTMLInputElement>(null)
-  const analysisRef = useRef<HTMLTextAreaElement>(null)
-  const optionRefs = useRef<(HTMLInputElement | null)[]>([])
+  const contentEditorRef = useRef<QuestionRichTextEditorHandle>(null)
+  const answerEditorRef = useRef<QuestionRichTextEditorHandle>(null)
+  const analysisEditorRef = useRef<QuestionRichTextEditorHandle>(null)
+  const optionEditorRefs = useRef<(QuestionRichTextEditorHandle | null)[]>([])
 
   const questionTypes = SUBJECT_QUESTION_TYPES[draft.subject] || ALL_QUESTION_TYPES
   const isChoice = draft.question_type === '选择题' || (draft.options?.length ?? 0) > 0
@@ -72,18 +64,18 @@ export default function QuestionEditModal({
     return () => window.removeEventListener('keydown', onKey)
   }, [latexOpen, geoBoardOpen, onCancel])
 
-  const getFieldRef = useCallback((field: EditField) => {
-    if (field === 'content') return contentRef
-    if (field === 'answer') return answerRef
-    if (field === 'analysis') return analysisRef
+  const getEditorRef = useCallback((field: EditField) => {
+    if (field === 'content') return contentEditorRef
+    if (field === 'answer') return answerEditorRef
+    if (field === 'analysis') return analysisEditorRef
     if (field.startsWith('option-')) {
       const idx = Number(field.slice(7))
-      return { current: optionRefs.current[idx] }
+      return { current: optionEditorRefs.current[idx] }
     }
-    return contentRef
+    return contentEditorRef
   }, [])
 
-  const updateField = useCallback((field: EditField, value: string, cursor?: number) => {
+  const updateField = useCallback((field: EditField, value: string) => {
     if (field === 'content') setDraft((d) => ({ ...d, content: value }))
     else if (field === 'answer') setDraft((d) => ({ ...d, answer: value }))
     else if (field === 'analysis') setDraft((d) => ({ ...d, analysis: value }))
@@ -95,95 +87,58 @@ export default function QuestionEditModal({
         return { ...d, options }
       })
     }
-    if (cursor != null) {
-      requestAnimationFrame(() => {
-        const ref = getFieldRef(field)
-        const el = ref.current
-        if (el && 'setSelectionRange' in el) {
-          el.focus()
-          el.setSelectionRange(cursor, cursor)
-        }
-      })
-    }
-  }, [getFieldRef])
-
-  const insertLatex = useCallback((latex: string) => {
-    const field = activeField
-    const ref = getFieldRef(field)
-    const el = ref.current
-    let value = ''
-    if (field === 'content') value = draft.content
-    else if (field === 'answer') value = draft.answer
-    else if (field === 'analysis') value = draft.analysis
-    else if (field.startsWith('option-')) {
-      const idx = Number(field.slice(7))
-      value = draft.options?.[idx] ?? ''
-    }
-
-    const wrapped = latex.includes('$') ? latex : `$${latex}$`
-    if (el && 'selectionStart' in el) {
-      const { next, cursor } = insertTextAtCursor(
-        value,
-        wrapped,
-        el.selectionStart ?? value.length,
-        el.selectionEnd ?? value.length,
-      )
-      updateField(field, next, cursor)
-    } else {
-      updateField(field, value + wrapped)
-    }
-  }, [activeField, draft, getFieldRef, updateField])
-
-  const getFieldValue = useCallback((field: EditField, data: BankQuestion) => {
-    if (field === 'content') return data.content
-    if (field === 'answer') return data.answer
-    if (field === 'analysis') return data.analysis
-    if (field.startsWith('option-')) {
-      const idx = Number(field.slice(7))
-      return data.options?.[idx] ?? ''
-    }
-    return data.content
   }, [])
 
-  const insertImageMarkdown = useCallback((url: string, alt = '几何图') => {
-    const md = `\n![${alt}](${url})\n`
-    const field = activeField
-    const ref = getFieldRef(field)
-    const el = ref.current
-    const value = getFieldValue(field, draft)
+  const insertLatex = useCallback((latex: string) => {
+    const wrapped = latex.includes('$') ? latex : `$${latex}$`
+    getEditorRef(activeField).current?.insertText(wrapped)
+  }, [activeField, getEditorRef])
 
-    if (el && 'selectionStart' in el) {
-      const { next, cursor } = insertTextAtCursor(
-        value,
-        md,
-        el.selectionStart ?? value.length,
-        el.selectionEnd ?? value.length,
-      )
-      updateField(field, next, cursor)
-    } else {
-      updateField(field, value + md)
-    }
-  }, [activeField, draft, getFieldRef, getFieldValue, updateField])
+  const insertImageMarkdown = useCallback((url: string, alt = '几何图') => {
+    getEditorRef(activeField).current?.insertImageMarkdown(url, alt)
+  }, [activeField, getEditorRef])
+
+  const uploadImageFile = useCallback(
+    async (file: File): Promise<string | null> => {
+      if (!file.type.startsWith('image/')) {
+        setError('请选择图片文件')
+        return null
+      }
+      setUploading(true)
+      setError(null)
+      try {
+        const compressed = await compressForScene(file, 'screenshot')
+        const base64 = await fileToBase64(compressed.file)
+        const url = await uploadQuestionImage(
+          teacherId,
+          base64,
+          compressed.file.name,
+          compressed.file.type,
+        )
+        URL.revokeObjectURL(compressed.url)
+        return url
+      } catch (e) {
+        setError(e instanceof Error ? e.message : '图片上传失败')
+        return null
+      } finally {
+        setUploading(false)
+      }
+    },
+    [teacherId],
+  )
 
   const handleImageUpload = async (file: File) => {
-    if (!file.type.startsWith('image/')) {
-      setError('请选择图片文件')
-      return
-    }
-    setUploading(true)
-    setError(null)
-    try {
-      const compressed = await compressForScene(file, 'screenshot')
-      const base64 = await fileToBase64(compressed.file)
-      const url = await uploadQuestionImage(teacherId, base64, compressed.file.name, compressed.file.type)
-      insertImageMarkdown(url, '题目图片')
-      URL.revokeObjectURL(compressed.url)
-    } catch (e) {
-      setError(e instanceof Error ? e.message : '图片上传失败')
-    } finally {
-      setUploading(false)
-    }
+    const url = await uploadImageFile(file)
+    if (url) insertImageMarkdown(url, '题目图片')
   }
+
+  const handlePasteImage = useCallback(
+    async (file: File) => {
+      const url = await uploadImageFile(file)
+      return url
+    },
+    [uploadImageFile],
+  )
 
   const handleOcrCorrect = async () => {
     setCorrecting(true)
@@ -336,19 +291,20 @@ export default function QuestionEditModal({
                   >
                     📐 几何画板
                   </button>
+                  <span className="text-xs text-slate-500">支持 Ctrl+V 粘贴图片与 MathType 公式</span>
                 </div>
 
                 {/* 题干 */}
                 <div>
                   <label className={fieldLabel()}>题干</label>
-                  <textarea
-                    ref={contentRef}
-                    className={`${inputClass} text-sm`}
-                    rows={5}
+                  <QuestionRichTextEditor
+                    ref={contentEditorRef}
                     value={draft.content}
+                    onChange={(v) => updateField('content', v)}
                     onFocus={() => setActiveField('content')}
-                    onChange={(e) => setDraft({ ...draft, content: e.target.value })}
-                    placeholder="支持 LaTeX：$行内$ 或 $$独立公式$$"
+                    onPasteImage={handlePasteImage}
+                    placeholder="支持 LaTeX：$行内$ 或 $$独立公式$$；可粘贴 MathType 公式与图片"
+                    minRows={5}
                   />
                 </div>
 
@@ -363,24 +319,24 @@ export default function QuestionEditModal({
                     </div>
                     <div className="space-y-2">
                       {(draft.options ?? []).map((opt, idx) => (
-                        <div key={idx} className="flex items-center gap-2">
-                          <span className="w-6 shrink-0 text-sm text-slate-500">
+                        <div key={idx} className="flex items-start gap-2">
+                          <span className="mt-2 w-6 shrink-0 text-sm text-slate-500">
                             {OPTION_LABELS[idx] || String.fromCharCode(65 + idx)}.
                           </span>
-                          <input
-                            ref={(el) => { optionRefs.current[idx] = el }}
-                            className={`${inputClass} flex-1 text-sm py-2`}
-                            value={opt}
-                            onFocus={() => setActiveField(`option-${idx}`)}
-                            onChange={(e) => {
-                              const options = [...(draft.options ?? [])]
-                              options[idx] = e.target.value
-                              setDraft({ ...draft, options })
-                            }}
-                          />
+                          <div className="min-w-0 flex-1">
+                            <QuestionRichTextEditor
+                              ref={(el) => { optionEditorRefs.current[idx] = el }}
+                              value={opt}
+                              onChange={(v) => updateField(`option-${idx}`, v)}
+                              onFocus={() => setActiveField(`option-${idx}`)}
+                              onPasteImage={handlePasteImage}
+                              placeholder="选项内容"
+                              minRows={2}
+                            />
+                          </div>
                           <button
                             type="button"
-                            className="shrink-0 text-xs text-red-400 hover:text-red-300"
+                            className="mt-2 shrink-0 text-xs text-red-400 hover:text-red-300"
                             onClick={() => removeOption(idx)}
                           >
                             删除
@@ -400,27 +356,28 @@ export default function QuestionEditModal({
                 {/* 答案 */}
                 <div>
                   <label className={fieldLabel()}>答案</label>
-                  <input
-                    ref={answerRef}
-                    className={`${inputClass} text-sm py-2`}
+                  <QuestionRichTextEditor
+                    ref={answerEditorRef}
                     value={draft.answer}
+                    onChange={(v) => updateField('answer', v)}
                     onFocus={() => setActiveField('answer')}
-                    onChange={(e) => setDraft({ ...draft, answer: e.target.value })}
+                    onPasteImage={handlePasteImage}
                     placeholder="正确答案"
+                    minRows={2}
                   />
                 </div>
 
                 {/* 解析 */}
                 <div>
                   <label className={fieldLabel()}>解析</label>
-                  <textarea
-                    ref={analysisRef}
-                    className={`${inputClass} text-sm`}
-                    rows={4}
+                  <QuestionRichTextEditor
+                    ref={analysisEditorRef}
                     value={draft.analysis}
+                    onChange={(v) => updateField('analysis', v)}
                     onFocus={() => setActiveField('analysis')}
-                    onChange={(e) => setDraft({ ...draft, analysis: e.target.value })}
+                    onPasteImage={handlePasteImage}
                     placeholder="题目解析"
+                    minRows={4}
                   />
                 </div>
               </div>

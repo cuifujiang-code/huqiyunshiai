@@ -116,6 +116,15 @@ function scanMathParts(text: string): Part[] {
       }
     }
 
+    const mdImgMatch = text.slice(i).match(/^!\[([^\]]*)\]\(([^)]+)\)/)
+    if (mdImgMatch) {
+      const alt = mdImgMatch[1] || '图片'
+      const src = mdImgMatch[2]
+      parts.push({ kind: 'html', value: `<img src="${src}" alt="${alt}" />` })
+      i += mdImgMatch[0].length
+      continue
+    }
+
     const imgMatch = text.slice(i).match(/^<img\b[^>]*\/?>/i)
     if (imgMatch) {
       parts.push({ kind: 'html', value: imgMatch[0] })
@@ -128,7 +137,7 @@ function scanMathParts(text: string): Part[] {
       if (text.startsWith(IMAGE_PLACEHOLDER, j)) break
       if (text.startsWith(FORMULA_PLACEHOLDER, j)) break
       if (text[j] === '$' && !isEscaped(text, j)) break
-      if (text.slice(j).match(/^<img\b/i)) break
+      if (text.slice(j).match(/^!\[|^<img\b/i)) break
       j++
     }
     const plain = text.slice(i, j)
