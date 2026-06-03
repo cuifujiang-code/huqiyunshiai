@@ -91,6 +91,14 @@
     "api/admin/[...path].js": {
       "maxDuration": 30,
       "includeFiles": "server/**"
+    },
+    "api/student/photo-search.js": {
+      "maxDuration": 60,
+      "includeFiles": "{server/**,node_modules/@alicloud/pop-core/**}"
+    },
+    "api/student/photo-search-history.js": {
+      "maxDuration": 30,
+      "includeFiles": "server/**"
     }
   },
   "rewrites": [

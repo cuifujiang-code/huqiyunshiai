@@ -21,6 +21,7 @@ const studentLinks = [
   { to: '/student/dashboard', label: '学习中心' },
   { to: '/student/diagnosis', label: 'AI学习诊断' },
   { to: '/student/planning', label: 'AI教育规划' },
+  { to: '/student/photo-search', label: '拍照搜题' },
 ]
 
 export default function FeatureNav({ role }: Props) {

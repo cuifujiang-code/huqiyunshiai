@@ -18,6 +18,13 @@ const FEATURES = [
     path: '/student/planning',
     cta: '查看规划',
   },
+  {
+    icon: '📷',
+    title: '拍照搜题',
+    desc: '拍照或上传题目，OCR 识别后智能搜题，优先匹配题库标准答案',
+    path: '/student/photo-search',
+    cta: '开始搜题',
+  },
 ]
 
 export default function StudentDashboard() {
