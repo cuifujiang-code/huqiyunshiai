@@ -8,6 +8,7 @@ import ProgressChecklist from '../components/planning/ProgressChecklist'
 import WeeklyReportCard from '../components/planning/WeeklyReportCard'
 import MonthlyReportCard from '../components/planning/MonthlyReportCard'
 import ParentBindingPanel from '../components/planning/ParentBindingPanel'
+import { printPlanningReport } from '../components/planning/PlanPrintView'
 import { useAuth } from '../context/AuthContext'
 import { exportToPdf } from '../lib/exportPdf'
 import { fetchPlanningReport } from '../lib/fetchPlanning'
@@ -359,15 +360,33 @@ export default function StudentPlanningPage() {
                 </div>
               ) : (
                 records.map((r) => (
-                  <button key={r.id} type="button" onClick={() => viewRecord(r)}
+                  <div key={r.id}
                     className={`w-full rounded-xl border p-4 text-left transition ${
                       selectedRecord?.id === r.id ? 'border-cyan-400/50 bg-cyan-500/10' : 'border-slate-700/50 bg-slate-900/60 hover:border-blue-500/30'
                     }`}>
-                    <p className="font-medium text-blue-100">{r.report.title}</p>
-                    <p className="mt-1 text-xs text-slate-500">
-                      {r.createdBy === 'teacher' ? '教师生成' : '自行创建'} · {new Date(r.createdAt).toLocaleDateString('zh-CN')}
-                    </p>
-                  </button>
+                    <button type="button" onClick={() => viewRecord(r)} className="w-full text-left">
+                      <p className="font-medium text-blue-100">{r.report.title}</p>
+                      <p className="mt-1 text-xs text-slate-500">
+                        {r.createdBy === 'teacher' ? '教师生成' : '自行创建'} · {new Date(r.createdAt).toLocaleDateString('zh-CN')}
+                      </p>
+                    </button>
+                    <div className="mt-2 flex gap-2">
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); viewRecord(r) }}
+                        className="flex-1 rounded-lg border border-cyan-500/20 px-2 py-1.5 text-xs text-cyan-200 hover:bg-cyan-500/10"
+                      >
+                        查看详情
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); printPlanningReport(r, checklistProgress) }}
+                        className="flex-1 rounded-lg bg-green-600/20 border border-green-500/30 px-2 py-1.5 text-xs text-green-200 hover:bg-green-600/30"
+                      >
+                        导出PDF
+                      </button>
+                    </div>
+                  </div>
                 ))
               )}
             </div>
@@ -381,10 +400,19 @@ export default function StudentPlanningPage() {
                         {selectedRecord.createdBy === 'teacher' ? '教师为您生成' : '您自行创建'} · {new Date(selectedRecord.createdAt).toLocaleString('zh-CN')}
                       </p>
                     </div>
-                    <button type="button" onClick={handleExportPdf} disabled={exporting}
-                      className="rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-3 py-1.5 text-xs text-cyan-200">
-                      {exporting ? '导出中…' : '导出 PDF'}
-                    </button>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => { if (selectedRecord) printPlanningReport(selectedRecord, checklistProgress) }}
+                        className="rounded-lg bg-green-600/20 border border-green-500/30 px-3 py-1.5 text-xs text-green-200 hover:bg-green-600/30"
+                      >
+                        导出PDF
+                      </button>
+                      <button type="button" onClick={handleExportPdf} disabled={exporting}
+                        className="rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-3 py-1.5 text-xs text-cyan-200">
+                        {exporting ? '导出中…' : '截图导出'}
+                      </button>
+                    </div>
                   </div>
                   <div className="max-h-[calc(100vh-220px)] overflow-y-auto">
                     <PlanningReportView

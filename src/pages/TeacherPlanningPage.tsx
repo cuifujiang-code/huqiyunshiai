@@ -1,4 +1,4 @@
-import { useRef, useState, useEffect, useCallback } from 'react'
+import { useRef, useState, useEffect, useCallback, useMemo } from 'react'
 import DashboardHeader from '../components/layout/DashboardHeader'
 import PlanningInputPanel, { defaultEnhancedForm } from '../components/planning/PlanningInputPanel'
 import PlanningPreviewPanel from '../components/planning/PlanningPreviewPanel'
@@ -7,10 +7,11 @@ import GanttChart from '../components/planning/GanttChart'
 import WeeklyReportCard from '../components/planning/WeeklyReportCard'
 import MonthlyReportCard from '../components/planning/MonthlyReportCard'
 import ParentBindingPanel from '../components/planning/ParentBindingPanel'
+import { printPlanningReport } from '../components/planning/PlanPrintView'
 import { useAuth } from '../context/AuthContext'
 import { exportToPdf } from '../lib/exportPdf'
 import { fetchPlanningReport } from '../lib/fetchPlanning'
-import { savePlanningRecord } from '../lib/planningStorage'
+import { savePlanningRecord, getTeacherPlanningRecords, deletePlanningRecord } from '../lib/planningStorage'
 import {
   fetchTeacherOverview, fetchPlanRoutes, fetchGanttData,
   fetchWeeklyReport, fetchMonthlyReport,
@@ -18,10 +19,10 @@ import {
 import type {
   EnhancedPlanningFormData, PlanningReport, PlanRoute, GanttData,
   WeeklyReport as WeeklyReportType, MonthlyReport as MonthlyReportType,
-  TeacherStudentItem, PlanRouteCode,
+  TeacherStudentItem, PlanRouteCode, SavedPlanningRecord,
 } from '../types/planning'
 
-type Tab = 'create' | 'overview' | 'detail' | 'reports' | 'binding'
+type Tab = 'create' | 'overview' | 'detail' | 'reports' | 'binding' | 'archive'
 
 export default function TeacherPlanningPage() {
   const { profile } = useAuth()
@@ -46,6 +47,14 @@ export default function TeacherPlanningPage() {
   const [weeklyReport, setWeeklyReport] = useState<WeeklyReportType | null>(null)
   const [monthlyReport, setMonthlyReport] = useState<MonthlyReportType | null>(null)
   const [selectedStudentPlanId, setSelectedStudentPlanId] = useState<string | null>(null)
+
+  // 归档状态
+  const [archiveViewingRecord, setArchiveViewingRecord] = useState<SavedPlanningRecord | null>(null)
+
+  const archiveRecords = useMemo(() => {
+    try { return getTeacherPlanningRecords(profile?.id) }
+    catch { return []; }
+  }, [profile?.id])
 
   useEffect(() => {
     fetchPlanRoutes().then((r) => { if (r.success) setRoutes(r.routes) }).catch(() => {})
@@ -166,6 +175,10 @@ export default function TeacherPlanningPage() {
           )}
           <TabBtn active={tab === 'reports'} onClick={() => setTab('reports')}>报表中心</TabBtn>
           <TabBtn active={tab === 'binding'} onClick={() => setTab('binding')}>家校管理</TabBtn>
+          <TabBtn active={tab === 'archive'} onClick={() => { setTab('archive'); setArchiveViewingRecord(null) }}>
+            规划归档
+            {archiveRecords.length > 0 && <span className="ml-1.5 inline-flex h-5 min-w-[20px] items-center justify-center rounded-full bg-[#2584FF]/30 px-1.5 text-xs">{archiveRecords.length}</span>}
+          </TabBtn>
         </div>
 
         {/* Tab: 创建规划 */}
@@ -331,6 +344,138 @@ export default function TeacherPlanningPage() {
         {tab === 'binding' && profile?.id && (
           <div className="mx-auto max-w-lg">
             <ParentBindingPanel userId={profile.id} role="teacher" />
+          </div>
+        )}
+
+        {/* Tab: 规划归档 */}
+        {tab === 'archive' && (
+          <div className="flex flex-col gap-6 lg:flex-row">
+            {/* 左侧：归档列表 */}
+            <div className="w-full space-y-3 lg:w-[38%] lg:shrink-0">
+              <h2 className="text-sm font-medium text-[#8A94A9]">所有已生成的规划方案 · 按时间排序</h2>
+
+              {archiveRecords.length === 0 ? (
+                <div className="flex flex-col items-center justify-center rounded-[12px] border border-white/[0.06] bg-[#1C2332] p-12 text-center">
+                  <svg className="mb-3 h-12 w-12 text-[#8A94A9]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4" />
+                  </svg>
+                  <p className="text-sm text-[#8A94A9]">暂无归档方案</p>
+                  <p className="mt-2 text-xs text-[#8A94A9]">请先为学生生成规划方案并保存</p>
+                  <button
+                    type="button"
+                    onClick={() => setTab('create')}
+                    className="mt-4 inline-flex items-center rounded-[8px] bg-[#2584FF] px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-[#0F70E8]"
+                  >
+                    去创建规划
+                  </button>
+                </div>
+              ) : (
+                archiveRecords.map((record) => (
+                  <div key={record.id}
+                    className={`rounded-[12px] border p-4 transition ${
+                      archiveViewingRecord?.id === record.id
+                        ? 'border-[#2584FF]/40 bg-[#2584FF]/8'
+                        : 'border-white/[0.06] bg-[#1C2332] hover:border-[#2584FF]/20'
+                    }`}
+                  >
+                    <div className="mb-3 flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-semibold text-[#E8ECF3]">{record.report.title}</p>
+                        <p className="mt-1 text-xs text-[#8A94A9]">
+                          {record.studentName} · {record.form.grade || record.report.studentProfile?.grade || '-'}
+                        </p>
+                        <p className="text-[10px] text-[#5A6275]">
+                          {new Date(record.createdAt).toLocaleDateString('zh-CN', {
+                            year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
+                          })}
+                        </p>
+                      </div>
+                    </div>
+                    {/* 目标标签 */}
+                    <div className="mb-3 flex flex-wrap gap-1.5">
+                      {(record.form.goalDirections || record.report.studentProfile?.goalDirections || []).slice(0, 3).map((g) => (
+                        <span key={g} className="rounded-full bg-[#2584FF]/15 px-2 py-0.5 text-[10px] text-[#2584FF]">{g}</span>
+                      ))}
+                      {record.report.phaseTasks && (
+                        <span className="rounded-full bg-white/[0.05] px-2 py-0.5 text-[10px] text-[#8A94A9]">
+                          {record.report.phaseTasks.length}个阶段
+                        </span>
+                      )}
+                    </div>
+                    {/* 操作按钮 */}
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setArchiveViewingRecord(archiveViewingRecord?.id === record.id ? null : record)}
+                        className="flex-1 rounded-[8px] border border-[#2584FF]/30 px-3 py-1.5 text-xs font-medium text-[#2584FF] transition hover:bg-[#2584FF]/10"
+                      >
+                        {archiveViewingRecord?.id === record.id ? '收起详情' : '查看详情'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => printPlanningReport(record)}
+                        className="flex-1 rounded-[8px] bg-[#2584FF] px-3 py-1.5 text-xs font-medium text-white transition hover:bg-[#0F70E8]"
+                      >
+                        导出PDF
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+
+            {/* 右侧：详情预览 */}
+            <div className="w-full lg:w-[62%]">
+              {archiveViewingRecord ? (
+                <div className="rounded-[12px] border border-[#2584FF]/20 bg-[#1C2332] p-5">
+                  <div className="mb-4 flex items-center justify-between">
+                    <div>
+                      <h2 className="text-lg font-semibold text-[#E8ECF3]">{archiveViewingRecord.report.title}</h2>
+                      <p className="text-xs text-[#8A94A9]">
+                        {archiveViewingRecord.studentName} · {new Date(archiveViewingRecord.createdAt).toLocaleDateString('zh-CN')}
+                      </p>
+                    </div>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => printPlanningReport(archiveViewingRecord)}
+                        className="rounded-[8px] bg-[#22C55E] px-3 py-1.5 text-xs font-medium text-white transition hover:bg-[#16A34A]"
+                      >
+                        导出PDF
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setArchiveViewingRecord(null)}
+                        className="rounded-[8px] border border-white/[0.12] px-3 py-1.5 text-xs text-[#8A94A9] transition hover:text-[#E8ECF3]"
+                      >
+                        关闭
+                      </button>
+                    </div>
+                  </div>
+                  {/* 进度统计条 */}
+                  {archiveViewingRecord.report.phaseTasks && (
+                    <div className="mb-4">
+                      <div className="mb-1 flex items-center justify-between text-xs text-[#8A94A9]">
+                        <span>阶段数：{archiveViewingRecord.report.phaseTasks.length}</span>
+                        <span>里程碑：{archiveViewingRecord.report.milestones?.length || 0}个</span>
+                        <span>风险提示：{archiveViewingRecord.report.risks?.length || 0}条</span>
+                      </div>
+                    </div>
+                  )}
+                  <div className="max-h-[calc(100vh-280px)] overflow-y-auto pr-1">
+                    <PlanningReportView report={archiveViewingRecord.report} readOnly />
+                  </div>
+                </div>
+              ) : (
+                <div className="flex min-h-[400px] flex-col items-center justify-center rounded-[12px] border border-white/[0.06] bg-[#1C2332] p-12 text-center">
+                  <svg className="mb-3 h-12 w-12 text-[#8A94A9]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                  </svg>
+                  <p className="text-sm text-[#8A94A9]">请从左侧选择一条规划方案</p>
+                  <p className="mt-2 text-xs text-[#5A6275]">点击"查看详情"按钮可预览完整报告</p>
+                </div>
+              )}
+            </div>
           </div>
         )}
       </main>
