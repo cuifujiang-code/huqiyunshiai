@@ -105,6 +105,16 @@ export async function deleteQuestions(teacherId, ids) {
   if (error) throw new Error(error.message)
 }
 
+export async function updateQuestionsVisibility(teacherId, ids, visibility) {
+  const admin = getSupabaseAdmin()
+  const { error } = await admin
+    .from(TABLE)
+    .update({ visibility, updated_at: nowIso() })
+    .eq('teacher_id', teacherId)
+    .in('id', ids)
+  if (error) throw new Error(error.message)
+}
+
 export async function updateQuestionsTags(teacherId, ids, tags) {
   const admin = getSupabaseAdmin()
   const { error } = await admin
@@ -123,4 +133,86 @@ export async function pickQuestionsForExam(teacherId, criteria) {
   const { data, error } = await query.limit(500)
   if (error) throw new Error(error.message)
   return data ?? []
+}
+
+/**
+ * 从知识点自动汇聚生成专题列表
+ * 规则：
+ *   1. 知识点含「/」时，取第一段作为专题（如「函数/一次函数」→「函数」）
+ *   2. 知识点含「-」或「——」时，取第一段作为专题
+ *   3. 否则将整个知识点视为一个专题
+ *   4. 匹配预定义专题关键词表（函数、几何、概率、力学、电学、热学等）
+ */
+const TOPIC_KEYWORDS_BY_SUBJECT = {
+  '数学': ['函数', '几何', '代数', '概率', '统计', '三角函数', '数列', '向量', '导数', '积分', '集合', '逻辑', '不等式', '复数', '立体几何', '解析几何', '排列组合'],
+  '物理': ['力学', '电学', '热学', '光学', '声学', '原子物理', '电磁学', '近代物理', '波', '能量', '动量'],
+  '化学': ['无机化学', '有机化学', '物理化学', '分析化学', '电化学', '反应原理', '元素化合物', '化学平衡', '溶液', '氧化还原'],
+  '语文': ['现代文阅读', '古诗文阅读', '写作', '语言文字运用', '名著导读', '口语交际', '综合性学习'],
+  '英语': ['语法', '词汇', '阅读', '写作', '听力', '完形填空', '书面表达', '七选五', '短文改错'],
+  '生物': ['细胞', '遗传', '进化', '生态', '人体生理', '植物生理', '微生物', '生物技术', '生物工程'],
+  '历史': ['中国古代史', '中国近现代史', '世界史', '政治史', '经济史', '文化史', '战争与和平'],
+  '地理': ['自然地理', '人文地理', '区域地理', '地图', '气候', '地貌', '水文', '人口', '城市', '农业', '工业', '交通'],
+}
+
+/** 从单个知识点文本提取专题 */
+function extractTopicFromKnowledgePoint(kp, subject) {
+  if (!kp) return '未分类'
+  if (kp.includes('/')) return kp.split('/')[0].trim()
+  const dashMatch = kp.split(/——|-/)
+  if (dashMatch.length > 1) return dashMatch[0].trim()
+  const keywords = TOPIC_KEYWORDS_BY_SUBJECT[subject] || []
+  for (const kw of keywords) {
+    if (kp.includes(kw)) return kw
+  }
+  return kp.trim()
+}
+
+export async function listTopics(teacherId, subject) {
+  const admin = getSupabaseAdmin()
+  let query = admin.from(TABLE).select('knowledge_point,subject').eq('teacher_id', teacherId)
+  if (subject) query = query.eq('subject', subject)
+  const { data, error } = await query
+  if (error) throw new Error(error.message)
+  const topicSet = new Map()
+  for (const row of data ?? []) {
+    const kp = row.knowledge_point || ''
+    const subj = row.subject || '未分类'
+    const topic = extractTopicFromKnowledgePoint(kp, subj)
+    if (!topic) continue
+    const existing = topicSet.get(topic)
+    if (existing) {
+      topicSet.set(topic, { subject: existing.subject, count: existing.count + 1 })
+    } else {
+      topicSet.set(topic, { subject: subj, count: 1 })
+    }
+  }
+  const result = {}
+  for (const [topic, { subject: subj, count }] of topicSet.entries()) {
+    if (!result[subj]) result[subj] = []
+    result[subj].push({ topic, count })
+  }
+  for (const key of Object.keys(result)) {
+    result[key].sort((a, b) => b.count - a.count)
+  }
+  return result
+}
+
+/** 获取各学科/专题的题目数量统计 */
+export async function getQuestionStats(teacherId) {
+  const admin = getSupabaseAdmin()
+  const { data, error } = await admin
+    .from(TABLE)
+    .select('subject,knowledge_point')
+    .eq('teacher_id', teacherId)
+  if (error) throw new Error(error.message)
+  const subjectCounts = {}
+  const topicCounts = {}
+  for (const row of data ?? []) {
+    const subj = row.subject || '未分类'
+    subjectCounts[subj] = (subjectCounts[subj] || 0) + 1
+    const topic = extractTopicFromKnowledgePoint(row.knowledge_point || '', subj)
+    if (!topicCounts[subj]) topicCounts[subj] = {}
+    topicCounts[subj][topic] = (topicCounts[subj][topic] || 0) + 1
+  }
+  return { subjectCounts, topicCounts }
 }

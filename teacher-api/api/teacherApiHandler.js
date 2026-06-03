@@ -126,6 +126,21 @@ export async function handleTeacherApi(req, res, pathSegments = []) {
       })
     }
 
+    if (path === 'questions/topics' && method === 'GET') {
+      const teacherId = query.teacherId
+      if (!teacherId) return res.status(400).json({ success: false, message: '缺少 teacherId' })
+      const subject = query.subject || ''
+      const topics = await questionBank.listTopics(teacherId, subject || undefined)
+      return res.status(200).json({ success: true, topics })
+    }
+
+    if (path === 'questions/stats' && method === 'GET') {
+      const teacherId = query.teacherId
+      if (!teacherId) return res.status(400).json({ success: false, message: '缺少 teacherId' })
+      const stats = await questionBank.getQuestionStats(teacherId)
+      return res.status(200).json({ success: true, stats })
+    }
+
     if (path === 'questions/generate' && method === 'POST') {
       const { subject, grade, question_type, difficulty, knowledge_point } = body
       const prompt = `生成一道${grade}${subject}${question_type}，难度${difficulty}，知识点${knowledge_point}。返回 JSON: content, options, answer, analysis, knowledge_point`

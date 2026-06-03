@@ -12,6 +12,8 @@ import {
   createQuestion,
   deleteQuestions,
   fetchQuestions,
+  fetchQuestionStats,
+  fetchTopics,
   submitDecomposeTask,
   updateQuestion,
 } from '../lib/teacherApi'
@@ -521,6 +523,112 @@ function TreeNodeItem(props: {
               onSelect={onSelect}
             />
           ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/* ===================================================================
+   Sub-component: SubjectTopicBar (学科标签 + 专题筛选 + 统计)
+   =================================================================== */
+
+function SubjectTopicBar(props: {
+  stats: { subjectCounts: Record<string, number>; topicCounts: Record<string, Record<string, number>> } | null
+  topics: Record<string, { topic: string; count: number }[]> | null
+  selectedSubject: string
+  selectedTopic: string
+  onSubjectChange: (subject: string) => void
+  onTopicChange: (topic: string) => void
+}) {
+  const { stats, topics, selectedSubject, selectedTopic, onSubjectChange, onTopicChange } = props
+
+  const allSubjects = ['数学', '语文', '英语', '物理', '化学', '生物', '历史', '地理', '政治']
+
+  if (!stats) {
+    return (
+      <div className="flex items-center gap-2 mb-3">
+        <span className="text-xs text-[#6B7394]">加载统计中...</span>
+      </div>
+    )
+  }
+
+  const currentTopics = topics?.[selectedSubject] || []
+  const hasData = Object.keys(stats.subjectCounts).length > 0
+
+  return (
+    <div className="mb-3 space-y-2">
+      {/* 学科标签栏 */}
+      <div className="flex items-center gap-1.5 flex-wrap">
+        <span className="text-[11px] text-[#6B7394] mr-1 shrink-0">学科：</span>
+        <button
+          type="button"
+          className={`rounded-[8px] px-3 py-1 text-xs font-medium transition border ${
+            !selectedSubject
+              ? 'bg-[#2584FF] text-white border-[#2584FF]'
+              : 'bg-white/[0.03] text-[#C8CFDF] border-white/[0.06] hover:bg-white/[0.06]'
+          }`}
+          onClick={() => onSubjectChange('')}
+        >
+          全部
+          {hasData && <span className="ml-1 opacity-60">{Object.values(stats.subjectCounts).reduce((a, b) => a + b, 0)}</span>}
+        </button>
+        {allSubjects.map((subj) => {
+          const count = stats.subjectCounts[subj] || 0
+          const isActive = selectedSubject === subj
+          return (
+            <button
+              key={subj}
+              type="button"
+              className={`rounded-[8px] px-3 py-1 text-xs font-medium transition border ${
+                isActive
+                  ? 'bg-[#2584FF]/15 text-[#5C9DFF] border-[#2584FF]/30'
+                  : count > 0
+                    ? 'bg-white/[0.03] text-[#C8CFDF] border-white/[0.06] hover:bg-white/[0.06]'
+                    : 'bg-white/[0.01] text-[#6B7394] border-white/[0.03] opacity-50'
+              }`}
+              onClick={() => onSubjectChange(isActive ? '' : subj)}
+            >
+              {subj}
+              {count > 0 && <span className={`ml-1 text-[10px] ${isActive ? 'text-[#5C9DFF]' : 'text-[#8A94A9]'}`}>{count}</span>}
+            </button>
+          )
+        })}
+      </div>
+
+      {/* 专题筛选栏（仅当选中学科时显示） */}
+      {selectedSubject && currentTopics.length > 0 && (
+        <div className="flex items-center gap-1 flex-wrap">
+          <span className="text-[11px] text-[#6B7394] mr-1 shrink-0">专题：</span>
+          <button
+            type="button"
+            className={`rounded-[6px] px-2.5 py-0.5 text-[11px] transition border ${
+              !selectedTopic
+                ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/25'
+                : 'bg-white/[0.02] text-[#8A94A9] border-white/[0.04] hover:bg-white/[0.04] hover:text-[#C8CFDF]'
+            }`}
+            onClick={() => onTopicChange('')}
+          >
+            全部专题
+          </button>
+          {currentTopics.map(({ topic, count }) => {
+            const isActive = selectedTopic === topic
+            return (
+              <button
+                key={topic}
+                type="button"
+                className={`rounded-[6px] px-2.5 py-0.5 text-[11px] transition border ${
+                  isActive
+                    ? 'bg-[#2584FF]/15 text-[#5C9DFF] border-[#2584FF]/30'
+                    : 'bg-white/[0.02] text-[#8A94A9] border-white/[0.04] hover:bg-white/[0.04] hover:text-[#C8CFDF]'
+                }`}
+                onClick={() => onTopicChange(isActive ? '' : topic)}
+              >
+                {topic}
+                <span className={`ml-1 opacity-70 ${isActive ? 'text-[#5C9DFF]' : ''}`}>{count}</span>
+              </button>
+            )
+          })}
         </div>
       )}
     </div>
@@ -1065,6 +1173,11 @@ export default function TeacherQuestionBankPage() {
   // Exam basket
   const [examBasket, setExamBasket] = useState<string[]>([])
 
+  // Subject/Topic quick filter
+  const [subjectTopics, setSubjectTopics] = useState<Record<string, { topic: string; count: number }[]> | null>(null)
+  const [questionStats, setQuestionStats] = useState<{ subjectCounts: Record<string, number>; topicCounts: Record<string, Record<string, number>> } | null>(null)
+  const [quickTopicTag, setQuickTopicTag] = useState('')
+
   // Scroll to top on filter/page change
   const mainRef = useRef<HTMLDivElement>(null)
 
@@ -1104,6 +1217,35 @@ export default function TeacherQuestionBankPage() {
   useEffect(() => {
     load()
   }, [load])
+
+  /* ---- Load topics & stats ---- */
+  useEffect(() => {
+    if (!teacherId) return
+    let cancelled = false
+    Promise.all([
+      fetchTopics(teacherId).catch(() => null),
+      fetchQuestionStats(teacherId).catch(() => null),
+    ]).then(([topics, stats]) => {
+      if (cancelled) return
+      setSubjectTopics(topics)
+      setQuestionStats(stats)
+    })
+    return () => { cancelled = true }
+  }, [teacherId])
+
+  /* ---- Quick subject/topic handlers ---- */
+  const handleQuickSubject = useCallback((subject: string) => {
+    setFilters((f) => ({ ...f, subject, knowledge_point: '', grade: '' }))
+    setQuickTopicTag('')
+    setSelectedTreeNode(null)
+    setPage(1)
+  }, [])
+
+  const handleQuickTopic = useCallback((topic: string) => {
+    setQuickTopicTag(topic)
+    setFilters((f) => ({ ...f, knowledge_point: topic }))
+    setPage(1)
+  }, [])
 
   /* ---- Build active tags from filters ---- */
   const activeTagChips = useMemo((): ActiveTag[] => {
@@ -1187,6 +1329,7 @@ export default function TeacherQuestionBankPage() {
       grade: path.grade || f.grade,
       knowledge_point: path.knowledge_point || '',
     }))
+    setQuickTopicTag('')
     setPage(1)
   }, [])
 
@@ -1213,6 +1356,7 @@ export default function TeacherQuestionBankPage() {
     })
     setActiveFilterTags([])
     setSelectedTreeNode(null)
+    setQuickTopicTag('')
     setPage(1)
   }, [filters.visibility])
 
@@ -1369,7 +1513,7 @@ export default function TeacherQuestionBankPage() {
                 className={`rounded-[8px] px-4 py-2 text-sm font-medium transition ${
                   !isPublicTab ? 'bg-[#2584FF] text-white shadow' : 'text-[#8A94A9] hover:text-[#E8ECF3]'
                 }`}
-                onClick={() => { setFilters({ ...filters, visibility: 'personal', subject: '', grade: '', knowledge_point: '' }); setPage(1); setSelected([]); setSelectedTreeNode(null); setActiveFilterTags([]) }}
+                onClick={() => { setFilters({ ...filters, visibility: 'personal', subject: '', grade: '', knowledge_point: '' }); setPage(1); setSelected([]); setSelectedTreeNode(null); setActiveFilterTags([]); setQuickTopicTag('') }}
               >
                 我的题库
               </button>
@@ -1378,7 +1522,7 @@ export default function TeacherQuestionBankPage() {
                 className={`rounded-[8px] px-4 py-2 text-sm font-medium transition ${
                   isPublicTab ? 'bg-emerald-600 text-white shadow' : 'text-[#8A94A9] hover:text-[#E8ECF3]'
                 }`}
-                onClick={() => { setFilters({ ...filters, visibility: 'public', subject: '', grade: '', knowledge_point: '' }); setPage(1); setSelected([]); setSelectedTreeNode(null); setActiveFilterTags([]) }}
+                onClick={() => { setFilters({ ...filters, visibility: 'public', subject: '', grade: '', knowledge_point: '' }); setPage(1); setSelected([]); setSelectedTreeNode(null); setActiveFilterTags([]); setQuickTopicTag('') }}
               >
                 公域题库
               </button>
@@ -1459,6 +1603,14 @@ export default function TeacherQuestionBankPage() {
 
           {/* Active path + filter chips */}
           <div className="shrink-0 px-5 pt-3">
+            <SubjectTopicBar
+              stats={questionStats}
+              topics={subjectTopics}
+              selectedSubject={filters.subject}
+              selectedTopic={quickTopicTag}
+              onSubjectChange={handleQuickSubject}
+              onTopicChange={handleQuickTopic}
+            />
             <ActivePathBar selected={selectedTreeNode} />
             <FilterChips chips={activeTagChips} onClearAll={hasFilters ? handleClearAll : undefined} />
           </div>

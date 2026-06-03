@@ -265,6 +265,28 @@ export async function splitExamPaper(
   throw new Error(r.kind === 'fallback' ? r.reason : '拆题失败')
 }
 
+export async function fetchTopics(teacherId: string, subject?: string) {
+  const params = new URLSearchParams({ teacherId })
+  if (subject) params.set('subject', subject)
+  const url = `${teacherApiUrl('questions/topics')}?${params}`
+  const r = await postApiJson<{ success: boolean; topics: Record<string, { topic: string; count: number }[]> }>(
+    url, null, '专题列表',
+    { method: 'GET', timeoutMs: 15000 },
+  )
+  if (r.kind === 'success' && r.data.success) return r.data.topics
+  throw new Error(r.kind === 'fallback' ? r.reason : '加载专题失败')
+}
+
+export async function fetchQuestionStats(teacherId: string) {
+  const url = `${teacherApiUrl('questions/stats')}?teacherId=${encodeURIComponent(teacherId)}`
+  const r = await postApiJson<{
+    success: boolean
+    stats: { subjectCounts: Record<string, number>; topicCounts: Record<string, Record<string, number>> }
+  }>(url, null, '题目统计', { method: 'GET', timeoutMs: 15000 })
+  if (r.kind === 'success' && r.data.success) return r.data.stats
+  throw new Error(r.kind === 'fallback' ? r.reason : '加载统计失败')
+}
+
 export async function generateQuestion(params: {
   subject: string
   grade: string
