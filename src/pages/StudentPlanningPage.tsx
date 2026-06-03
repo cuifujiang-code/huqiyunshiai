@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, type ReactNode } from 'react'
+import { useMemo, useRef, useState, useCallback, type ReactNode } from 'react'
 import DashboardHeader from '../components/layout/DashboardHeader'
 import PlanningInputPanel from '../components/planning/PlanningInputPanel'
 import PlanningPreviewPanel from '../components/planning/PlanningPreviewPanel'
@@ -7,7 +7,9 @@ import { useAuth } from '../context/AuthContext'
 import { exportToPdf } from '../lib/exportPdf'
 import { fetchPlanningReport } from '../lib/fetchPlanning'
 import { getStudentPlanningRecords, savePlanningRecord } from '../lib/planningStorage'
-import type { PlanningFormData, PlanningReport, SavedPlanningRecord } from '../types/planning'
+import type { PlanningFormData, PlanningReport, SavedPlanningRecord, GanttTask, PlanningTaskProgress } from '../types/planning'
+
+const API_BASE = 'https://api.huqiyunshiai.online'
 
 type Tab = 'create' | 'records'
 
@@ -35,6 +37,95 @@ export default function StudentPlanningPage() {
   const [message, setMessage] = useState<string | null>(null)
   const [isWarning, setIsWarning] = useState(false)
   const [exporting, setExporting] = useState(false)
+
+  // 甘特图 & 进度跟踪
+  const [checklistProgress, setChecklistProgress] = useState<Record<string, boolean>>({})
+  const [supabaseProgress, setSupabaseProgress] = useState<PlanningTaskProgress[]>([])
+
+  /** 从教育规划报告中构建甘特图任务 */
+  const ganttTasks = useMemo<GanttTask[] | undefined>(() => {
+    const activeReport = selectedRecord?.report ?? report
+    if (!activeReport?.phaseTasks?.length) return undefined
+
+    const colors = ['#22d3ee', '#a78bfa', '#f472b6', '#34d399', '#fbbf24', '#60a5fa']
+    const now = new Date()
+    const tasks: GanttTask[] = []
+
+    activeReport.phaseTasks.forEach((phase, pi) => {
+      const phaseTasks = phase.tasks || []
+      const phaseStart = new Date(now)
+      phaseStart.setDate(phaseStart.getDate() + pi * (activeReport.phaseTasks[0]?.days || 30))
+      const phaseEnd = new Date(phaseStart)
+      phaseEnd.setDate(phaseEnd.getDate() + (phase.days || 30))
+
+      phaseTasks.forEach((task, ti) => {
+        const key = `${pi}_${ti}`
+        tasks.push({
+          id: `${activeReport.title}_${key}`,
+          name: task,
+          phase: phase.phase || `阶段${pi + 1}`,
+          startDate: phaseStart.toISOString().split('T')[0],
+          endDate: phaseEnd.toISOString().split('T')[0],
+          completed: !!checklistProgress[key],
+          color: colors[pi % colors.length],
+        })
+      })
+    })
+    return tasks
+  }, [report, selectedRecord, checklistProgress])
+
+  /** 从 Supabase 加载规划进度 */
+  const loadPlanProgress = useCallback(async (planRecord: SavedPlanningRecord) => {
+    if (!profile?.id) return
+    try {
+      const r = await fetch(`${API_BASE}/api/student/planning-progress?planId=${planRecord.id}&userId=${profile.id}`)
+      const d = await r.json()
+      if (d.success && d.progress?.length) {
+        setSupabaseProgress(d.progress)
+        const progressMap: Record<string, boolean> = {}
+        d.progress.forEach((p: PlanningTaskProgress) => {
+          if (p.completed) progressMap[`${p.phaseIndex}_${p.taskIndex}`] = true
+        })
+        setChecklistProgress((prev) => ({ ...prev, ...progressMap }))
+      }
+    } catch { /* 静默失败 */ }
+  }, [profile?.id])
+
+  /** 勾选/取消勾选任务进度，同步到 Supabase */
+  const handleChecklistToggle = useCallback(async (phaseIndex: number, taskIndex: number) => {
+    const activeReport = selectedRecord?.report ?? report
+    const planId = selectedRecord?.id ?? report?.title ?? ''
+    const key = `${phaseIndex}_${taskIndex}`
+    const newCompleted = !checklistProgress[key]
+
+    // 先更新本地状态（乐观更新）
+    setChecklistProgress((p) => ({ ...p, [key]: newCompleted }))
+
+    if (!planId || !profile?.id) return
+
+    try {
+      const taskName = activeReport?.phaseTasks?.[phaseIndex]?.tasks?.[taskIndex] || ''
+      await fetch(`${API_BASE}/api/student/planning-progress`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          planId, userId: profile.id, phaseIndex, taskIndex, taskName, completed: newCompleted,
+        }),
+      })
+    } catch {
+      // 回滚
+      setChecklistProgress((p) => ({ ...p, [key]: !newCompleted }))
+    }
+  }, [checklistProgress, selectedRecord, report, profile?.id])
+
+  /** 甘特图勾选回调 */
+  const handleGanttToggle = useCallback(async (taskId: string) => {
+    // 从 taskId 解析 phaseIndex 和 taskIndex
+    const match = taskId.match(/_(\d+)_(\d+)$/)
+    if (match) {
+      handleChecklistToggle(parseInt(match[1]), parseInt(match[2]))
+    }
+  }, [handleChecklistToggle])
 
   const records = useMemo(
     () => getStudentPlanningRecords(form.studentName || displayName, profile?.id),
@@ -93,6 +184,7 @@ export default function StudentPlanningPage() {
     setReport(null)
     setTab('records')
     setMessage(null)
+    loadPlanProgress(record)
   }
 
   return (
@@ -132,6 +224,10 @@ export default function StudentPlanningPage() {
                 reportRef={reportRef}
                 onExportPdf={handleExportPdf}
                 exporting={exporting}
+                ganttTasks={ganttTasks}
+                checklistProgress={checklistProgress}
+                onChecklistToggle={handleChecklistToggle}
+                onGanttToggle={handleGanttToggle}
               />
             </div>
           </div>
@@ -187,7 +283,15 @@ export default function StudentPlanningPage() {
                     </button>
                   </div>
                   <div className="max-h-[calc(100vh-220px)] overflow-y-auto">
-                    <PlanningReportView report={selectedRecord.report} reportRef={reportRef} />
+                    <PlanningReportView
+                      report={selectedRecord.report}
+                      reportRef={reportRef}
+                      ganttTasks={ganttTasks}
+                      checklistProgress={checklistProgress}
+                      onChecklistToggle={handleChecklistToggle}
+                      supabaseProgress={supabaseProgress}
+                      onGanttToggle={handleGanttToggle}
+                    />
                   </div>
                 </div>
               ) : (

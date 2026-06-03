@@ -141,3 +141,37 @@ export interface SavedPlanningRecord {
   report: PlanningReport
   createdAt: string
 }
+
+/** 规划任务进度 — 存储在 Supabase */
+export interface PlanningTaskProgress {
+  planId: string
+  phaseIndex: number
+  taskIndex: number
+  taskName: string
+  completed: boolean
+  completedAt?: string
+  notes?: string
+  updatedAt: string
+}
+
+/** 教师端查看学生规划执行概要 */
+export interface StudentPlanSummary {
+  studentId: string
+  studentName: string
+  planTitle: string
+  totalTasks: number
+  completedTasks: number
+  progressPercent: number
+  lastActivityAt: string
+}
+
+/** 甘特图任务项 */
+export interface GanttTask {
+  id: string
+  name: string
+  phase: string
+  startDate: string
+  endDate: string
+  completed: boolean
+  color: string
+}

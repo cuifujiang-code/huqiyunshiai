@@ -1,5 +1,5 @@
 import type { RefObject } from 'react'
-import type { PlanningReport } from '../../types/planning'
+import type { PlanningReport, GanttTask, PlanningTaskProgress } from '../../types/planning'
 import PlanningReportView from './PlanningReportView'
 
 interface Props {
@@ -13,6 +13,13 @@ interface Props {
   exporting?: boolean
   saving?: boolean
   saved?: boolean
+  /** 甘特图数据 */
+  ganttTasks?: GanttTask[]
+  /** 任务进度 */
+  checklistProgress?: Record<string, boolean>
+  onChecklistToggle?: (phaseIndex: number, taskIndex: number) => void
+  supabaseProgress?: PlanningTaskProgress[]
+  onGanttToggle?: (taskId: string) => void
 }
 
 export default function PlanningPreviewPanel({
@@ -26,6 +33,11 @@ export default function PlanningPreviewPanel({
   exporting = false,
   saving = false,
   saved = false,
+  ganttTasks,
+  checklistProgress,
+  onChecklistToggle,
+  supabaseProgress,
+  onGanttToggle,
 }: Props) {
   return (
     <div className="flex min-h-[480px] flex-col rounded-2xl border border-blue-500/20 bg-slate-900/60 p-5 sm:min-h-[calc(100vh-140px)] sm:p-6">
@@ -105,7 +117,15 @@ export default function PlanningPreviewPanel({
             </div>
           </div>
           <div className="flex-1 overflow-y-auto pr-1">
-            <PlanningReportView report={report} reportRef={reportRef} />
+            <PlanningReportView
+              report={report}
+              reportRef={reportRef}
+              ganttTasks={ganttTasks}
+              checklistProgress={checklistProgress}
+              onChecklistToggle={onChecklistToggle}
+              supabaseProgress={supabaseProgress}
+              onGanttToggle={onGanttToggle}
+            />
           </div>
         </>
       )}

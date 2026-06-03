@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useRef, useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import DiagnosisAnalyzingStep from '../components/diagnosis/DiagnosisAnalyzingStep'
 import DiagnosisInputStep from '../components/diagnosis/DiagnosisInputStep'
@@ -9,7 +9,9 @@ import { useMembership } from '../context/MembershipContext'
 import { runSequentialDiagnosis } from '../lib/fetchDiagnosis'
 import { exportToPdf } from '../lib/exportPdf'
 import { revokePreviewUrls } from '../lib/answerSheetCompress'
-import type { DiagnosisFormData, DiagnosisReport } from '../types/diagnosis'
+import type { DiagnosisFormData, DiagnosisReport, DiagnosisHistoryItem, ClassComparison } from '../types/diagnosis'
+
+const API_BASE = 'https://api.huqiyunshiai.online'
 
 type Step = 'input' | 'analyzing' | 'report'
 
@@ -38,6 +40,29 @@ export default function StudentDiagnosisPage() {
   const [notice, setNotice] = useState<string | null>(null)
   const [noticeWarning, setNoticeWarning] = useState(false)
   const [quotaError, setQuotaError] = useState<string | null>(null)
+
+  // 进步趋势 & 班级对比
+  const [diagnosisHistory, setDiagnosisHistory] = useState<DiagnosisHistoryItem[]>([])
+  const [classComparison, setClassComparison] = useState<ClassComparison | undefined>()
+
+  // 报告展示后加载历史数据和班级对比
+  useEffect(() => {
+    if (step === 'report' && user?.id && form.subject) {
+      const controller = new AbortController()
+      fetch(`${API_BASE}/api/student/diagnosis-history?userId=${user.id}&subject=${form.subject}&limit=10`, {
+        signal: controller.signal,
+      }).then((r) => r.json()).then((d) => {
+        if (d.success && d.history?.length >= 2) setDiagnosisHistory(d.history)
+      }).catch(() => {})
+
+      fetch(`${API_BASE}/api/student/class-comparison?userId=${user.id}&subject=${form.subject}`, {
+        signal: controller.signal,
+      }).then((r) => r.json()).then((d) => {
+        if (d.success && d.comparison) setClassComparison(d.comparison)
+      }).catch(() => {})
+      return () => controller.abort()
+    }
+  }, [step, user?.id, form.subject])
 
   const ensureQuota = () => {
     const permission = checkDiagnosis()
@@ -191,6 +216,8 @@ export default function StudentDiagnosisPage() {
             exporting={exporting}
             planTasks={planTasks}
             onToggleTask={(id) => setPlanTasks((p) => ({ ...p, [id]: !p[id] }))}
+            diagnosisHistory={diagnosisHistory.length > 0 ? diagnosisHistory : undefined}
+            classComparison={classComparison}
           />
         )}
       </main>

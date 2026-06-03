@@ -114,6 +114,33 @@ export interface DiagnosisReport {
   source?: 'ai' | 'mock'
 }
 
+/** 历史诊断摘要 — 用于绘制进步趋势图 */
+export interface DiagnosisHistoryItem {
+  id: string
+  examType: string
+  subject: string
+  score: number
+  fullScore: number
+  gradeRank?: number
+  classRank?: number
+  percentile: number
+  generatedAt: string
+}
+
+/** 班级/年级对比数据 */
+export interface ClassComparison {
+  studentScore: number
+  studentRank: number
+  totalStudents: number
+  classAvg: number
+  gradeAvg: number
+  classTop: number
+  gradeTop: number
+  scoreDistribution: { range: string; count: number }[]
+  percentile: number
+  strongerThan: number
+}
+
 export interface DiagnosisResponse {
   success: boolean
   message?: string

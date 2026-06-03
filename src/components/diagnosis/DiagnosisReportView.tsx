@@ -1,11 +1,13 @@
 import { useState } from 'react'
-import type { DiagnosisReport } from '../../types/diagnosis'
+import type { DiagnosisHistoryItem, DiagnosisReport, ClassComparison } from '../../types/diagnosis'
 import ScoreOverviewCard from './ScoreOverviewCard'
 import LossAnalysisCard from './LossAnalysisCard'
 import WeakPointsCard from './WeakPointsCard'
 import WrongQuestionsCard from './WrongQuestionsCard'
 import ImprovementPlanCard from './ImprovementPlanCard'
 import RecommendedExercisesCard from './RecommendedExercisesCard'
+import ProgressTrendChart from './ProgressTrendChart'
+import ClassComparisonCard from './ClassComparisonCard'
 
 interface Props {
   report: DiagnosisReport
@@ -16,10 +18,15 @@ interface Props {
   exporting: boolean
   planTasks: Record<string, boolean>
   onToggleTask: (taskId: string) => void
+  /** 历史诊断摘要 — 用于进步趋势图 */
+  diagnosisHistory?: DiagnosisHistoryItem[]
+  /** 班级/年级对比数据 */
+  classComparison?: ClassComparison
 }
 
 export default function DiagnosisReportView({
   report, reportRef, onExportPdf, onShare, onBackHome, exporting, planTasks, onToggleTask,
+  diagnosisHistory, classComparison,
 }: Props) {
   const [expandedPoint, setExpandedPoint] = useState<string | null>(null)
 
@@ -36,6 +43,17 @@ export default function DiagnosisReportView({
         )}
       </div>
       <ScoreOverviewCard overview={report.scoreOverview} />
+
+      {/* 进步趋势图 */}
+      {diagnosisHistory && diagnosisHistory.length >= 2 && (
+        <ProgressTrendChart history={diagnosisHistory} />
+      )}
+
+      {/* 班级/年级对比 */}
+      {classComparison && (
+        <ClassComparisonCard data={classComparison} />
+      )}
+
       <LossAnalysisCard items={report.lossAnalysis} />
       <WeakPointsCard points={report.weakPoints} expanded={expandedPoint} onToggle={(id) => setExpandedPoint(expandedPoint === id ? null : id)} />
       <WrongQuestionsCard questions={report.wrongQuestions} />
