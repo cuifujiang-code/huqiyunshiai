@@ -9,6 +9,7 @@ import decomposeProcess from '../api/decompose-process.js'
 import debugTasks from '../api/debug-tasks.js'
 import ocrCorrectApi from './batch/ocrCorrectApi.js'
 import studentApiHandler from './batch/studentApi.js'
+import educationPlanningApiHandler from './batch/educationPlanningApi.js'
 
 function getRequestPathname(req) {
   if (typeof req.url !== 'string' || !req.url) return '/'
@@ -67,6 +68,12 @@ export async function dispatchApiRequest(req, res) {
 
   // OCR 精修校正路由
   if (pathname === '/api/teacher/questions/ocr-correct') return ocrCorrectApi(req, res)
+
+  // 教育规划系统 API（7大路线/甘特图/报表/家长绑定）
+  if (
+    pathname.startsWith('/api/planning/') ||
+    pathname.startsWith('/api/parent/')
+  ) return educationPlanningApiHandler(req, res)
 
   // 学生端 API 路由
   if (pathname.startsWith('/api/student/')) return studentApiHandler(req, res)

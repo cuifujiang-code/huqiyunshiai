@@ -25,6 +25,7 @@ import BatchUploadPage from './pages/teacher/BatchUploadPage'
 import QuestionLibraryPage from './pages/teacher/QuestionLibraryPage'
 import ExamLayoutPage from './pages/teacher/ExamLayoutPage'
 import AdminDashboardPage from './pages/admin/AdminDashboardPage'
+import ParentDashboardPage from './pages/ParentDashboardPage'
 import ProtectedRouteAdmin from './components/ProtectedRouteAdmin'
 
 export default function App() {
@@ -186,6 +187,14 @@ export default function App() {
                 <ProtectedRoute requiredRole="student">
                   <StudentPhotoSearchPage />
                 </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/parent/dashboard"
+              element={
+                <ProtectedRouteAuth>
+                  <ParentDashboardPage />
+                </ProtectedRouteAuth>
               }
             />
             <Route path="*" element={<Navigate to="/" replace />} />

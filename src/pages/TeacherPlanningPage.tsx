@@ -1,12 +1,27 @@
-import { useRef, useState } from 'react'
+import { useRef, useState, useEffect, useCallback } from 'react'
 import DashboardHeader from '../components/layout/DashboardHeader'
 import PlanningInputPanel from '../components/planning/PlanningInputPanel'
 import PlanningPreviewPanel from '../components/planning/PlanningPreviewPanel'
+import PlanningReportView from '../components/planning/PlanningReportView'
+import GanttChart from '../components/planning/GanttChart'
+import WeeklyReportCard from '../components/planning/WeeklyReportCard'
+import MonthlyReportCard from '../components/planning/MonthlyReportCard'
+import ParentBindingPanel from '../components/planning/ParentBindingPanel'
 import { useAuth } from '../context/AuthContext'
 import { exportToPdf } from '../lib/exportPdf'
 import { fetchPlanningReport } from '../lib/fetchPlanning'
 import { savePlanningRecord } from '../lib/planningStorage'
-import type { PlanningFormData, PlanningReport } from '../types/planning'
+import {
+  fetchTeacherOverview, fetchPlanRoutes, fetchGanttData,
+  fetchWeeklyReport, fetchMonthlyReport,
+} from '../lib/educationPlanning'
+import type {
+  PlanningFormData, PlanningReport, PlanRoute, GanttData,
+  WeeklyReport as WeeklyReportType, MonthlyReport as MonthlyReportType,
+  TeacherStudentItem, PlanRouteCode,
+} from '../types/planning'
+
+type Tab = 'create' | 'overview' | 'detail' | 'reports' | 'binding'
 
 const defaultForm: PlanningFormData = {
   studentName: '',
@@ -23,6 +38,7 @@ export default function TeacherPlanningPage() {
   const { profile } = useAuth()
   const reportRef = useRef<HTMLDivElement>(null)
 
+  const [tab, setTab] = useState<Tab>('create')
   const [form, setForm] = useState<PlanningFormData>(defaultForm)
   const [report, setReport] = useState<PlanningReport | null>(null)
   const [loading, setLoading] = useState(false)
@@ -32,67 +48,87 @@ export default function TeacherPlanningPage() {
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
 
-  const handleGenerate = async () => {
-    if (!form.studentName.trim()) {
-      setMessage('请填写学生姓名')
-      setIsWarning(true)
-      return
-    }
+  // 新系统状态
+  const [routes, setRoutes] = useState<PlanRoute[]>([])
+  const [overviewStudents, setOverviewStudents] = useState<TeacherStudentItem[]>([])
+  const [classAvgRate, setClassAvgRate] = useState(0)
+  const [weakStudents, setWeakStudents] = useState<{ studentName: string; progressPercent: number; planTitle: string }[]>([])
+  const [ganttData, setGanttData] = useState<GanttData | null>(null)
+  const [weeklyReport, setWeeklyReport] = useState<WeeklyReportType | null>(null)
+  const [monthlyReport, setMonthlyReport] = useState<MonthlyReportType | null>(null)
+  const [selectedStudentPlanId, setSelectedStudentPlanId] = useState<string | null>(null)
 
+  useEffect(() => {
+    fetchPlanRoutes().then((r) => { if (r.success) setRoutes(r.routes) }).catch(() => {})
+  }, [])
+
+  const loadOverview = useCallback(async () => {
+    if (!profile?.id) return
+    try {
+      const res = await fetchTeacherOverview(profile.id)
+      if (res.success) {
+        setOverviewStudents(res.students || [])
+        setClassAvgRate(res.classAvgRate)
+        setWeakStudents(res.weakStudents || [])
+      }
+    } catch { /* 静默 */ }
+  }, [profile?.id])
+
+  useEffect(() => {
+    if (tab === 'overview') loadOverview()
+  }, [tab, loadOverview])
+
+  const loadStudentDetail = useCallback(async (planId: string) => {
+    setSelectedStudentPlanId(planId)
+    setTab('detail')
+    try {
+      const [ganttRes, weeklyRes, monthlyRes] = await Promise.all([
+        fetchGanttData(planId),
+        fetchWeeklyReport({ plan_id: planId }),
+        fetchMonthlyReport({ plan_id: planId }),
+      ])
+      if (ganttRes.success) setGanttData(ganttRes.gantt)
+      if (weeklyRes.success) setWeeklyReport(weeklyRes.report)
+      if (monthlyRes.success) setMonthlyReport(monthlyRes.report)
+    } catch { /* 静默 */ }
+  }, [])
+
+  const handleGenerate = async () => {
+    if (!form.studentName.trim()) { setMessage('请填写学生姓名'); setIsWarning(true); return }
     setLoading(true)
     setMessage(null)
     setIsWarning(false)
     setSaved(false)
-
     try {
       const payload = { ...form, createdByRole: 'teacher' as const }
-      console.log('[教育规划页面-教师] 提交表单，即将请求 API', {
-        url: '/api/planning/generate',
-        payload,
-      })
       const data = await fetchPlanningReport(payload)
-      console.log('[教育规划页面-教师] API 完整响应', data)
       setReport(data.report!)
       setIsWarning(!!data.isMockFallback)
       setMessage(data.message ?? '教育规划方案生成成功')
     } catch (err) {
-      setMessage(err instanceof Error ? err.message : '规划方案生成失败，请稍后重试')
+      setMessage(err instanceof Error ? err.message : '规划方案生成失败')
       setIsWarning(true)
-    } finally {
-      setLoading(false)
-    }
+    } finally { setLoading(false) }
   }
 
   const handleExportPdf = async () => {
     const el = reportRef.current ?? document.getElementById('planning-report-content')
     if (!el || !report) return
     setExporting(true)
-    try {
-      await exportToPdf(el as HTMLElement, `${report.title}.pdf`)
-    } catch {
-      setMessage('PDF 导出失败，请重试')
-      setIsWarning(true)
-    } finally {
-      setExporting(false)
-    }
+    try { await exportToPdf(el as HTMLElement, `${report.title}.pdf`) }
+    catch { setMessage('PDF 导出失败'); setIsWarning(true) }
+    finally { setExporting(false) }
   }
 
   const handleSave = () => {
     if (!report) return
     setSaving(true)
     try {
-      savePlanningRecord({
-        form: { ...form, createdByRole: 'teacher' },
-        report,
-        createdBy: 'teacher',
-        creatorUserId: profile?.id,
-      })
+      savePlanningRecord({ form: { ...form, createdByRole: 'teacher' }, report, createdBy: 'teacher', creatorUserId: profile?.id })
       setSaved(true)
       setMessage('规划方案已保存，学生可在学生端查看')
       setIsWarning(false)
-    } finally {
-      setSaving(false)
-    }
+    } finally { setSaving(false) }
   }
 
   return (
@@ -100,31 +136,183 @@ export default function TeacherPlanningPage() {
       <DashboardHeader title="AI教育规划 · 教师工作台" featureNavRole="teacher" />
 
       <main className="mx-auto max-w-[1600px] px-4 py-6 sm:px-6 sm:py-8">
-        <div className="flex flex-col gap-6 lg:flex-row lg:items-stretch">
-          <div className="w-full lg:w-[40%] lg:shrink-0">
-            <PlanningInputPanel
-              form={form}
-              loading={loading}
-              onChange={setForm}
-              onGenerate={handleGenerate}
-            />
-          </div>
-          <div className="w-full lg:w-[60%]">
-            <PlanningPreviewPanel
-              report={report}
-              loading={loading}
-              message={message}
-              isWarning={isWarning}
-              reportRef={reportRef}
-              onExportPdf={handleExportPdf}
-              onSave={handleSave}
-              exporting={exporting}
-              saving={saving}
-              saved={saved}
-            />
-          </div>
+        <div className="mb-6 flex flex-wrap gap-2">
+          <TabBtn active={tab === 'create'} onClick={() => setTab('create')}>新建规划</TabBtn>
+          <TabBtn active={tab === 'overview'} onClick={() => { setTab('overview'); loadOverview() }}>
+            全班概览
+          </TabBtn>
+          {selectedStudentPlanId && (
+            <TabBtn active={tab === 'detail'} onClick={() => setTab('detail')}>学生详情</TabBtn>
+          )}
+          <TabBtn active={tab === 'reports'} onClick={() => setTab('reports')}>报表中心</TabBtn>
+          <TabBtn active={tab === 'binding'} onClick={() => setTab('binding')}>家校管理</TabBtn>
         </div>
+
+        {/* Tab: 创建规划 */}
+        {tab === 'create' && (
+          <div className="flex flex-col gap-6 lg:flex-row lg:items-stretch">
+            <div className="w-full lg:w-[40%] lg:shrink-0">
+              <PlanningInputPanel form={form} loading={loading} onChange={setForm} onGenerate={handleGenerate} />
+            </div>
+            <div className="w-full lg:w-[60%]">
+              <PlanningPreviewPanel
+                report={report} loading={loading} message={message} isWarning={isWarning}
+                reportRef={reportRef} onExportPdf={handleExportPdf} onSave={handleSave}
+                exporting={exporting} saving={saving} saved={saved}
+              />
+            </div>
+          </div>
+        )}
+
+        {/* Tab: 全班概览 */}
+        {tab === 'overview' && (
+          <div className="space-y-6">
+            {/* 班级总览卡片 */}
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+              <OverviewCard label="学生总数" value={overviewStudents.length} color="text-blue-200" />
+              <OverviewCard label="班级平均完成率" value={`${classAvgRate}%`} color="text-cyan-300" />
+              <OverviewCard label="薄弱学生" value={weakStudents.length} color="text-red-300" warn={weakStudents.length > 0} />
+            </div>
+
+            {/* 薄弱学生预警 */}
+            {weakStudents.length > 0 && (
+              <div className="rounded-2xl border border-red-500/20 bg-red-500/10 p-4">
+                <h3 className="mb-2 text-sm font-semibold text-red-300">⚠ 需要重点关注的学生</h3>
+                {weakStudents.map((w, i) => (
+                  <div key={i} className="mb-1 flex items-center justify-between rounded-lg bg-slate-900/40 px-3 py-2">
+                    <div>
+                      <span className="text-sm text-slate-200">{w.studentName}</span>
+                      <span className="ml-2 text-xs text-slate-500">{w.planTitle}</span>
+                    </div>
+                    <span className="rounded-full bg-red-500/20 px-2 py-0.5 text-xs text-red-300">{w.progressPercent}%</span>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* 学生列表 */}
+            {overviewStudents.length > 0 ? (
+              <div className="rounded-2xl border border-blue-500/20 bg-slate-900/60 p-5">
+                <h3 className="mb-3 text-sm font-semibold text-blue-100">全班学生规划执行情况</h3>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="border-b border-slate-700/50 text-left text-slate-400">
+                        <th className="pb-2 pr-4 font-medium">学生</th>
+                        <th className="pb-2 pr-4 font-medium">规划标题</th>
+                        <th className="pb-2 pr-4 font-medium">路线</th>
+                        <th className="pb-2 pr-4 font-medium text-center">任务完成</th>
+                        <th className="pb-2 pr-4 font-medium text-center">进度</th>
+                        <th className="pb-2 font-medium">操作</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {overviewStudents.map((s) => (
+                        <tr key={s.planId} className="border-b border-slate-800/50 hover:bg-slate-800/20">
+                          <td className="py-2 pr-4 text-slate-200">{s.studentName}</td>
+                          <td className="py-2 pr-4 text-slate-400 max-w-[200px] truncate">{s.planTitle}</td>
+                          <td className="py-2 pr-4">
+                            <span className="rounded-full bg-slate-700/60 px-2 py-0.5 text-[10px] text-slate-400">
+                              {routes.find((r) => r.route_code === s.routeName)?.route_name || s.routeName}
+                            </span>
+                          </td>
+                          <td className="py-2 pr-4 text-center text-slate-300">
+                            {s.completedTasks}/{s.totalTasks}
+                          </td>
+                          <td className="py-2 pr-4 text-center">
+                            <div className="flex items-center gap-2">
+                              <div className="h-1.5 w-20 overflow-hidden rounded-full bg-slate-700/60">
+                                <div
+                                  className={`h-full rounded-full ${s.progressPercent >= 60 ? 'bg-emerald-500' : s.progressPercent >= 30 ? 'bg-amber-500' : 'bg-red-500'}`}
+                                  style={{ width: `${s.progressPercent}%` }}
+                                />
+                              </div>
+                              <span className={s.progressPercent < 40 ? 'text-red-400' : 'text-slate-400'}>
+                                {s.progressPercent}%
+                              </span>
+                            </div>
+                          </td>
+                          <td className="py-2">
+                            <button
+                              type="button" onClick={() => loadStudentDetail(s.planId)}
+                              className="rounded border border-blue-500/30 px-2 py-0.5 text-[10px] text-blue-300 hover:bg-blue-500/20"
+                            >
+                              查看
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ) : (
+              <div className="rounded-2xl border border-blue-500/20 bg-slate-900/60 p-8 text-center text-sm text-slate-500">
+                暂无学生规划数据。请先为学生生成规划方案。
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Tab: 学生详情（含甘特图+报表） */}
+        {tab === 'detail' && (
+          <div className="space-y-6">
+            {ganttData ? (
+              <>
+                <GanttChart ganttData={ganttData} readOnly={false}
+                  onTaskClick={(taskId) => console.log('Edit task:', taskId)} />
+                {weeklyReport && <WeeklyReportCard report={weeklyReport} role="teacher" onEditTask={(id) => console.log('Edit:', id)} />}
+                {monthlyReport && <MonthlyReportCard report={monthlyReport} role="teacher" />}
+              </>
+            ) : (
+              <div className="rounded-2xl border border-blue-500/20 bg-slate-900/60 p-8 text-center text-sm text-slate-500">
+                加载中…
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Tab: 报表中心 */}
+        {tab === 'reports' && (
+          <div className="space-y-6">
+            {weeklyReport ? (
+              <WeeklyReportCard report={weeklyReport} role="teacher" />
+            ) : (
+              <div className="rounded-2xl border border-blue-500/20 bg-slate-900/60 p-8 text-center text-sm text-slate-500">
+                请先从全班概览中选择学生查看报表
+              </div>
+            )}
+            {monthlyReport && <MonthlyReportCard report={monthlyReport} role="teacher" />}
+          </div>
+        )}
+
+        {/* Tab: 家校管理 */}
+        {tab === 'binding' && profile?.id && (
+          <div className="mx-auto max-w-lg">
+            <ParentBindingPanel userId={profile.id} role="teacher" />
+          </div>
+        )}
       </main>
     </div>
+  )
+}
+
+function OverviewCard({ label, value, color, warn }: { label: string; value: string | number; color: string; warn?: boolean }) {
+  return (
+    <div className={`rounded-2xl border p-5 text-center ${warn ? 'border-red-500/30 bg-red-500/5' : 'border-blue-500/20 bg-slate-900/60'}`}>
+      <p className={`text-3xl font-bold ${color}`}>{value}</p>
+      <p className="mt-1 text-xs text-slate-500">{label}</p>
+    </div>
+  )
+}
+
+function TabBtn({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button type="button" onClick={onClick}
+      className={`rounded-xl px-4 py-2 text-sm font-medium transition ${
+        active ? 'bg-blue-500/20 text-cyan-300' : 'bg-slate-800/60 text-slate-400 hover:text-blue-200'
+      }`}>
+      {children}
+    </button>
   )
 }
