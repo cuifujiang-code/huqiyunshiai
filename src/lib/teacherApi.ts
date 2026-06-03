@@ -9,7 +9,7 @@ import type {
 } from '../types/teacher'
 import { postApiJson } from './postApiJson'
 
-const TEACHER_API_BASE = (import.meta.env.VITE_TEACHER_API_URL ?? 'https://api.huqiyunshiai.online').replace(/\/$/, '')
+const TEACHER_API_BASE = (import.meta.env.VITE_TEACHER_API_URL || 'https://api.huqiyunshiai.online').replace(/\/$/, '')
 
 /** 教师业务 API（题库/组卷/讲义/辅导书等）→ /api/teacher/* */
 function teacherApiUrl(path: string) {
