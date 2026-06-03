@@ -29,6 +29,7 @@ import AdminDashboardPage from './pages/admin/AdminDashboardPage'
 import ParentDashboardPage from './pages/ParentDashboardPage'
 import StudentParentBindPage from './pages/StudentParentBindPage'
 import ProtectedRouteAdmin from './components/ProtectedRouteAdmin'
+import FloatingActionButton from './components/common/FloatingActionButton'
 
 export default function App() {
   return (
@@ -217,6 +218,7 @@ export default function App() {
             />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
+          <FloatingActionButton />
           </QuestionBasketProvider>
         </MembershipProvider>
       </AuthProvider>

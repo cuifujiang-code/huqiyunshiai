@@ -132,15 +132,14 @@ export default function TeacherPlanningPage() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-950 text-white">
+    <div className="min-h-screen bg-[#121722] text-[#E8ECF3]">
       <DashboardHeader title="AI教育规划 · 教师工作台" featureNavRole="teacher" />
 
-      <main className="mx-auto max-w-[1600px] px-4 py-6 sm:px-6 sm:py-8">
+      <main className="mx-auto max-w-[1600px] px-4 py-4 sm:px-6 sm:py-6">
+        {/* Tab 导航 */}
         <div className="mb-6 flex flex-wrap gap-2">
           <TabBtn active={tab === 'create'} onClick={() => setTab('create')}>新建规划</TabBtn>
-          <TabBtn active={tab === 'overview'} onClick={() => { setTab('overview'); loadOverview() }}>
-            全班概览
-          </TabBtn>
+          <TabBtn active={tab === 'overview'} onClick={() => { setTab('overview'); loadOverview() }}>全班概览</TabBtn>
           {selectedStudentPlanId && (
             <TabBtn active={tab === 'detail'} onClick={() => setTab('detail')}>学生详情</TabBtn>
           )}
@@ -169,22 +168,22 @@ export default function TeacherPlanningPage() {
           <div className="space-y-6">
             {/* 班级总览卡片 */}
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-              <OverviewCard label="学生总数" value={overviewStudents.length} color="text-blue-200" />
-              <OverviewCard label="班级平均完成率" value={`${classAvgRate}%`} color="text-cyan-300" />
-              <OverviewCard label="薄弱学生" value={weakStudents.length} color="text-red-300" warn={weakStudents.length > 0} />
+              <OverviewCard label="学生总数" value={overviewStudents.length} color="text-[#2584FF]" />
+              <OverviewCard label="班级平均完成率" value={`${classAvgRate}%`} color="text-[#22C55E]" />
+              <OverviewCard label="薄弱学生" value={weakStudents.length} color="text-[#EF4444]" warn={weakStudents.length > 0} />
             </div>
 
             {/* 薄弱学生预警 */}
             {weakStudents.length > 0 && (
-              <div className="rounded-2xl border border-red-500/20 bg-red-500/10 p-4">
-                <h3 className="mb-2 text-sm font-semibold text-red-300">⚠ 需要重点关注的学生</h3>
+              <div className="rounded-[12px] border border-[#EF4444]/20 bg-[#EF4444]/10 p-4">
+                <h3 className="mb-2 text-sm font-semibold text-[#EF4444]">需要重点关注的学生</h3>
                 {weakStudents.map((w, i) => (
-                  <div key={i} className="mb-1 flex items-center justify-between rounded-lg bg-slate-900/40 px-3 py-2">
+                  <div key={i} className="mb-1 flex items-center justify-between rounded-[8px] bg-[#1C2332] px-3 py-2">
                     <div>
-                      <span className="text-sm text-slate-200">{w.studentName}</span>
-                      <span className="ml-2 text-xs text-slate-500">{w.planTitle}</span>
+                      <span className="text-sm text-[#E8ECF3]">{w.studentName}</span>
+                      <span className="ml-2 text-xs text-[#8A94A9]">{w.planTitle}</span>
                     </div>
-                    <span className="rounded-full bg-red-500/20 px-2 py-0.5 text-xs text-red-300">{w.progressPercent}%</span>
+                    <span className="rounded-full bg-[#EF4444]/20 px-2 py-0.5 text-xs text-[#EF4444]">{w.progressPercent}%</span>
                   </div>
                 ))}
               </div>
@@ -192,12 +191,12 @@ export default function TeacherPlanningPage() {
 
             {/* 学生列表 */}
             {overviewStudents.length > 0 ? (
-              <div className="rounded-2xl border border-blue-500/20 bg-slate-900/60 p-5">
-                <h3 className="mb-3 text-sm font-semibold text-blue-100">全班学生规划执行情况</h3>
+              <div className="rounded-[12px] border border-white/[0.06] bg-[#1C2332] p-5">
+                <h3 className="mb-3 text-sm font-semibold text-[#E8ECF3]">全班学生规划执行情况</h3>
                 <div className="overflow-x-auto">
                   <table className="w-full text-xs">
                     <thead>
-                      <tr className="border-b border-slate-700/50 text-left text-slate-400">
+                      <tr className="border-b border-white/[0.06] text-left text-[#8A94A9]">
                         <th className="pb-2 pr-4 font-medium">学生</th>
                         <th className="pb-2 pr-4 font-medium">规划标题</th>
                         <th className="pb-2 pr-4 font-medium">路线</th>
@@ -208,26 +207,26 @@ export default function TeacherPlanningPage() {
                     </thead>
                     <tbody>
                       {overviewStudents.map((s) => (
-                        <tr key={s.planId} className="border-b border-slate-800/50 hover:bg-slate-800/20">
-                          <td className="py-2 pr-4 text-slate-200">{s.studentName}</td>
-                          <td className="py-2 pr-4 text-slate-400 max-w-[200px] truncate">{s.planTitle}</td>
+                        <tr key={s.planId} className="border-b border-white/[0.04] hover:bg-white/[0.03]">
+                          <td className="py-2 pr-4 text-[#E8ECF3]">{s.studentName}</td>
+                          <td className="py-2 pr-4 text-[#8A94A9] max-w-[200px] truncate">{s.planTitle}</td>
                           <td className="py-2 pr-4">
-                            <span className="rounded-full bg-slate-700/60 px-2 py-0.5 text-[10px] text-slate-400">
+                            <span className="rounded-full bg-white/[0.05] px-2 py-0.5 text-[10px] text-[#8A94A9]">
                               {routes.find((r) => r.route_code === s.routeName)?.route_name || s.routeName}
                             </span>
                           </td>
-                          <td className="py-2 pr-4 text-center text-slate-300">
+                          <td className="py-2 pr-4 text-center text-[#E8ECF3]">
                             {s.completedTasks}/{s.totalTasks}
                           </td>
                           <td className="py-2 pr-4 text-center">
                             <div className="flex items-center gap-2">
-                              <div className="h-1.5 w-20 overflow-hidden rounded-full bg-slate-700/60">
+                              <div className="h-1.5 w-20 overflow-hidden rounded-full bg-white/[0.06]">
                                 <div
-                                  className={`h-full rounded-full ${s.progressPercent >= 60 ? 'bg-emerald-500' : s.progressPercent >= 30 ? 'bg-amber-500' : 'bg-red-500'}`}
+                                  className={`h-full rounded-full ${s.progressPercent >= 60 ? 'bg-[#22C55E]' : s.progressPercent >= 30 ? 'bg-[#F59E0B]' : 'bg-[#EF4444]'}`}
                                   style={{ width: `${s.progressPercent}%` }}
                                 />
                               </div>
-                              <span className={s.progressPercent < 40 ? 'text-red-400' : 'text-slate-400'}>
+                              <span className={s.progressPercent < 40 ? 'text-[#EF4444]' : 'text-[#8A94A9]'}>
                                 {s.progressPercent}%
                               </span>
                             </div>
@@ -235,7 +234,7 @@ export default function TeacherPlanningPage() {
                           <td className="py-2">
                             <button
                               type="button" onClick={() => loadStudentDetail(s)}
-                              className="rounded border border-blue-500/30 px-2 py-0.5 text-[10px] text-blue-300 hover:bg-blue-500/20"
+                              className="rounded-[6px] border border-[#2584FF]/30 px-2 py-0.5 text-[10px] text-[#2584FF] hover:bg-[#2584FF]/10"
                             >
                               查看
                             </button>
@@ -247,14 +246,22 @@ export default function TeacherPlanningPage() {
                 </div>
               </div>
             ) : (
-              <div className="rounded-2xl border border-blue-500/20 bg-slate-900/60 p-8 text-center text-sm text-slate-500">
-                暂无学生规划数据。请先为学生生成规划方案。
+              <div className="flex flex-col items-center justify-center rounded-[12px] border border-white/[0.06] bg-[#1C2332] p-12 text-center">
+                <p className="text-sm text-[#8A94A9]">暂无学生规划数据</p>
+                <p className="mt-2 text-xs text-[#8A94A9]">请先为学生生成规划方案</p>
+                <button
+                  type="button"
+                  onClick={() => setTab('create')}
+                  className="mt-4 inline-flex items-center rounded-[8px] bg-[#2584FF] px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-[#0F70E8]"
+                >
+                  去创建规划
+                </button>
               </div>
             )}
           </div>
         )}
 
-        {/* Tab: 学生详情（含甘特图+报表） */}
+        {/* Tab: 学生详情 */}
         {tab === 'detail' && (
           <div className="space-y-6">
             {ganttData ? (
@@ -265,7 +272,7 @@ export default function TeacherPlanningPage() {
                 {monthlyReport && <MonthlyReportCard report={monthlyReport} role="teacher" />}
               </>
             ) : (
-              <div className="rounded-2xl border border-blue-500/20 bg-slate-900/60 p-8 text-center text-sm text-slate-500">
+              <div className="flex items-center justify-center rounded-[12px] border border-white/[0.06] bg-[#1C2332] p-12 text-sm text-[#8A94A9]">
                 加载中…
               </div>
             )}
@@ -278,8 +285,15 @@ export default function TeacherPlanningPage() {
             {weeklyReport ? (
               <WeeklyReportCard report={weeklyReport} role="teacher" />
             ) : (
-              <div className="rounded-2xl border border-blue-500/20 bg-slate-900/60 p-8 text-center text-sm text-slate-500">
-                请先从全班概览中选择学生查看报表
+              <div className="flex flex-col items-center justify-center rounded-[12px] border border-white/[0.06] bg-[#1C2332] p-12 text-center">
+                <p className="text-sm text-[#8A94A9]">请先从全班概览中选择学生查看报表</p>
+                <button
+                  type="button"
+                  onClick={() => setTab('overview')}
+                  className="mt-4 inline-flex items-center rounded-[8px] bg-[#2584FF] px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-[#0F70E8]"
+                >
+                  前往全班概览
+                </button>
               </div>
             )}
             {monthlyReport && <MonthlyReportCard report={monthlyReport} role="teacher" />}
@@ -299,19 +313,24 @@ export default function TeacherPlanningPage() {
 
 function OverviewCard({ label, value, color, warn }: { label: string; value: string | number; color: string; warn?: boolean }) {
   return (
-    <div className={`rounded-2xl border p-5 text-center ${warn ? 'border-red-500/30 bg-red-500/5' : 'border-blue-500/20 bg-slate-900/60'}`}>
+    <div className={`rounded-[12px] border p-5 text-center ${warn ? 'border-[#EF4444]/30 bg-[#EF4444]/5' : 'border-white/[0.06] bg-[#1C2332]'}`}>
       <p className={`text-3xl font-bold ${color}`}>{value}</p>
-      <p className="mt-1 text-xs text-slate-500">{label}</p>
+      <p className="mt-1 text-xs text-[#8A94A9]">{label}</p>
     </div>
   )
 }
 
 function TabBtn({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
   return (
-    <button type="button" onClick={onClick}
-      className={`rounded-xl px-4 py-2 text-sm font-medium transition ${
-        active ? 'bg-blue-500/20 text-cyan-300' : 'bg-slate-800/60 text-slate-400 hover:text-blue-200'
-      }`}>
+    <button
+      type="button"
+      onClick={onClick}
+      className={`rounded-[10px] px-4 py-2 text-sm font-medium transition ${
+        active
+          ? 'bg-[#2584FF] text-white'
+          : 'bg-[#1C2332] text-[#8A94A9] hover:text-[#E8ECF3] hover:bg-[#222B3E]'
+      }`}
+    >
       {children}
     </button>
   )

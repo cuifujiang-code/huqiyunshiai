@@ -148,23 +148,26 @@ export default function TeacherTaskCenterPage() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-950 text-white">
+    <div className="min-h-screen text-[#E8ECF3]" style={{ backgroundColor: '#121722' }}>
       <DashboardHeader title="拆题任务中心" backTo="/teacher/question-bank" backLabel="返回题库" featureNavRole="teacher" />
-      <main className="mx-auto max-w-5xl px-4 py-6">
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-          <p className="text-sm text-slate-400">后台异步处理试卷拆题，可随时刷新查看进度</p>
-          <button type="button" className={btnSecondary} onClick={loadTasks} disabled={loading}>
-            {loading ? '加载中...' : '刷新列表'}
+      <main className="mx-auto max-w-5xl px-5 py-6">
+        {/* 顶部居中说明 */}
+        <p className="text-center text-sm text-[#8A94A9] mb-5">上传 PDF 自动异步拆卷，解析完成自动存入个人题库</p>
+
+        {/* 右上角刷新按钮 */}
+        <div className="flex justify-end mb-4">
+          <button type="button" className="btn-secondary text-xs px-3 py-2" onClick={loadTasks} disabled={loading}>
+            {loading ? '加载中…' : '🔄 刷新列表'}
           </button>
         </div>
 
         {message && (
-          <p className="mb-4 rounded-lg border border-blue-500/30 bg-blue-500/10 px-3 py-2 text-sm text-blue-200">{message}</p>
+          <p className="mb-4 rounded-[8px] border border-blue-500/30 bg-blue-500/10 px-3 py-2 text-sm text-blue-200">{message}</p>
         )}
 
-        <div className="overflow-x-auto rounded-xl border border-slate-700">
+        <div className="overflow-x-auto rounded-[12px] border border-white/[0.06]" style={{ backgroundColor: '#1C2332' }}>
           <table className="w-full min-w-[720px] text-left text-sm">
-            <thead className="bg-slate-800/80 text-slate-400">
+            <thead className="text-[#8A94A9] text-xs" style={{ backgroundColor: '#1C2332' }}>
               <tr>
                 <th className="p-3">文件名</th>
                 <th className="p-3">提交时间</th>
@@ -173,27 +176,26 @@ export default function TeacherTaskCenterPage() {
                 <th className="p-3">操作</th>
               </tr>
             </thead>
-            <tbody>
+            <tbody className="divide-y divide-white/[0.04]">
               {loading && tasks.length === 0 ? (
-                <tr><td colSpan={5} className="p-6 text-center text-slate-500">加载中...</td></tr>
+                <tr><td colSpan={5} className="p-6 text-center text-[#8A94A9]">加载中...</td></tr>
               ) : tasks.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="p-6 text-center text-slate-500">
-                    暂无拆题任务，请前往
-                    {' '}
-                    <Link to="/teacher/question-bank" className="text-cyan-400 hover:underline">我的题库</Link>
-                    {' '}
-                    上传试卷
+                  <td colSpan={5} className="p-12 text-center">
+                    <p className="text-[#8A94A9] mb-5">暂无拆题任务</p>
+                    <Link to="/teacher/question-bank" className="btn-brand text-base px-6 py-3">
+                      去上传试卷
+                    </Link>
                   </td>
                 </tr>
               ) : (
                 tasks.map((task) => (
-                  <tr key={task.taskId} className="border-t border-slate-800 hover:bg-slate-900/50">
+                  <tr key={task.taskId} className="transition hover:bg-white/[0.03]">
                     <td className="p-3">
                       <div className="font-medium">{task.fileName}</div>
-                      <div className="text-xs text-slate-500">{task.subject} · {task.grade}</div>
+                      <div className="text-xs text-[#8A94A9]">{task.subject} · {task.grade}</div>
                     </td>
-                    <td className="p-3 text-slate-400">{formatTime(task.created_at)}</td>
+                    <td className="p-3 text-[#8A94A9]">{formatTime(task.created_at)}</td>
                     <td className={`p-3 ${statusColor(task.status)}`}>
                       {statusLabel(task.status, task.batchProgress ?? undefined)}
                       {task.status === 'failed' && task.error_message && (
@@ -204,28 +206,18 @@ export default function TeacherTaskCenterPage() {
                     <td className="p-3">
                       <div className="flex flex-wrap gap-2">
                         {(task.status === 'processing' || task.status === 'parsed' || task.status === 'splitting') && (
-                          <button
-                            type="button"
-                            className={btnSecondary}
-                            disabled={refreshingId === task.taskId}
-                            onClick={() => refreshTask(task.taskId)}
-                          >
-                            {refreshingId === task.taskId ? '刷新中...' : '刷新'}
+                          <button type="button" className="btn-secondary text-xs px-3 py-1.5" disabled={refreshingId === task.taskId} onClick={() => refreshTask(task.taskId)}>
+                            {refreshingId === task.taskId ? '刷新中…' : '刷新进度'}
                           </button>
                         )}
                         {task.status === 'completed' && (
-                          <button type="button" className={btnPrimary} onClick={() => viewResult(task.taskId)}>
+                          <button type="button" className="btn-brand text-xs px-3 py-1.5" onClick={() => viewResult(task.taskId)}>
                             查看结果
                           </button>
                         )}
                         {task.status === 'failed' && (
-                          <button
-                            type="button"
-                            className={btnSecondary}
-                            disabled={retryingId === task.taskId}
-                            onClick={() => handleRetry(task.taskId)}
-                          >
-                            {retryingId === task.taskId ? '提交中...' : '重新拆题'}
+                          <button type="button" className="btn-secondary text-xs px-3 py-1.5" disabled={retryingId === task.taskId} onClick={() => handleRetry(task.taskId)}>
+                            {retryingId === task.taskId ? '提交中…' : '重新拆题'}
                           </button>
                         )}
                       </div>
@@ -240,32 +232,21 @@ export default function TeacherTaskCenterPage() {
 
       {splitPreview && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
-          <div className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-2xl border border-slate-700 bg-slate-900 p-6">
+          <div className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-[12px] border border-white/[0.06] p-6" style={{ backgroundColor: '#1C2332' }}>
             <h3 className="mb-4 text-lg font-semibold">拆题结果确认（{splitPreview.length} 道）</h3>
             <div className="space-y-3">
               {splitPreview.map((q, i) => (
-                <div key={i} className="rounded-lg border border-slate-700 p-3">
-                  <p className="text-xs text-slate-500">{q.question_type} · {q.difficulty} · {q.knowledge_point}</p>
-                  <textarea
-                    className={`${inputClass} mt-2`}
-                    rows={2}
-                    value={q.content}
-                    onChange={(e) => {
-                      const next = [...splitPreview]
-                      next[i] = { ...q, content: e.target.value }
-                      setSplitPreview(next)
-                    }}
-                  />
+                <div key={i} className="rounded-[8px] border border-white/[0.06] p-3">
+                  <p className="text-xs text-[#8A94A9]">{q.question_type} · {q.difficulty} · {q.knowledge_point}</p>
+                  <textarea className="input-brand mt-2" rows={2} value={q.content} onChange={(e) => {
+                      const next = [...splitPreview]; next[i] = { ...q, content: e.target.value }; setSplitPreview(next)
+                    }} />
                 </div>
               ))}
             </div>
             <div className="mt-4 flex justify-end gap-2">
-              <button type="button" className={btnSecondary} onClick={() => setSplitPreview(null)} disabled={importing}>
-                取消
-              </button>
-              <button type="button" className={btnPrimary} onClick={confirmImport} disabled={importing}>
-                {importing ? '入库中...' : '确认入库'}
-              </button>
+              <button type="button" className="btn-secondary" onClick={() => setSplitPreview(null)} disabled={importing}>取消</button>
+              <button type="button" className="btn-brand" onClick={confirmImport} disabled={importing}>{importing ? '入库中…' : '确认入库'}</button>
             </div>
           </div>
         </div>

@@ -37,3 +37,36 @@ export async function exportToPdf(element: HTMLElement, filename: string): Promi
 
   pdf.save(filename)
 }
+
+export async function exportExamToWord(element: HTMLElement, filename: string): Promise<void> {
+  const html = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="generator" content="华祺云师AI">
+  <title>${filename.replace('.docx', '')}</title>
+  <style>
+    body { font-family: 'SimSun', '宋体', serif; font-size: 12pt; line-height: 1.6; color: #000; margin: 20mm; }
+    h1 { text-align: center; font-size: 16pt; }
+    table { border-collapse: collapse; width: 100%; }
+    td, th { border: 1px solid #000; padding: 4px 8px; }
+    @page { margin: 20mm; }
+  </style>
+</head>
+<body>
+${element.innerHTML}
+</body>
+</html>`
+
+  const blob = new Blob(['\ufeff' + html], {
+    type: 'application/msword',
+  })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename.endsWith('.docx') ? filename : `${filename}.doc`
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  URL.revokeObjectURL(url)
+}

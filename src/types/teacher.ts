@@ -178,11 +178,38 @@ export interface BookRecord {
   updated_at?: string
 }
 
+/* ============================================================
+   华祺云师AI · 全局样式常量 (Design System)
+   主色：#2584FF｜页面底色：#121722｜卡片底色：#1C2332
+   正文#E8ECF3｜辅助灰#8A94A9｜卡片圆角：12px｜按钮圆角：8px
+   ============================================================ */
+
+/** 标准输入框 — 圆角8px，深色卡片底，聚焦蓝色描边 */
 export const inputClass =
-  'w-full rounded-xl border border-slate-700 bg-slate-800/80 px-4 py-3 text-white outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30'
+  'w-full rounded-[8px] border border-white/10 bg-[#1C2332] px-4 py-2.5 text-[#E8ECF3] placeholder-[#8A94A9] outline-none transition focus:border-[#2584FF] focus:ring-[3px] focus:ring-[#2584FF]/15 text-sm'
 
+/** 标准下拉框 */
+export const selectClass =
+  'rounded-[8px] border border-white/10 bg-[#1C2332] text-[#E8ECF3] px-4 py-2.5 text-sm outline-none cursor-pointer transition focus:border-[#2584FF] appearance-none bg-no-repeat bg-[right_12px_center] pr-8'
+
+/** 主按钮 — 圆角8px，品牌蓝 #2584FF，hover #0F70E8 */
 export const btnPrimary =
-  'rounded-xl bg-gradient-to-r from-blue-600 to-cyan-500 px-4 py-2.5 text-sm font-semibold text-white shadow-lg shadow-blue-600/30 hover:from-blue-500 hover:to-cyan-400 disabled:opacity-50'
+  'inline-flex items-center justify-center gap-1.5 rounded-[8px] bg-[#2584FF] px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-[#0F70E8] active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed'
 
+/** 次按钮 — 透明底白色边框 */
 export const btnSecondary =
-  'rounded-xl border border-slate-600 bg-slate-800/80 px-4 py-2.5 text-sm text-slate-200 hover:border-blue-500/50'
+  'inline-flex items-center justify-center gap-1.5 rounded-[8px] border border-white/10 bg-transparent px-5 py-2.5 text-sm font-medium text-[#E8ECF3] transition hover:border-[#2584FF] hover:text-[#5C9DFF]'
+
+/** 金色边框按钮（会员中心等） */
+export const btnGold =
+  'inline-flex items-center gap-1 rounded-[8px] border border-amber-500/50 bg-transparent px-4 py-1.5 text-[13px] font-medium text-amber-400 transition hover:bg-amber-500/10'
+
+/** 卡片 hover 上浮效果 — 组合 class */
+export const cardLift =
+  'rounded-[12px] bg-[#1C2332] border border-white/[0.06] transition-all duration-200 hover:-translate-y-[3px] hover:bg-[#222B3E] hover:shadow-lg hover:shadow-black/30'
+
+/** 页面标题 */
+export const pageTitleClass = 'text-xl font-bold text-[#E8ECF3]'
+
+/** 辅助描述文字 */
+export const mutedTextClass = 'text-sm text-[#8A94A9]'

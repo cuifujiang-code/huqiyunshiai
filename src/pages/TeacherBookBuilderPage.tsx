@@ -39,6 +39,8 @@ export default function TeacherBookBuilderPage() {
   const [knowledgeGraph, setKnowledgeGraph] = useState<BookRecord['knowledgeGraph']>(null)
   const [graphLoading, setGraphLoading] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
+  const [leftCollapsed, setLeftCollapsed] = useState(false)
+  const [rightCollapsed, setRightCollapsed] = useState(false)
 
   const chapter = chapters[selectedChapter]
 
@@ -117,162 +119,225 @@ export default function TeacherBookBuilderPage() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-950 text-white">
-      <DashboardHeader title="辅导书制作" backTo="/teacher/dashboard" backLabel="返回工作台" featureNavRole="teacher" />
-      <main className="mx-auto flex max-w-7xl flex-col gap-4 px-4 py-6 lg:flex-row">
-        <aside className="w-full shrink-0 space-y-3 lg:w-72">
-          <input className={`${inputClass} text-sm py-2`} value={title} onChange={(e) => setTitle(e.target.value)} />
-          <input className={`${inputClass} text-sm py-2`} value={grade} onChange={(e) => setGrade(e.target.value)} placeholder="年级" />
-          <select className={`${inputClass} text-sm py-2`} value={level} onChange={(e) => setLevel(e.target.value)}>
-            <option>基础</option>
-            <option>提高</option>
-            <option>竞赛</option>
-          </select>
+    <div className="min-h-screen bg-[#121722] text-[#E8ECF3]">
+      <DashboardHeader title="教辅书制作" backTo="/teacher/dashboard" backLabel="返回工作台" featureNavRole="teacher" />
 
-          <div className="rounded-xl border border-slate-700 p-3">
-            <p className="mb-2 text-xs font-medium text-slate-400">封面风格</p>
-            <div className="space-y-1">
-              {COVER_OPTIONS.map((c) => (
-                <button
-                  key={c.id}
-                  type="button"
-                  onClick={() => setCoverStyle(c.id)}
-                  className={`w-full rounded-lg px-2 py-1.5 text-left text-sm ${
-                    coverStyle === c.id ? 'bg-rose-500/20 text-rose-200' : 'text-slate-400 hover:bg-slate-800'
-                  }`}
-                >
-                  {c.label} · {c.desc}
-                </button>
-              ))}
-            </div>
+      <main className="mx-auto flex max-w-[1600px] gap-3 px-4 py-4" style={{ height: 'calc(100vh - 140px)' }}>
+        {/* 左栏：封面设置 + 选题筛选 */}
+        <aside
+          className={`flex shrink-0 flex-col gap-3 overflow-y-auto rounded-[12px] border border-white/[0.06] bg-[#1C2332] p-3 transition-all ${
+            leftCollapsed ? 'w-10 p-2' : 'w-64'
+          }`}
+        >
+          <div className="flex items-center justify-between">
+            {!leftCollapsed && <span className="text-xs font-semibold uppercase tracking-wider text-[#8A94A9]">封面设置</span>}
+            <button
+              type="button"
+              onClick={() => setLeftCollapsed(!leftCollapsed)}
+              className="rounded p-1 text-xs text-[#8A94A9] hover:text-[#E8ECF3]"
+            >
+              {leftCollapsed ? '▶' : '◀'}
+            </button>
           </div>
 
-          <BookQuestionPicker teacherId={teacherId} selected={pickedQuestions} onChange={setPickedQuestions} />
+          {!leftCollapsed && (
+            <>
+              <input
+                className={`${inputClass} text-sm`}
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                placeholder="书名"
+              />
+              <input
+                className={`${inputClass} text-sm`}
+                value={grade}
+                onChange={(e) => setGrade(e.target.value)}
+                placeholder="年级"
+              />
+              <select
+                className={`${inputClass} text-sm`}
+                value={level}
+                onChange={(e) => setLevel(e.target.value)}
+              >
+                <option>基础</option>
+                <option>提高</option>
+                <option>竞赛</option>
+              </select>
 
-          <button type="button" className={`${btnSecondary} w-full text-sm`} onClick={applyQuestionsToChapters}>
-            按章节自动归类
-          </button>
-          <button type="button" className={`${btnSecondary} w-full text-sm`} onClick={() => void handleGenerateGraph()} disabled={graphLoading}>
-            {graphLoading ? '生成中…' : 'AI 生成知识网络图'}
-          </button>
+              <div className="space-y-1">
+                <p className="text-[11px] text-[#8A94A9]">封面风格</p>
+                {COVER_OPTIONS.map((c) => (
+                  <button
+                    key={c.id}
+                    type="button"
+                    onClick={() => setCoverStyle(c.id)}
+                    className={`w-full rounded-[8px] px-2 py-1.5 text-left text-xs transition ${
+                      coverStyle === c.id
+                        ? 'bg-[#2584FF]/15 text-[#5C9DFF] ring-1 ring-[#2584FF]/30'
+                        : 'text-[#8A94A9] hover:bg-[#222B3E]'
+                    }`}
+                  >
+                    {c.label} · {c.desc}
+                  </button>
+                ))}
+              </div>
 
-          <p className="text-xs text-slate-500">目录</p>
-          {chapters.map((ch, i) => (
-            <button
-              key={ch.id}
-              type="button"
-              onClick={() => setSelectedChapter(i)}
-              className={`mb-1 block w-full rounded px-2 py-1 text-left text-sm ${
-                i === selectedChapter ? 'bg-rose-600/30 text-rose-200' : 'text-slate-400 hover:bg-slate-800'
-              }`}
-            >
-              {ch.title}
-            </button>
-          ))}
-          <button type="button" className="text-xs text-cyan-400" onClick={addChapter}>
-            + 添加章节
-          </button>
+              <div className="h-px bg-white/[0.06]" />
+
+              <BookQuestionPicker teacherId={teacherId} selected={pickedQuestions} onChange={setPickedQuestions} />
+
+              <button type="button" className={`${btnSecondary} w-full text-xs`} onClick={applyQuestionsToChapters}>
+                按章节自动归类
+              </button>
+              <button
+                type="button"
+                className={`${btnSecondary} w-full text-xs`}
+                onClick={() => void handleGenerateGraph()}
+                disabled={graphLoading}
+              >
+                {graphLoading ? '生成中…' : 'AI 生成知识网络图'}
+              </button>
+            </>
+          )}
         </aside>
 
-        <section className="min-w-0 flex-1 rounded-2xl border border-slate-700 bg-slate-900/60 p-4">
-          {message && <p className="mb-3 text-sm text-blue-300">{message}</p>}
-
-          <KnowledgeGraphView graph={knowledgeGraph ?? null} loading={graphLoading} />
-
-          <div className="my-4 flex flex-wrap gap-2">
-            <button type="button" className={btnSecondary} onClick={addSection}>
-              + 小节
-            </button>
-            <button type="button" className={btnSecondary} onClick={() => addBlock('knowledge')}>
-              + 知识讲解
-            </button>
-            <button type="button" className={btnSecondary} onClick={() => addBlock('example')}>
-              + 例题
-            </button>
-            <button type="button" className={btnSecondary} onClick={() => addBlock('exercise')}>
-              + 练习
-            </button>
-            <button type="button" className={btnSecondary} onClick={() => addBlock('summary')}>
-              + 总结
+        {/* 中栏：章节编辑 */}
+        <section className="flex flex-1 flex-col min-w-0 overflow-hidden rounded-[12px] border border-white/[0.06] bg-[#1C2332]">
+          {/* 章节 Tab 切换 */}
+          <div className="flex shrink-0 items-center gap-1 overflow-x-auto border-b border-white/[0.06] px-3 py-2">
+            {chapters.map((ch, i) => (
+              <button
+                key={ch.id}
+                type="button"
+                onClick={() => setSelectedChapter(i)}
+                className={`shrink-0 rounded-[6px] px-3 py-1.5 text-xs font-medium transition ${
+                  i === selectedChapter
+                    ? 'bg-[#2584FF] text-white'
+                    : 'text-[#8A94A9] hover:bg-[#222B3E] hover:text-[#E8ECF3]'
+                }`}
+              >
+                {ch.title}
+              </button>
+            ))}
+            <button type="button" onClick={addChapter} className="shrink-0 rounded-[6px] px-2 py-1.5 text-xs text-[#2584FF] hover:bg-[#2584FF]/10">
+              + 章节
             </button>
           </div>
 
-          {chapter?.sections.map((sec: BookSection) => (
-            <div key={sec.id} className="mb-4">
-              <input
-                className={`${inputClass} mb-2 font-semibold text-sm py-2`}
-                value={sec.title}
-                onChange={(e) => {
-                  const next = [...chapters]
-                  const s = next[selectedChapter].sections.find((x) => x.id === sec.id)
-                  if (s) s.title = e.target.value
-                  setChapters(next)
-                }}
-              />
-              {sec.blocks.map((b) => (
-                <div key={b.id} className="mb-2 rounded-lg border border-slate-700 p-2">
-                  <p className="text-xs text-slate-500">{b.type}</p>
-                  <textarea
-                    className={`${inputClass} mt-1 text-sm`}
-                    rows={3}
-                    value={b.content}
-                    onChange={(e) => {
-                      setChapters(
-                        chapters.map((ch, ci) =>
-                          ci !== selectedChapter
-                            ? ch
-                            : {
-                                ...ch,
-                                sections: ch.sections.map((s) =>
-                                  s.id !== sec.id
-                                    ? s
-                                    : {
-                                        ...s,
-                                        blocks: s.blocks.map((blk) =>
-                                          blk.id === b.id ? { ...blk, content: e.target.value } : blk,
-                                        ),
-                                      },
-                                ),
-                              },
-                        ),
-                      )
-                    }}
-                  />
-                </div>
-              ))}
+          {/* 操作栏 */}
+          <div className="flex shrink-0 flex-wrap gap-1.5 border-b border-white/[0.06] px-3 py-2">
+            <button type="button" className={btnSecondary} onClick={addSection}>+ 小节</button>
+            <button type="button" className={btnSecondary} onClick={() => addBlock('knowledge')}>+ 知识</button>
+            <button type="button" className={btnSecondary} onClick={() => addBlock('example')}>+ 例题</button>
+            <button type="button" className={btnSecondary} onClick={() => addBlock('exercise')}>+ 练习</button>
+            <button type="button" className={btnSecondary} onClick={() => addBlock('summary')}>+ 总结</button>
+          </div>
+
+          {/* 内容编辑区 */}
+          <div className="flex-1 overflow-y-auto p-4">
+            {message && (
+              <p className="mb-3 rounded-[8px] border border-[#2584FF]/20 bg-[#2584FF]/10 px-3 py-2 text-sm text-[#5C9DFF]">
+                {message}
+              </p>
+            )}
+
+            <KnowledgeGraphView graph={knowledgeGraph ?? null} loading={graphLoading} />
+
+            {chapter?.sections.map((sec: BookSection) => (
+              <div key={sec.id} className="mb-4">
+                <input
+                  className={`${inputClass} mb-2 font-semibold text-sm`}
+                  value={sec.title}
+                  onChange={(e) => {
+                    const next = [...chapters]
+                    const s = next[selectedChapter].sections.find((x) => x.id === sec.id)
+                    if (s) s.title = e.target.value
+                    setChapters(next)
+                  }}
+                />
+                {sec.blocks.map((b) => (
+                  <div key={b.id} className="mb-2 rounded-[8px] border border-white/[0.06] bg-[#222B3E] p-2">
+                    <p className="text-[11px] text-[#8A94A9]">{b.title}</p>
+                    <textarea
+                      className={`${inputClass} mt-1 text-sm`}
+                      rows={3}
+                      value={b.content}
+                      onChange={(e) => {
+                        setChapters(
+                          chapters.map((ch, ci) =>
+                            ci !== selectedChapter
+                              ? ch
+                              : {
+                                  ...ch,
+                                  sections: ch.sections.map((s) =>
+                                    s.id !== sec.id
+                                      ? s
+                                      : {
+                                          ...s,
+                                          blocks: s.blocks.map((blk) =>
+                                            blk.id === b.id ? { ...blk, content: e.target.value } : blk,
+                                          ),
+                                        },
+                                  ),
+                                },
+                          ),
+                        )
+                      }}
+                    />
+                  </div>
+                ))}
+              </div>
+            ))}
+
+            {/* 底部操作按钮 */}
+            <div className="flex flex-wrap gap-2 border-t border-white/[0.06] pt-3">
+              <button type="button" className={btnPrimary} onClick={() => void handleSave()}>
+                保存辅导书
+              </button>
+              <button
+                type="button"
+                className={btnSecondary}
+                onClick={() => exportHtmlAsWord(bookToExportHtml(bookRecord()), title)}
+              >
+                导出 Word
+              </button>
+              <button
+                type="button"
+                className={btnSecondary}
+                onClick={() => previewRef.current && exportToPdf(previewRef.current, `${title}.pdf`)}
+              >
+                导出 PDF
+              </button>
             </div>
-          ))}
+            <p className="mt-2 text-[11px] text-[#8A94A9]">导出含统一章节标题、页码与封面样式</p>
+          </div>
+        </section>
 
-          <div className="flex flex-wrap gap-2">
-            <button type="button" className={btnPrimary} onClick={() => void handleSave()}>
-              保存辅导书
-            </button>
+        {/* 右栏：预览 */}
+        <aside
+          className={`shrink-0 overflow-hidden rounded-[12px] border border-white/[0.06] bg-[#1C2332] transition-all ${
+            rightCollapsed ? 'w-10 p-1' : 'w-72 p-3'
+          }`}
+        >
+          <div className="flex items-center justify-between">
+            {!rightCollapsed && <span className="text-xs font-semibold uppercase tracking-wider text-[#8A94A9]">全书预览</span>}
             <button
               type="button"
-              className={btnSecondary}
-              onClick={() => exportHtmlAsWord(bookToExportHtml(bookRecord()), title)}
+              onClick={() => setRightCollapsed(!rightCollapsed)}
+              className="rounded p-1 text-xs text-[#8A94A9] hover:text-[#E8ECF3]"
             >
-              导出 Word
-            </button>
-            <button
-              type="button"
-              className={btnSecondary}
-              onClick={() => previewRef.current && exportToPdf(previewRef.current, `${title}.pdf`)}
-            >
-              导出 PDF
+              {rightCollapsed ? '◀' : '▶'}
             </button>
           </div>
-          <p className="mt-2 text-xs text-slate-500">导出含统一章节标题、页码与封面样式</p>
-        </section>
 
-        <section className="hidden w-80 shrink-0 lg:block">
-          <p className="mb-2 text-xs text-slate-500">全书预览</p>
-          <div
-            ref={previewRef}
-            className="max-h-[calc(100vh-6rem)] overflow-y-auto rounded-2xl border border-slate-700 bg-white p-4 text-black text-sm"
-            dangerouslySetInnerHTML={{ __html: bookToExportHtml(bookRecord()) }}
-          />
-        </section>
+          {!rightCollapsed && (
+            <div
+              ref={previewRef}
+              className="mt-2 max-h-[calc(100vh-12rem)] overflow-y-auto rounded-[8px] bg-white p-4 text-sm text-black"
+              dangerouslySetInnerHTML={{ __html: bookToExportHtml(bookRecord()) }}
+            />
+          )}
+        </aside>
       </main>
     </div>
   )

@@ -154,17 +154,17 @@ export default function TeacherQuestionBankPage() {
   const isPublicTab = filters.visibility === 'public'
 
   return (
-    <div className="min-h-screen bg-slate-950 text-white">
+    <div className="min-h-screen text-[#E8ECF3]" style={{ backgroundColor: '#121722' }}>
       <DashboardHeader title="我的题库" backTo="/teacher/dashboard" backLabel="返回工作台" featureNavRole="teacher" />
-      <main className="mx-auto max-w-6xl px-4 py-6">
-        {message && <p className="mb-4 rounded-lg border border-blue-500/30 bg-blue-500/10 px-3 py-2 text-sm text-blue-200">{message}</p>}
+      <main className="mx-auto max-w-6xl px-5 py-6">
+        {message && <p className="mb-4 rounded-[8px] border border-blue-500/30 bg-blue-500/10 px-3 py-2 text-sm text-blue-200">{message}</p>}
 
         {/* 个人/公域 Tab 切换 */}
-        <div className="mb-4 flex items-center gap-1 rounded-xl bg-slate-800/80 p-1 w-fit">
+        <div className="mb-4 flex items-center gap-1 rounded-[10px] p-1 w-fit" style={{ backgroundColor: '#1C2332' }}>
           <button
             type="button"
-            className={`rounded-lg px-4 py-2 text-sm font-medium transition ${
-              !isPublicTab ? 'bg-blue-600 text-white shadow' : 'text-slate-400 hover:text-white'
+            className={`rounded-[8px] px-4 py-2 text-sm font-medium transition ${
+              !isPublicTab ? 'bg-[#2584FF] text-white shadow' : 'text-[#8A94A9] hover:text-[#E8ECF3]'
             }`}
             onClick={() => { setFilters({ ...filters, visibility: 'personal' }); setPage(1); setSelected([]) }}
           >
@@ -172,8 +172,8 @@ export default function TeacherQuestionBankPage() {
           </button>
           <button
             type="button"
-            className={`rounded-lg px-4 py-2 text-sm font-medium transition ${
-              isPublicTab ? 'bg-emerald-600 text-white shadow' : 'text-slate-400 hover:text-white'
+            className={`rounded-[8px] px-4 py-2 text-sm font-medium transition ${
+              isPublicTab ? 'bg-emerald-600 text-white shadow' : 'text-[#8A94A9] hover:text-[#E8ECF3]'
             }`}
             onClick={() => { setFilters({ ...filters, visibility: 'public' }); setPage(1); setSelected([]) }}
           >
@@ -181,41 +181,41 @@ export default function TeacherQuestionBankPage() {
           </button>
         </div>
 
-        {/* 筛选栏 */}
-        <div className="mb-4 flex flex-wrap gap-2">
-          <select className={`${inputClass} w-auto`} value={filters.subject} onChange={(e) => setFilters({ ...filters, subject: e.target.value, question_type: '' })}>
-            <option value="">全部学科</option>
-            {TEACHER_SUBJECTS.map((s) => <option key={s} value={s}>{s}</option>)}
-          </select>
-          <select className={`${inputClass} w-auto`} value={filters.grade} onChange={(e) => setFilters({ ...filters, grade: e.target.value })}>
-            <option value="">全部年级</option>
-            {TEACHER_GRADES.map((g) => <option key={g} value={g}>{g}</option>)}
-          </select>
-          <select className={`${inputClass} w-auto`} value={filters.question_type} onChange={(e) => setFilters({ ...filters, question_type: e.target.value })}>
-            <option value="">全部题型</option>
-            {questionTypes.map((t) => <option key={t} value={t}>{t}</option>)}
-          </select>
-          <select className={`${inputClass} w-auto`} value={filters.difficulty} onChange={(e) => setFilters({ ...filters, difficulty: e.target.value })}>
-            <option value="">全部难度</option>
-            {DIFFICULTIES.map((d) => <option key={d} value={d}>{d}</option>)}
-          </select>
-          <select className={`${inputClass} w-auto`} value={filters.source} onChange={(e) => setFilters({ ...filters, source: e.target.value })}>
-            <option value="">全部来源</option>
-            {QUESTION_SOURCES.map((s) => <option key={s} value={s}>{s}</option>)}
-          </select>
-          <input className={`${inputClass} min-w-[160px] flex-1`} placeholder="搜索题目内容" value={filters.keyword} onChange={(e) => setFilters({ ...filters, keyword: e.target.value })} />
-          <button type="button" className={btnSecondary} onClick={() => { setPage(1); load() }}>筛选</button>
-          {!isPublicTab && (
-            <>
-              <button type="button" className={btnPrimary} onClick={() => setEditing(emptyQuestion())}>+ 单题添加</button>
-              <label className={`${btnSecondary} cursor-pointer ${importing ? 'opacity-60 pointer-events-none' : ''}`}>
-                {importing ? '提交中...' : '上传试卷拆题'}
-                <input type="file" accept=".docx,.pdf" className="hidden" onChange={(e) => e.target.files?.[0] && handleImportFile(e.target.files[0])} />
-              </label>
-            </>
-          )}
-          <Link to="/teacher/task-center" className={btnSecondary}>查看拆题任务</Link>
-          <Link to="/teacher/batch-upload" className={btnPrimary}>大批量拆题（100～1000题）</Link>
+        {/* 筛选栏 + 功能按钮 — 横向一行 */}
+        <div className="mb-4 flex items-center gap-2">
+          {/* 筛选下拉 — 左侧横向排列 */}
+          <div className="flex items-center gap-2 flex-1 min-w-0">
+            <select className="select-brand w-[110px]" value={filters.subject} onChange={(e) => setFilters({ ...filters, subject: e.target.value, question_type: '' })}>
+              <option value="">学科</option>
+              {TEACHER_SUBJECTS.map((s) => <option key={s} value={s}>{s}</option>)}
+            </select>
+            <select className="select-brand w-[100px]" value={filters.grade} onChange={(e) => setFilters({ ...filters, grade: e.target.value })}>
+              <option value="">年级</option>
+              {TEACHER_GRADES.map((g) => <option key={g} value={g}>{g}</option>)}
+            </select>
+            <select className="select-brand w-[100px]" value={filters.question_type} onChange={(e) => setFilters({ ...filters, question_type: e.target.value })}>
+              <option value="">题型</option>
+              {questionTypes.map((t) => <option key={t} value={t}>{t}</option>)}
+            </select>
+            <select className="select-brand w-[90px]" value={filters.difficulty} onChange={(e) => setFilters({ ...filters, difficulty: e.target.value })}>
+              <option value="">难度</option>
+              {DIFFICULTIES.map((d) => <option key={d} value={d}>{d}</option>)}
+            </select>
+            <input className="input-brand flex-1 min-w-[120px]" placeholder="搜索题目…" value={filters.keyword} onChange={(e) => setFilters({ ...filters, keyword: e.target.value })} />
+          </div>
+          {/* 右侧功能按钮 */}
+          <div className="flex items-center gap-2 shrink-0">
+            {!isPublicTab && (
+              <>
+                <button type="button" className="btn-brand text-xs px-3 py-2" onClick={() => setEditing(emptyQuestion())}>单题录入</button>
+                <label className={`btn-secondary text-xs px-3 py-2 cursor-pointer ${importing ? 'opacity-50 pointer-events-none' : ''}`}>
+                  {importing ? '提交中…' : '上传拆题'}
+                  <input type="file" accept=".docx,.pdf" className="hidden" onChange={(e) => e.target.files?.[0] && handleImportFile(e.target.files[0])} />
+                </label>
+                <Link to="/teacher/task-center" className="btn-brand text-xs px-3 py-2">批量拆题</Link>
+              </>
+            )}
+          </div>
         </div>
 
         {/* 批量操作栏 */}
@@ -249,10 +249,10 @@ export default function TeacherQuestionBankPage() {
           </div>
         )}
 
-        {/* 题目列表 */}
-        <div className="overflow-x-auto rounded-xl border border-slate-700">
+        {/* 题目列表 — 表头固定悬浮 */}
+        <div className="overflow-x-auto rounded-[12px] border border-white/[0.06]" style={{ backgroundColor: '#1C2332' }}>
           <table className="w-full min-w-[800px] text-left text-sm">
-            <thead className="bg-slate-800/80 text-slate-400">
+            <thead className="sticky top-0 z-10 text-[#8A94A9] text-xs" style={{ backgroundColor: '#1C2332' }}>
               <tr>
                 <th className="p-3"><input type="checkbox" checked={selected.length === items.length && items.length > 0} onChange={(e) => setSelected(e.target.checked ? items.map((i) => i.id!).filter(Boolean) : [])} /></th>
                 <th className="p-3">学科</th>
@@ -264,17 +264,20 @@ export default function TeacherQuestionBankPage() {
                 <th className="p-3">操作</th>
               </tr>
             </thead>
-            <tbody>
+            <tbody className="divide-y divide-white/[0.04]">
               {loading ? (
-                <tr><td colSpan={isPublicTab ? 8 : 7} className="p-6 text-center text-slate-500">加载中...</td></tr>
+                <tr><td colSpan={isPublicTab ? 8 : 7} className="p-6 text-center text-[#8A94A9]">加载中...</td></tr>
               ) : items.length === 0 ? (
-                <tr><td colSpan={isPublicTab ? 8 : 7} className="p-6 text-center text-slate-500">
-                  {isPublicTab ? '公域题库暂无题目' : '暂无题目，请添加或导入试卷'}
+                <tr><td colSpan={isPublicTab ? 8 : 7} className="p-10 text-center">
+                  <p className="text-[#8A94A9] mb-4">{isPublicTab ? '公域题库暂无题目' : '暂无试题数据'}</p>
+                  {!isPublicTab && (
+                    <Link to="/teacher/task-center" className="btn-brand text-sm px-5 py-2.5">去批量拆题</Link>
+                  )}
                 </td></tr>
               ) : items.map((q) => {
                 const isExpanded = expandedId === q.id
                 return (
-                  <tr key={q.id} className={`border-t border-slate-800 hover:bg-slate-900/50 ${isExpanded ? 'bg-slate-800/40' : ''}`}>
+                  <tr key={q.id} className={`transition hover:bg-white/[0.03] ${isExpanded ? 'bg-white/[0.04]' : ''}`} style={{ borderColor: 'rgba(255,255,255,0.04)' }}>
                     <td className="p-3"><input type="checkbox" checked={selected.includes(q.id!)} onChange={(e) => setSelected(e.target.checked ? [...selected, q.id!] : selected.filter((id) => id !== q.id))} /></td>
                     <td className="p-3">{q.subject}</td>
                     <td className="p-3">{q.question_type}</td>
@@ -292,7 +295,7 @@ export default function TeacherQuestionBankPage() {
                             {q.options && q.options.length > 0 && (
                               <div className="mt-2 grid grid-cols-2 gap-1 text-xs">
                                 {q.options.map((opt, oi) => (
-                                  <span key={oi} className="rounded bg-slate-700/50 px-2 py-0.5">
+                                  <span key={oi} className="rounded bg-white/[0.06] px-2 py-0.5">
                                     <MathRenderer text={opt} />
                                   </span>
                                 ))}
@@ -326,7 +329,7 @@ export default function TeacherQuestionBankPage() {
                     </td>
                     <td className="p-3">{q.source}</td>
                     {isPublicTab && (
-                      <td className="p-3 text-xs text-slate-400">{q.teacher_id?.slice(0, 8) || '未知'}</td>
+                      <td className="p-3 text-xs text-[#8A94A9]">{q.teacher_id?.slice(0, 8) || '未知'}</td>
                     )}
                     <td className="p-3">
                       {!isPublicTab && (
@@ -343,7 +346,7 @@ export default function TeacherQuestionBankPage() {
           </table>
         </div>
 
-        <div className="mt-4 flex items-center justify-between text-sm text-slate-400">
+        <div className="mt-4 flex items-center justify-between text-sm text-[#8A94A9]">
           <span>共 {total} 题</span>
           <div className="flex gap-2">
             <button type="button" disabled={page <= 1} className={btnSecondary} onClick={() => setPage((p) => p - 1)}>上一页</button>
