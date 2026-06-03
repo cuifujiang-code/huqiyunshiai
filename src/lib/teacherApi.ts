@@ -7,10 +7,10 @@ import type {
   KnowledgeGraph,
   LessonPlan,
 } from '../types/teacher'
+import { getTeacherApiBase } from './apiBase'
 import { postApiJson } from './postApiJson'
 
-// 默认同源调用（SPA 项目已自带 serverless functions）；可通过 VITE_TEACHER_API_URL 覆盖
-const TEACHER_API_BASE = (import.meta.env.VITE_TEACHER_API_URL || '').replace(/\/$/, '')
+const TEACHER_API_BASE = getTeacherApiBase()
 
 /** 教师业务 API（题库/组卷/讲义/辅导书等）→ /api/teacher/* */
 function teacherApiUrl(path: string) {

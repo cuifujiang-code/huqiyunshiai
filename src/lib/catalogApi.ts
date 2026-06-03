@@ -1,6 +1,7 @@
+import { getTeacherApiBase } from './apiBase'
 import { postApiJson } from './postApiJson'
 
-const TEACHER_API_BASE = (import.meta.env.VITE_TEACHER_API_URL ?? 'https://api.huqiyunshiai.online').replace(/\/$/, '')
+const TEACHER_API_BASE = getTeacherApiBase()
 
 function catalogUrl(path: string) {
   return `${TEACHER_API_BASE}/api/catalog/${path.replace(/^\//, '')}`
