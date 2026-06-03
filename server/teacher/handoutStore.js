@@ -55,6 +55,7 @@ const MODE_TEMPLATES = {
   school: ['课题标题', '教学目标', '知识梳理', '典型例题', '课堂练习', '课后作业'],
   tutoring: ['课题标题', '适用层次', '知识点模块', '综合练习', '本讲总结', '课后巩固'],
   targeted: ['学生信息', '薄弱点总览', '分知识点训练', '综合检测', '学习建议'],
+  custom: ['知识点讲解', '例题', '练习', '总结'],
 }
 
 export async function generateHandoutDraft(mode, input) {

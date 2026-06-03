@@ -5,6 +5,7 @@ import { buildSmartExam } from '../server/teacher/examBuilderService.js'
 import * as lessonPlan from '../server/teacher/lessonPlanStore.js'
 import * as handout from '../server/teacher/handoutStore.js'
 import * as book from '../server/teacher/bookStore.js'
+import * as bookAi from '../server/teacher/bookAi.js'
 import { callDeepSeekAI, extractJson } from '../server/deepseekClient.js'
 import { normalizeTeacherPath } from '../server/urlUtil.js'
 
@@ -207,6 +208,12 @@ export async function handleTeacherApi(req, res, pathSegments = []) {
       const id = path.split('/')[1]
       const data = await book.getBook(query.teacherId, id)
       return res.status(200).json({ success: true, book: data })
+    }
+
+    if (path === 'books/knowledge-graph' && method === 'POST') {
+      requireTeacher(body, query)
+      const graph = await bookAi.generateKnowledgeGraph(body.questions ?? [])
+      return res.status(200).json({ success: true, graph })
     }
 
     if (path === 'books' && method === 'POST') {

@@ -83,18 +83,37 @@ export interface BuiltExam {
   generatedAt: string
 }
 
-export type HandoutMode = 'school' | 'tutoring' | 'targeted'
+export type HandoutMode = 'school' | 'tutoring' | 'targeted' | 'custom'
+
+export type HandoutModuleType = 'knowledge' | 'example' | 'exercise' | 'summary' | 'custom'
+
+export interface HandoutModuleStyle {
+  fontSize?: number
+  color?: string
+}
 
 export interface HandoutModule {
   id: string
+  type?: HandoutModuleType
   title: string
   content: string
   items?: string[]
+  style?: HandoutModuleStyle
+}
+
+export interface HandoutCover {
+  title: string
+  subtitle?: string
+  teacherName?: string
+  date?: string
 }
 
 export interface HandoutContent {
   title: string
+  cover?: HandoutCover
   modules: HandoutModule[]
+  headerText?: string
+  footerText?: string
 }
 
 export interface HandoutRecord {
@@ -128,6 +147,24 @@ export interface BookChapter {
   sections: BookSection[]
 }
 
+export type BookCoverStyle = 'minimal' | 'academic' | 'fresh'
+
+export interface KnowledgeGraphNode {
+  id: string
+  label: string
+}
+
+export interface KnowledgeGraphEdge {
+  from: string
+  to: string
+  label?: string
+}
+
+export interface KnowledgeGraph {
+  nodes: KnowledgeGraphNode[]
+  edges: KnowledgeGraphEdge[]
+}
+
 export interface BookRecord {
   id?: string
   teacher_id?: string
@@ -135,6 +172,8 @@ export interface BookRecord {
   grade: string
   level: string
   chapters: BookChapter[]
+  coverStyle?: BookCoverStyle
+  knowledgeGraph?: KnowledgeGraph | null
   created_at?: string
   updated_at?: string
 }

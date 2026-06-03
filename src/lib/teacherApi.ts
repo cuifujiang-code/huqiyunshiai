@@ -4,6 +4,7 @@ import type {
   BuiltExam,
   HandoutContent,
   HandoutRecord,
+  KnowledgeGraph,
   LessonPlan,
 } from '../types/teacher'
 import { postApiJson } from './postApiJson'
@@ -353,6 +354,17 @@ export async function saveBook(teacherId: string, book: Partial<BookRecord>) {
   )
   if (r.kind === 'success' && r.data.success) return r.data.book
   throw new Error(r.kind === 'fallback' ? r.reason : '保存失败')
+}
+
+export async function generateBookKnowledgeGraph(questions: Partial<BankQuestion>[]) {
+  const r = await postApiJson<{ success: boolean; graph: KnowledgeGraph }>(
+    teacherApiUrl('books/knowledge-graph'),
+    { questions },
+    '知识网络图',
+    { timeoutMs: 90000 },
+  )
+  if (r.kind === 'success' && r.data.success) return r.data.graph
+  throw new Error(r.kind === 'fallback' ? r.reason : '生成知识网络图失败')
 }
 
 export async function fetchBooks(teacherId: string) {
