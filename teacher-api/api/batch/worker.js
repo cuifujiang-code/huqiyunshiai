@@ -47,6 +47,7 @@ async function handleWorkerFatalError(batchId, error) {
 }
 
 export default async function handler(req, res) {
+  console.log('[worker-debug] 函数已启动')
   let batchId = null
   // 最外层 try-catch：捕获所有未处理的同步/异步异常
   try {

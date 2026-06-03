@@ -1,3 +1,4 @@
+import { waitUntil } from '@vercel/functions'
 import '../server/applyUrlShim.js'
 import { randomUUID } from 'crypto'
 import {
@@ -46,7 +47,8 @@ export default async function handler(req, res) {
       },
     })
 
-    triggerDecomposeProcess(taskId)
+    // waitUntil 确保 trigger 请求在响应返回后仍能完成（Vercel 不取消 Promise）
+    waitUntil(triggerDecomposeProcess(taskId))
 
     return res.status(200).json({
       success: true,
