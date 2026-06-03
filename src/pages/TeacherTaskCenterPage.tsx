@@ -206,9 +206,14 @@ export default function TeacherTaskCenterPage() {
                     <td className="p-3">
                       <div className="flex flex-wrap gap-2">
                         {(task.status === 'processing' || task.status === 'parsed' || task.status === 'splitting') && (
+                          <>
                           <button type="button" className="btn-secondary text-xs px-3 py-1.5" disabled={refreshingId === task.taskId} onClick={() => refreshTask(task.taskId)}>
                             {refreshingId === task.taskId ? '刷新中…' : '刷新进度'}
                           </button>
+                          <button type="button" className="btn-secondary text-xs px-3 py-1.5 text-amber-300" disabled={retryingId === task.taskId} onClick={() => handleRetry(task.taskId)}>
+                            {retryingId === task.taskId ? '提交中…' : '重新拆题'}
+                          </button>
+                          </>
                         )}
                         {task.status === 'completed' && (
                           <button type="button" className="btn-brand text-xs px-3 py-1.5" onClick={() => viewResult(task.taskId)}>
