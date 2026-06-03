@@ -25,6 +25,13 @@ const FEATURES = [
     path: '/student/photo-search',
     cta: '开始搜题',
   },
+  {
+    icon: '👨‍👩‍👧',
+    title: '家长绑定',
+    desc: '生成邀请码分享给家长，支持多名家长绑定同一学生账号',
+    path: '/student/parent-bind',
+    cta: '管理绑定',
+  },
 ]
 
 export default function StudentDashboard() {

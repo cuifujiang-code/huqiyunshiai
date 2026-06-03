@@ -8,11 +8,14 @@ import {
   sendPhoneOtp,
   validatePassword,
 } from '../lib/phoneAuth'
+import { bindParent } from '../lib/educationPlanning'
 import type { UserRole } from '../lib/supabase'
 
 function defaultDashboard(role: UserRole) {
   if (role === 'admin') return '/admin/dashboard'
-  return role === 'teacher' ? '/teacher/dashboard' : '/student/dashboard'
+  if (role === 'teacher') return '/teacher/dashboard'
+  if (role === 'parent') return '/parent/dashboard'
+  return '/student/dashboard'
 }
 
 function resolveRedirect(role: UserRole, redirectParam: string | null) {
@@ -20,6 +23,7 @@ function resolveRedirect(role: UserRole, redirectParam: string | null) {
   if (redirectParam.startsWith('/admin/') && role !== 'admin') return defaultDashboard(role)
   if (redirectParam.startsWith('/teacher/') && role !== 'teacher' && role !== 'admin') return defaultDashboard(role)
   if (redirectParam.startsWith('/student/') && role !== 'student') return defaultDashboard(role)
+  if (redirectParam.startsWith('/parent/') && role !== 'parent') return defaultDashboard(role)
   return redirectParam
 }
 
@@ -31,6 +35,7 @@ export default function LoginPage() {
   const [phone, setPhone] = useState('')
   const [password, setPassword] = useState('')
   const [role, setRole] = useState<UserRole>('student')
+  const [inviteCode, setInviteCode] = useState('')
   const [otp, setOtp] = useState('')
   const [otpSent, setOtpSent] = useState(false)
   const [countdown, setCountdown] = useState(0)
@@ -40,7 +45,7 @@ export default function LoginPage() {
 
   useEffect(() => {
     const roleParam = searchParams.get('role')
-    if (roleParam === 'teacher' || roleParam === 'student') {
+    if (roleParam === 'teacher' || roleParam === 'student' || roleParam === 'parent') {
       setRole(roleParam)
     }
   }, [searchParams])
@@ -120,6 +125,11 @@ export default function LoginPage() {
       return
     }
 
+    if (role === 'parent' && !inviteCode.trim()) {
+      setError('家长注册请填写学生提供的邀请码')
+      return
+    }
+
     setLoading(true)
     try {
       const result = await authenticateWithPhone({
@@ -143,6 +153,18 @@ export default function LoginPage() {
       const userProfile = await ensureProfile(formattedPhone, role, result.session.user.id)
       if (!userProfile) {
         throw new Error('登录成功但无法创建用户资料')
+      }
+
+      if (role === 'parent' && inviteCode.trim()) {
+        const bindRes = await bindParent({
+          parent_user_id: result.session.user.id,
+          invite_code: inviteCode.trim(),
+        })
+        if (!bindRes.success) {
+          setError(bindRes.message || '邀请码绑定失败，请核对后重试')
+          return
+        }
+        setMessage(bindRes.message || '绑定成功，正在进入家长中心…')
       }
 
       navigate(resolveRedirect(userProfile.role, searchParams.get('redirect')), { replace: true })
@@ -198,8 +220,26 @@ export default function LoginPage() {
               >
                 <option value="student">学生</option>
                 <option value="teacher">教师</option>
+                <option value="parent">家长</option>
               </select>
             </div>
+            {role === 'parent' && (
+              <div>
+                <label htmlFor="inviteCode" className="mb-1.5 block text-sm font-medium text-slate-300">
+                  学生邀请码
+                </label>
+                <input
+                  id="inviteCode"
+                  type="text"
+                  value={inviteCode}
+                  onChange={(e) => setInviteCode(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))}
+                  placeholder="请输入孩子分享的 8 位邀请码"
+                  maxLength={12}
+                  className="w-full rounded-xl border border-slate-700 bg-slate-800/80 px-4 py-3 font-mono tracking-widest text-white placeholder-slate-500 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30"
+                />
+                <p className="mt-1 text-xs text-slate-500">新家长注册必填；已注册家长可在家长中心继续绑定</p>
+              </div>
+            )}
             <div>
               <label htmlFor="password" className="mb-1.5 block text-sm font-medium text-slate-300">
                 密码

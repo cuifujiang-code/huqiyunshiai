@@ -12,7 +12,7 @@ export const supabase = createClient(
   supabaseAnonKey || 'placeholder-anon-key',
 )
 
-export type UserRole = 'teacher' | 'student' | 'admin'
+export type UserRole = 'teacher' | 'student' | 'admin' | 'parent'
 
 export interface Profile {
   id: string

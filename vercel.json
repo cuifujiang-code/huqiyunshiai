@@ -99,6 +99,26 @@
     "api/student/photo-search-history.js": {
       "maxDuration": 30,
       "includeFiles": "server/**"
+    },
+    "api/student/generate-invite-code.js": {
+      "maxDuration": 30,
+      "includeFiles": "server/**"
+    },
+    "api/student/parent-bindings.js": {
+      "maxDuration": 30,
+      "includeFiles": "server/**"
+    },
+    "api/parent/bind.js": {
+      "maxDuration": 30,
+      "includeFiles": "server/**"
+    },
+    "api/parent/bindings.js": {
+      "maxDuration": 30,
+      "includeFiles": "server/**"
+    },
+    "api/parent/children.js": {
+      "maxDuration": 30,
+      "includeFiles": "server/**"
     }
   },
   "rewrites": [

@@ -1,5 +1,8 @@
 export type PhotoSearchSource = 'bank' | 'ai'
 
+/** 搜题四种结果状态 */
+export type SearchStatus = 'success' | 'no_match' | 'blurry' | 'network_error'
+
 export interface PhotoSearchResult {
   ocrText: string
   question: string
@@ -13,6 +16,8 @@ export interface PhotoSearchResult {
   similarity?: number
   historyId?: string | null
   isMockFallback?: boolean
+  /** 搜题状态码，前端据此切换 UI */
+  searchStatus?: SearchStatus
 }
 
 export interface PhotoSearchHistoryItem {
@@ -43,5 +48,6 @@ export function historyItemToResult(item: PhotoSearchHistoryItem): PhotoSearchRe
     bankTable: item.bank_table,
     matchedQuestion: item.matched_question,
     historyId: item.id,
+    searchStatus: 'success',
   }
 }

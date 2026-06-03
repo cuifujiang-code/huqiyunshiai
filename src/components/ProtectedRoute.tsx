@@ -27,7 +27,9 @@ export default function ProtectedRoute({ children, requiredRole }: ProtectedRout
         ? '/admin/dashboard'
         : profile.role === 'teacher'
           ? '/teacher/dashboard'
-          : '/student/dashboard'
+          : profile.role === 'parent'
+            ? '/parent/dashboard'
+            : '/student/dashboard'
     return <Navigate to={redirectTo} replace />
   }
 

@@ -12,6 +12,32 @@ import type {
 
 const API_BASE = import.meta.env.VITE_API_BASE || 'https://api.huqiyunshiai.online'
 
+/** 家长绑定 API 优先走主站同源（Vercel /api/student、/api/parent） */
+function getBindingApiBase(): string {
+  const env = import.meta.env.VITE_BINDING_API_BASE?.replace(/\/$/, '')
+  if (env) return env
+  if (typeof window !== 'undefined') return window.location.origin
+  return API_BASE
+}
+
+async function bindingGet<T>(path: string, params?: Record<string, string>): Promise<T> {
+  const url = new URL(`${getBindingApiBase()}${path}`)
+  if (params) {
+    Object.entries(params).forEach(([k, v]) => { if (v) url.searchParams.set(k, v) })
+  }
+  const r = await fetch(url.toString(), { headers: { 'Content-Type': 'application/json' } })
+  return r.json()
+}
+
+async function bindingPost<T>(path: string, body: unknown): Promise<T> {
+  const r = await fetch(`${getBindingApiBase()}${path}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  return r.json()
+}
+
 async function apiGet<T>(path: string, params?: Record<string, string>): Promise<T> {
   const url = new URL(`${API_BASE}${path}`)
   if (params) {
@@ -93,22 +119,40 @@ export async function fetchTeacherOverview(teacherId?: string): Promise<{ succes
 
 /** 学生生成邀请码 */
 export async function generateInviteCode(studentUserId: string): Promise<{ success: boolean; code: string; expires_at: string; message?: string }> {
-  return apiPost('/api/parent/generate-code', { student_user_id: studentUserId })
+  const res = await bindingPost<{
+    success: boolean
+    inviteCode?: string
+    code?: string
+    expiresAt?: string
+    expires_at?: string
+    message?: string
+  }>('/api/student/generate-invite-code', { studentId: studentUserId })
+  return {
+    success: res.success,
+    code: res.code || res.inviteCode || '',
+    expires_at: res.expires_at || res.expiresAt || '',
+    message: res.message,
+  }
 }
 
 /** 家长通过邀请码绑定 */
 export async function bindParent(data: { parent_user_id: string; invite_code?: string; student_user_id?: string; bind_type?: string }): Promise<{ success: boolean; binding?: ParentBinding; message?: string }> {
-  return apiPost('/api/parent/bind', data)
+  return bindingPost('/api/parent/bind', {
+    parentId: data.parent_user_id,
+    parent_user_id: data.parent_user_id,
+    inviteCode: data.invite_code,
+    invite_code: data.invite_code,
+  })
 }
 
 /** 查询绑定关系 */
 export async function fetchBindings(params: { user_id: string; role?: 'student' | 'parent' }): Promise<{ success: boolean; bindings: ParentBinding[] }> {
-  return apiGet('/api/parent/bindings', params as Record<string, string>)
+  return bindingGet('/api/parent/bindings', params as Record<string, string>)
 }
 
 /** 解绑 */
 export async function unbindParent(bindingId: string): Promise<{ success: boolean; message?: string }> {
-  return apiPost('/api/parent/unbind', { binding_id: bindingId })
+  return bindingPost('/api/parent/unbind', { binding_id: bindingId })
 }
 
 /** 教师批量绑定 */

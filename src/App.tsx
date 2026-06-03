@@ -26,6 +26,7 @@ import QuestionLibraryPage from './pages/teacher/QuestionLibraryPage'
 import ExamLayoutPage from './pages/teacher/ExamLayoutPage'
 import AdminDashboardPage from './pages/admin/AdminDashboardPage'
 import ParentDashboardPage from './pages/ParentDashboardPage'
+import StudentParentBindPage from './pages/StudentParentBindPage'
 import ProtectedRouteAdmin from './components/ProtectedRouteAdmin'
 
 export default function App() {
@@ -190,11 +191,19 @@ export default function App() {
               }
             />
             <Route
+              path="/student/parent-bind"
+              element={
+                <ProtectedRoute requiredRole="student">
+                  <StudentParentBindPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
               path="/parent/dashboard"
               element={
-                <ProtectedRouteAuth>
+                <ProtectedRoute requiredRole="parent">
                   <ParentDashboardPage />
-                </ProtectedRouteAuth>
+                </ProtectedRoute>
               }
             />
             <Route path="*" element={<Navigate to="/" replace />} />
