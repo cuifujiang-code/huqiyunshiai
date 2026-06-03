@@ -15,6 +15,7 @@ const teacherLinks = [
   { to: '/teacher/handout-builder', label: '讲义制作' },
   { to: '/teacher/book-builder', label: '辅导书' },
   { to: '/teacher/planning', label: '教育规划' },
+  { to: '/teacher/student-progress', label: '学生进度' },
 ]
 
 const studentLinks = [

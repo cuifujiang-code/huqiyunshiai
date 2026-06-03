@@ -18,6 +18,7 @@ import TeacherExamPage from './pages/TeacherExamPage'
 import TeacherHandoutBuilderPage from './pages/TeacherHandoutBuilderPage'
 import TeacherLessonPrepPage from './pages/TeacherLessonPrepPage'
 import TeacherPlanningPage from './pages/TeacherPlanningPage'
+import TeacherStudentProgressPage from './pages/TeacherStudentProgressPage'
 import TeacherQuestionBankPage from './pages/TeacherQuestionBankPage'
 import TeacherTaskCenterPage from './pages/TeacherTaskCenterPage'
 import TeacherBatchDecomposePage from './pages/TeacherBatchDecomposePage'
@@ -155,6 +156,14 @@ export default function App() {
               element={
                 <ProtectedRoute requiredRole="teacher">
                   <TeacherPlanningPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/teacher/student-progress"
+              element={
+                <ProtectedRoute requiredRole="teacher">
+                  <TeacherStudentProgressPage />
                 </ProtectedRoute>
               }
             />

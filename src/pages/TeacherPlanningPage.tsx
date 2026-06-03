@@ -78,14 +78,14 @@ export default function TeacherPlanningPage() {
     if (tab === 'overview') loadOverview()
   }, [tab, loadOverview])
 
-  const loadStudentDetail = useCallback(async (planId: string) => {
-    setSelectedStudentPlanId(planId)
+  const loadStudentDetail = useCallback(async (student: TeacherStudentItem) => {
+    setSelectedStudentPlanId(student.planId)
     setTab('detail')
     try {
       const [ganttRes, weeklyRes, monthlyRes] = await Promise.all([
-        fetchGanttData(planId),
-        fetchWeeklyReport({ plan_id: planId }),
-        fetchMonthlyReport({ plan_id: planId }),
+        fetchGanttData(student.planId),
+        fetchWeeklyReport({ studentId: student.studentId, planId: student.planId }),
+        fetchMonthlyReport({ studentId: student.studentId, planId: student.planId }),
       ])
       if (ganttRes.success) setGanttData(ganttRes.gantt)
       if (weeklyRes.success) setWeeklyReport(weeklyRes.report)
@@ -234,7 +234,7 @@ export default function TeacherPlanningPage() {
                           </td>
                           <td className="py-2">
                             <button
-                              type="button" onClick={() => loadStudentDetail(s.planId)}
+                              type="button" onClick={() => loadStudentDetail(s)}
                               className="rounded border border-blue-500/30 px-2 py-0.5 text-[10px] text-blue-300 hover:bg-blue-500/20"
                             >
                               查看

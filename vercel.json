@@ -119,6 +119,14 @@
     "api/parent/children.js": {
       "maxDuration": 30,
       "includeFiles": "server/**"
+    },
+    "api/planning/weekly-report.js": {
+      "maxDuration": 30,
+      "includeFiles": "server/**"
+    },
+    "api/planning/monthly-report.js": {
+      "maxDuration": 30,
+      "includeFiles": "server/**"
     }
   },
   "rewrites": [

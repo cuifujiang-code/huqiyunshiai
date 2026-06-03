@@ -52,6 +52,29 @@ export default function MonthlyReportCard({ report, role = 'student' }: Props) {
         </div>
       </div>
 
+      {/* 月度进步趋势 */}
+      {report.weeklyTrend && report.weeklyTrend.length > 0 && (
+        <div className="mb-4">
+          <h4 className="mb-2 text-xs font-medium text-slate-400">月度进步趋势</h4>
+          <div className="space-y-2">
+            {report.weeklyTrend.map((w) => (
+              <div key={w.weekLabel} className="flex items-center gap-2">
+                <span className="w-14 shrink-0 text-xs text-slate-400">{w.weekLabel}</span>
+                <div className="h-2 flex-1 overflow-hidden rounded-full bg-slate-700/60">
+                  <div
+                    className="h-full rounded-full bg-gradient-to-r from-blue-500 to-cyan-500"
+                    style={{ width: `${w.rate}%` }}
+                  />
+                </div>
+                <span className="w-20 text-right text-xs text-slate-500">
+                  {w.completed}/{w.total} ({w.rate}%)
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* 分阶段进度 */}
       {report.stageProgress.length > 0 && (
         <div className="mb-4">
@@ -76,7 +99,7 @@ export default function MonthlyReportCard({ report, role = 'student' }: Props) {
       {/* 智能建议 */}
       {report.suggestions.length > 0 && (
         <div className="rounded-lg border border-violet-500/20 bg-violet-500/10 p-3">
-          <h4 className="mb-1.5 text-xs font-semibold text-violet-300">下月补强建议</h4>
+          <h4 className="mb-1.5 text-xs font-semibold text-violet-300">下月重点任务建议</h4>
           <ul className="space-y-1">
             {report.suggestions.map((s, i) => (
               <li key={i} className="flex items-start gap-1.5 text-xs text-violet-200/80">
