@@ -8,7 +8,6 @@ import {
 import { triggerBatchWorker } from './batchTrigger.js'
 
 const DEFAULT_STALE_MINUTES = Number(process.env.BATCH_AUTO_RETRY_STALE_MINUTES || 3)
-const MAX_AUTO_RETRY_ATTEMPTS = Number(process.env.BATCH_AUTO_RETRY_MAX_ATTEMPTS || 3)
 
 /**
  * 扫描并恢复卡住/失败的批量拆题任务

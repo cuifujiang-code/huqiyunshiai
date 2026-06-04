@@ -321,14 +321,9 @@ async function runExamBuilderOrchestration(input) {
 
   const meta = { providersUsed: [], degraded: false, reviewRequired: false, disagreements: [] }
 
-  let exam
-  if (isDeepSeekAvailable()) {
-    exam = await buildSmartExam(teacherId, config)
-    meta.providersUsed.push('deepseek-exam-builder')
-  } else {
-    meta.degraded = true
-    exam = await buildSmartExam(teacherId, config)
-  }
+  if (!isDeepSeekAvailable()) meta.degraded = true
+  const exam = await buildSmartExam(teacherId, config)
+  if (isDeepSeekAvailable()) meta.providersUsed.push('deepseek-exam-builder')
 
   const examSummary = JSON.stringify({
     title: exam.title,
