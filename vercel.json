@@ -147,8 +147,8 @@
   },
   "rewrites": [
     {
-      "source": "/api/:path*",
-      "destination": "http://106.54.29.9:3001/api/:path*"
+      "source": "/api/(.*)",
+      "destination": "http://106.54.29.9:3001/api/$1"
     },
     { "source": "/(.*)", "destination": "/index.html" }
   ],
