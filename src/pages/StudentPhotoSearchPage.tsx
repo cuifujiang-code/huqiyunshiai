@@ -6,6 +6,11 @@ import { useAuth } from '../context/AuthContext'
 import { compressAnswerSheetForUpload, formatFileSize } from '../lib/answerSheetCompress'
 import { fileToBase64 } from '../lib/fileBase64'
 import { fetchPhotoSearchHistory, submitPhotoSearch } from '../lib/fetchPhotoSearch'
+import {
+  isClientOcrTextUsable,
+  recognizePhotoImageClient,
+  shouldRetryWithClientOcr,
+} from '../lib/photoClientOcr'
 import type { PhotoSearchHistoryItem, PhotoSearchResult, SearchStatus } from '../types/photoSearch'
 import { historyItemToResult } from '../types/photoSearch'
 
@@ -130,11 +135,31 @@ export default function StudentPhotoSearchPage() {
     setNotice(null)
     resetSearchState()
 
-    const res = await submitPhotoSearch({
+    let res = await submitPhotoSearch({
       userId: userId || undefined,
       imageBase64: pendingBase64,
       imageName: fileName || 'photo.jpg',
     })
+
+    if (!res.success && shouldRetryWithClientOcr(res) && previewUrl) {
+      setNotice('服务端识别失败，正在使用本机 OCR 识别…')
+      try {
+        const clientText = await recognizePhotoImageClient(previewUrl, (msg) => setNotice(msg))
+        if (isClientOcrTextUsable(clientText)) {
+          res = await submitPhotoSearch({
+            userId: userId || undefined,
+            imageBase64: pendingBase64,
+            imageName: fileName || 'photo.jpg',
+            clientOcrText: clientText,
+          })
+        } else {
+          setNotice('本机 OCR 未能识别足够文字，请换一张更清晰的图片')
+        }
+      } catch (ocrErr) {
+        console.warn('[photoSearch] 本机 OCR 失败', ocrErr)
+        setNotice('本机 OCR 失败，请换一张更清晰的图片重试')
+      }
+    }
 
     setSearching(false)
 

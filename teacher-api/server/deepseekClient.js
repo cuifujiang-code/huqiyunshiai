@@ -27,19 +27,37 @@ export class DeepSeekApiError extends Error {
   }
 }
 
+/** DeepSeek 官方多模态模型；勿将 DEEPSEEK_MODEL（如 v4-flash）用于视觉 */
+export function getDeepSeekVisionModel() {
+  const explicit = process.env.DEEPSEEK_VISION_MODEL?.trim()
+  if (explicit) return explicit
+  return 'deepseek-chat'
+}
+
+/** 剥离 data URL 前缀，返回纯 base64 + MIME（DeepSeek 视觉 API 要求 data:...;base64,...） */
+export function normalizeImageBase64(input, defaultMime = 'image/jpeg') {
+  const raw = String(input ?? '').trim()
+  if (!raw) return { base64: '', mimeType: defaultMime }
+  const match = raw.match(/^data:([^;]+);base64,(.+)$/is)
+  if (match) {
+    return { base64: match[2].replace(/\s/g, ''), mimeType: match[1] || defaultMime }
+  }
+  return { base64: raw.replace(/\s/g, ''), mimeType: defaultMime }
+}
+
 export function getDeepSeekConfig() {
   const apiKey = process.env.DEEPSEEK_API_KEY
   const apiBase = (process.env.DEEPSEEK_API_BASE_URL || 'https://api.deepseek.com').replace(/\/$/, '')
   const model = process.env.DEEPSEEK_MODEL || 'deepseek-chat'
-  const visionModelEnv = process.env.DEEPSEEK_VISION_MODEL?.trim() || ''
+  const visionModel = getDeepSeekVisionModel()
   const url = resolveChatCompletionsUrl(apiBase)
 
   return {
     apiKey,
     apiBase,
     model,
-    visionModel: visionModelEnv,
-    visionEnabled: Boolean(visionModelEnv),
+    visionModel,
+    visionEnabled: true,
     url,
     hasApiKey: Boolean(apiKey),
   }
@@ -243,31 +261,39 @@ export async function callDeepSeekAI(systemPrompt, userPrompt, options = {}) {
 /**
  * 多模态调用：试卷图片以 Base64 data URL 传入（OpenAI 兼容格式）
  */
-export async function callDeepSeekVisionAI(systemPrompt, userPrompt, imageBase64, mimeType = 'image/jpeg') {
+export async function callDeepSeekVisionAI(systemPrompt, userPrompt, imageBase64, mimeType = 'image/jpeg', options = {}) {
   const cfg = getDeepSeekConfig()
+  const visionModel = options.model || cfg.visionModel
+  const { base64, mimeType: resolvedMime } = normalizeImageBase64(imageBase64, mimeType)
 
-  console.log('[DeepSeek Vision] 配置检查', getDeepSeekConfigSummary())
+  console.log('[DeepSeek Vision] 配置检查', {
+    ...getDeepSeekConfigSummary(),
+    resolvedVisionModel: visionModel,
+    chatModel: cfg.model,
+    messageFormat: 'user.content[]: image_url(data:...;base64) + text',
+  })
 
   if (!cfg.apiKey) {
     throw new DeepSeekApiError('DEEPSEEK_API_KEY 未配置', { config: getDeepSeekConfigSummary() })
   }
 
-  if (!imageBase64) {
+  if (!base64) {
     throw new DeepSeekApiError('缺少试卷图片 Base64 数据')
   }
 
-  const imageBytes = Buffer.byteLength(imageBase64, 'utf8')
+  const imageBytes = Buffer.byteLength(base64, 'utf8')
   console.log('[DeepSeek Vision] 图片数据', {
-    mimeType,
+    mimeType: resolvedMime,
     base64Bytes: imageBytes,
     base64KB: (imageBytes / 1024).toFixed(1),
+    visionModel,
   })
 
-  const dataUrl = `data:${mimeType};base64,${imageBase64}`
+  const dataUrl = `data:${resolvedMime};base64,${base64}`
 
   return executeDeepSeekRequest(
     {
-      model: cfg.visionModel || cfg.model,
+      model: visionModel,
       messages: [
         { role: 'system', content: systemPrompt },
         {
@@ -285,7 +311,7 @@ export async function callDeepSeekVisionAI(systemPrompt, userPrompt, imageBase64
       max_tokens: 8192,
       stream: false,
     },
-    { label: 'DeepSeek Vision', model: cfg.visionModel || cfg.model },
+    { label: 'DeepSeek Vision', model: visionModel },
   )
 }
 

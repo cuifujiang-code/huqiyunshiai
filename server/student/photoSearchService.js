@@ -209,7 +209,7 @@ async function solveWithDeepSeek(ocrText, candidates) {
   }
 }
 
-async function runPhotoSearchViaOrchestrator({ userId, imageBase64, imageName }) {
+async function runPhotoSearchViaOrchestrator({ userId, imageBase64, imageName, clientOcrText, editedOcrText }) {
   const base = (
     process.env.TEACHER_API_URL ||
     process.env.VITE_TEACHER_API_URL ||
@@ -221,7 +221,7 @@ async function runPhotoSearchViaOrchestrator({ userId, imageBase64, imageName })
     headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
     body: JSON.stringify({
       taskType: 'photo-search',
-      input: { userId, imageBase64, imageName },
+      input: { userId, imageBase64, imageName, clientOcrText, editedOcrText },
     }),
     signal: AbortSignal.timeout(120000),
   })
@@ -244,14 +244,21 @@ async function runPhotoSearchViaOrchestrator({ userId, imageBase64, imageName })
 /**
  * 拍照搜题主流程：优先 teacher-api 多 AI 编排，失败则单 AI 降级
  */
-export async function runPhotoSearch({ userId, imageBase64, imageName }) {
-  if (!imageBase64?.trim()) {
+export async function runPhotoSearch({ userId, imageBase64, imageName, clientOcrText, editedOcrText }) {
+  const preOcr = (clientOcrText || editedOcrText || '').trim()
+  if (!preOcr && !imageBase64?.trim()) {
     throw new Error('请上传题目图片')
   }
 
   if (process.env.USE_AI_ORCHESTRATOR !== 'false') {
     try {
-      const orchestrated = await runPhotoSearchViaOrchestrator({ userId, imageBase64, imageName })
+      const orchestrated = await runPhotoSearchViaOrchestrator({
+        userId,
+        imageBase64,
+        imageName,
+        clientOcrText,
+        editedOcrText,
+      })
       let historyId = null
       try {
         const row = await insertPhotoSearchRecord({

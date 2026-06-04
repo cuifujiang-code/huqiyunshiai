@@ -1,7 +1,14 @@
 /**
  * 多 AI 提供商统一调用（30s 超时 + 可用性检测）
  */
-import { callDeepSeekAI, extractJson, getDeepSeekConfig } from './deepseekClient.js'
+import {
+  callDeepSeekAI,
+  callDeepSeekVisionAI,
+  extractJson,
+  getDeepSeekConfig,
+  getDeepSeekVisionModel,
+  normalizeImageBase64,
+} from './deepseekClient.js'
 import { recognizeHandwritingHttp, isAlibabaOcrConfigured } from './alibabaOcrHttp.js'
 
 export const AI_CALL_TIMEOUT_MS = Number(process.env.AI_ORCHESTRATOR_TIMEOUT_MS || 30000)
@@ -160,6 +167,36 @@ export async function safeAiCall(name, available, fn) {
   }
 }
 
+export function isVisionUnsupportedError(message) {
+  const m = String(message || '').toLowerCase()
+  return (
+    m.includes('image_url') ||
+    (m.includes('不支持') && (m.includes('image') || m.includes('视觉') || m.includes('多模态'))) ||
+    m.includes('multimodal') ||
+    m.includes('does not support') ||
+    m.includes('vision')
+  )
+}
+
+/**
+ * 拍照搜题 OCR 降级：固定使用 deepseek-chat（或 DEEPSEEK_VISION_MODEL），禁止误用 v4-flash
+ */
+export async function callDeepSeekVisionSafe(systemPrompt, userPrompt, imageBase64, mimeType = 'image/jpeg') {
+  const visionModel = getDeepSeekVisionModel()
+  const { base64, mimeType: resolvedMime } = normalizeImageBase64(imageBase64, mimeType)
+  const cfg = getDeepSeekConfig()
+
+  console.log('[aiProviders] DeepSeek Vision 降级调用', {
+    visionModel,
+    chatModel: cfg.model,
+    mimeType: resolvedMime,
+    base64Length: base64.length,
+    requestFormat: 'OpenAI-compatible image_url + data URL base64',
+  })
+
+  return callDeepSeekVisionAI(systemPrompt, userPrompt, base64, resolvedMime, { model: visionModel })
+}
+
 export async function runDualAlibabaOcr(imageBase64, fileName = 'photo.jpg') {
   const [standard, enhanced] = await Promise.all([
     safeAiCall('AlibabaOCR-standard', isAlibabaOcrAvailable, () =>
@@ -173,4 +210,4 @@ export async function runDualAlibabaOcr(imageBase64, fileName = 'photo.jpg') {
   return { standard, enhanced }
 }
 
-export { callDeepSeekAI, extractJson, recognizeHandwritingHttp }
+export { callDeepSeekAI, extractJson, recognizeHandwritingHttp, getDeepSeekVisionModel, normalizeImageBase64 }

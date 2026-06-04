@@ -9,17 +9,20 @@ export default async function handler(req, res) {
     return res.status(405).json({ success: false, message: 'Method Not Allowed' })
   }
 
-  const { userId, imageBase64, imageName } = req.body ?? {}
+  const { userId, imageBase64, imageName, clientOcrText, editedOcrText } = req.body ?? {}
+  const preOcr = (clientOcrText || editedOcrText || '').trim()
 
-  if (!imageBase64?.trim()) {
+  if (!preOcr && !imageBase64?.trim()) {
     return res.status(400).json({ success: false, message: '请上传题目图片' })
   }
 
   try {
     const result = await runPhotoSearch({
       userId: userId?.trim() || null,
-      imageBase64,
+      imageBase64: imageBase64?.trim() || null,
       imageName: imageName?.trim() || 'photo.jpg',
+      clientOcrText: clientOcrText?.trim() || null,
+      editedOcrText: editedOcrText?.trim() || null,
     })
     return res.status(200).json({
       success: true,

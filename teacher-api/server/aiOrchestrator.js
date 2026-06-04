@@ -4,17 +4,18 @@
  */
 import { buildSmartExam } from './teacher/examBuilderService.js'
 import { getSupabaseAdmin, isSupabaseAdminConfigured } from './supabaseAdmin.js'
-import { callDeepSeekVisionAI } from './deepseekClient.js'
 import {
   AI_CALL_TIMEOUT_MS,
   callDoubaoAI,
   callQianwenAI,
   callDeepSeekWithTimeout,
+  callDeepSeekVisionSafe,
   extractJson,
   isDeepSeekAvailable,
   isDoubaoAvailable,
   isQianwenAvailable,
   isAlibabaOcrAvailable,
+  isVisionUnsupportedError,
   runDualAlibabaOcr,
   safeAiCall,
 } from './aiProviders.js'
@@ -117,44 +118,70 @@ async function arbitrateOcrTexts(ocrA, ocrB, meta = {}) {
 }
 
 async function runPhotoSearchOrchestration(input) {
-  const { imageBase64, imageName = 'photo.jpg', userId } = input ?? {}
+  const { imageBase64, imageName = 'photo.jpg', userId, clientOcrText, editedOcrText } = input ?? {}
   const meta = { providersUsed: [], degraded: false, reviewRequired: false }
 
-  if (!imageBase64?.trim()) {
-    throw new Error('请上传题目图片')
-  }
-
+  const preOcr = (clientOcrText || editedOcrText || '').trim()
   let ocrText = ''
-  const dual = await runDualAlibabaOcr(imageBase64, imageName)
-  meta.providersUsed.push('alibaba-ocr-standard', 'alibaba-ocr-enhanced')
+  let textA = ''
+  let textB = ''
 
-  const textA = dual.standard.ok ? dual.standard.result : ''
-  const textB = dual.enhanced.ok ? dual.enhanced.result : ''
-
-  if (!textA && !textB) {
-    // ============ OCR 全部失败 → DeepSeek 视觉降级 ============
-    meta.degraded = true
-    console.warn('[aiOrchestrator] 阿里云 OCR 双路均失败，触发 DeepSeek 视觉降级')
-    const vision = await safeAiCall('DeepSeek-Vision-fallback', isDeepSeekAvailable, () =>
-      callDeepSeekVisionAI(
-        '你是 K12 拍照搜题 OCR 专家。请仔细查看图片，提取其中的完整题目文字内容（包括公式和图表标注）。只输出纯文本题目，不要添加解释或评价。',
-        '请识别这张题目图片的完整文字内容，输出原文。',
-        imageBase64,
-        'image/jpeg',
-      ),
-    )
-    if (vision.ok) {
-      ocrText = String(vision.result || '').trim()
-      meta.providersUsed.push('deepseek-vision-fallback')
+  if (preOcr) {
+    ocrText = preOcr
+    meta.providersUsed.push(clientOcrText ? 'client-tesseract' : 'user-edited-ocr')
+    if (clientOcrText) {
+      meta.degraded = true
       meta.ocrFallback = true
-      console.log('[aiOrchestrator] DeepSeek Vision 识别成功', { charCount: ocrText.length })
+      meta.clientOcr = true
+    }
+    console.log('[aiOrchestrator] 使用预置 OCR 文本', {
+      source: clientOcrText ? 'client-tesseract' : 'edited',
+      charCount: ocrText.length,
+    })
+  } else {
+    if (!imageBase64?.trim()) {
+      throw new Error('请上传题目图片')
+    }
+
+    const dual = await runDualAlibabaOcr(imageBase64, imageName)
+    meta.providersUsed.push('alibaba-ocr-standard', 'alibaba-ocr-enhanced')
+
+    textA = dual.standard.ok ? dual.standard.result : ''
+    textB = dual.enhanced.ok ? dual.enhanced.result : ''
+
+    if (!textA && !textB) {
+      meta.degraded = true
+      console.warn('[aiOrchestrator] 阿里云 OCR 双路均失败，触发 DeepSeek 视觉降级')
+      const vision = await safeAiCall('DeepSeek-Vision-fallback', isDeepSeekAvailable, () =>
+        callDeepSeekVisionSafe(
+          '你是 K12 拍照搜题 OCR 专家。请仔细查看图片，提取其中的完整题目文字内容（包括公式和图表标注）。只输出纯文本题目，不要添加解释或评价。',
+          '请识别这张题目图片的完整文字内容，输出原文。',
+          imageBase64,
+          'image/jpeg',
+        ),
+      )
+      if (vision.ok) {
+        ocrText = String(vision.result || '').trim()
+        meta.providersUsed.push('deepseek-vision-fallback')
+        meta.ocrFallback = true
+        console.log('[aiOrchestrator] DeepSeek Vision 识别成功', { charCount: ocrText.length })
+      } else if (vision.error && isVisionUnsupportedError(vision.error)) {
+        meta.visionUnsupported = true
+        console.warn('[aiOrchestrator] DeepSeek 视觉模型不支持 image_url', { error: vision.error })
+      }
     }
   }
 
   if (!ocrText) {
     if (!textA && !textB) {
       if (!isDeepSeekAvailable()) meta.degraded = true
-      throw Object.assign(new Error('OCR 未配置或全部失败，AI 视觉识别也未能成功'), { searchStatus: 'blurry' })
+      const hint = meta.visionUnsupported
+        ? '服务端视觉识别不可用，请使用本机 OCR 重试'
+        : 'OCR 未配置或全部失败，AI 视觉识别也未能成功'
+      throw Object.assign(new Error(hint), {
+        searchStatus: 'blurry',
+        clientOcrSuggested: true,
+      })
     }
     // 至少有单路 OCR 成功 → 进入仲裁
     const arbitration = await arbitrateOcrTexts(textA, textB, { imageName })

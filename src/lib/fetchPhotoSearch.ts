@@ -43,6 +43,8 @@ export async function submitPhotoSearch(params: {
   imageBase64: string
   imageName: string
   editedOcrText?: string
+  /** 浏览器 Tesseract 识别文本（第三层降级，跳过服务端 OCR/视觉） */
+  clientOcrText?: string
 }): Promise<PhotoSearchResponse> {
   const r = await postApiJson<PhotoSearchResponse>(
     PHOTO_SEARCH_API,
@@ -51,6 +53,7 @@ export async function submitPhotoSearch(params: {
       imageBase64: params.imageBase64,
       imageName: params.imageName,
       editedOcrText: params.editedOcrText,
+      clientOcrText: params.clientOcrText,
     },
     '拍照搜题',
     { timeoutMs: SEARCH_TIMEOUT_MS },
