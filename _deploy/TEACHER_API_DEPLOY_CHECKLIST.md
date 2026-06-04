@@ -176,9 +176,65 @@ Content-Type: application/json
 
 ---
 
-## 8. 回滚
+## 8. 腾讯云 Lighthouse（`server.js` + PM2）
+
+### 8.1 进程起不来：`originalPath: '/api/batch/*'`
+
+Express 5 不再支持裸 `*`，会抛 `path-to-regexp` 错误。请使用仓库最新 `teacher-api/server.js`（batch 显式路径 + `*splat` 通配）。
+
+```bash
+cd /var/teacher-api
+git pull   # 或 rsync 上传最新 server.js
+pm2 restart teacher-api
+pm2 logs teacher-api --lines 30
+```
+
+期望日志：`[server] Teacher API running on port 3001`，无 stack trace。
+
+### 8.2 防火墙：3001 未放行
+
+控制台防火墙若只有 **22 / 80 / 443**，外网无法访问 `http://106.54.29.9:3001`。
+
+**推荐（生产）：** 不开放 3001，用 Nginx 443 反代到本机 3001：
+
+```nginx
+server {
+    listen 443 ssl;
+    server_name api.huqiyunshiai.online;
+    location / {
+        proxy_pass http://127.0.0.1:3001;
+        proxy_read_timeout 300s;
+        client_max_body_size 100m;
+    }
+}
+```
+
+**备选：** 防火墙新增 TCP **3001**，仅用于调试。
+
+### 8.3 冒烟（在服务器上）
+
+```bash
+curl -s http://127.0.0.1:3001/api
+curl -s http://127.0.0.1:3001/api/batch/health
+```
+
+公网（Nginx 配好后）：
+
+```bash
+curl -s https://api.huqiyunshiai.online/api/batch/health
+```
+
+### 8.4 `Expecting value: line 1 column 1`
+
+多为对空响应做 `json` 解析（健康检查脚本、错误 `curl` 目标）。先确认 `pm2` 进程已监听 3001，再测 `/api/batch/health` 是否返回 JSON。
+
+---
+
+## 9. 回滚
 
 Vercel → Deployments → 选择上一成功 Production → **Promote to Production**。
+
+腾讯云：保留上一版 `server.js` 备份后 `pm2 restart`。
 
 ---
 
