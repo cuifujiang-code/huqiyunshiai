@@ -73,10 +73,25 @@ export function buildTeacherApiUrl(path: string): string {
   return url
 }
 
-/** 拼接 teacher-api 根路径 API：{base}/api/{path}（拆题等） */
+/** 拼接 teacher-api 根路径 API：{base}/api/{path}（批量拆题、目录等） */
 export function buildTeacherRootApiUrl(path: string): string {
   const normalized = path.replace(/^\//, '').replace(/^api\/?/i, '')
   const url = `${getTeacherApiBase()}/api/${normalized}`
   console.log('[apiBase] buildTeacherRootApiUrl', { path, url })
+  return url
+}
+
+/**
+ * 拆题任务 API：主站 Vercel 为 /api/teacher/decompose-*，独立 teacher-api 为 /api/decompose-*
+ */
+export function buildTeacherDecomposeApiUrl(path: string): string {
+  const normalized = path.replace(/^\//, '').replace(/^api\/(teacher\/)?/i, '')
+  if (typeof window !== 'undefined' && isSameOriginTeacherApiHost(window.location.hostname)) {
+    const url = buildTeacherApiUrl(normalized)
+    console.log('[apiBase] buildTeacherDecomposeApiUrl（主站 /api/teacher）', { path, url })
+    return url
+  }
+  const url = buildTeacherRootApiUrl(normalized)
+  console.log('[apiBase] buildTeacherDecomposeApiUrl（独立 API）', { path, url })
   return url
 }

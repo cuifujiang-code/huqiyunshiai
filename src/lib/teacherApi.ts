@@ -7,7 +7,7 @@ import type {
   KnowledgeGraph,
   LessonPlan,
 } from '../types/teacher'
-import { buildTeacherApiUrl, buildTeacherRootApiUrl } from './apiBase'
+import { buildTeacherApiUrl, buildTeacherDecomposeApiUrl } from './apiBase'
 import { postApiJson } from './postApiJson'
 
 /** 教师业务 API（题库/组卷/讲义/辅导书等）→ /api/teacher/* */
@@ -15,9 +15,9 @@ function teacherApiUrl(path: string) {
   return buildTeacherApiUrl(path)
 }
 
-/** 独立 teacher-api 上的拆题专用路由 → /api/decompose-* */
+/** 拆题：主站 /api/teacher/decompose-*，独立 API 域 /api/decompose-* */
 function teacherDecomposeApiUrl(path: string) {
-  return buildTeacherRootApiUrl(path)
+  return buildTeacherDecomposeApiUrl(path)
 }
 
 export async function fetchQuestions(
