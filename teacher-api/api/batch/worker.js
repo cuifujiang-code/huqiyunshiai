@@ -27,11 +27,32 @@ function getEnvSummary() {
   return { vars, missing, allOk: missing.length === 0 }
 }
 
+function isJsonParseFailure(err) {
+  const msg = err instanceof Error ? err.message : String(err ?? '')
+  return /JSON\s*解析|JSON\s*修复|repairJSON|Expected\s*','|Expected\s*'}'|JSON\.parse/i.test(msg)
+}
+
+function buildFailureMessage(error) {
+  const msg = error instanceof Error ? error.message : String(error ?? '')
+  const rawPreview = error?.rawPreview ?? error?.cause?.rawPreview
+  if (isJsonParseFailure(error)) {
+    const preview = String(rawPreview ?? '').slice(0, 1000)
+    return `[JSON解析失败] ${msg}${preview ? `\n原始内容前1000字符: ${preview}` : ''}`
+  }
+  return msg
+}
+
 async function handleWorkerFatalError(batchId, error) {
-  const msg = error instanceof Error ? error.message : String(error)
+  const msg = buildFailureMessage(error)
   const stack = error instanceof Error ? error.stack : undefined
   console.error('=== Worker 处理遇到未捕获异常 ===')
   console.error(msg)
+  if (isJsonParseFailure(error)) {
+    console.error('[batch/worker] JSON 解析失败详情', {
+      batchId,
+      rawPreview: String(error?.rawPreview ?? error?.cause?.rawPreview ?? '').slice(0, 1000),
+    })
+  }
   console.error(stack)
   if (batchId) {
     try {
@@ -99,6 +120,10 @@ export default async function handler(req, res) {
         const result = await safeRunBatchWorker(batchId)
         console.log(`[Worker] 后台处理结束 batchId=${batchId}`, { result })
       } catch (err) {
+        console.error(`[Worker] 后台异常 batchId=${batchId}`, {
+          jsonParse: isJsonParseFailure(err),
+          message: err instanceof Error ? err.message : String(err),
+        })
         await handleWorkerFatalError(batchId, err)
       }
     })(),

@@ -1,5 +1,6 @@
-/** 安全 JSON 解析：清理 AI 响应后 JSON.parse / JSON5，禁止 eval / new Function */
+/** 安全 JSON 解析：委托 jsonRepairEngine，禁止 eval / new Function */
 import JSON5 from 'json5'
+import { repairJSON } from './jsonRepairEngine.js'
 
 const PARSE_ERROR_PREVIEW_LEN = 500
 
@@ -215,10 +216,18 @@ export function parseJsonLenient(text) {
 }
 
 export function safeJsonParse(text) {
-  return parseJsonLenient(text)
+  try {
+    return repairJSON(text)
+  } catch (repairErr) {
+    try {
+      return parseJsonLenient(text)
+    } catch {
+      throw repairErr
+    }
+  }
 }
 
 /** 解析 AI 拆题响应：多候选清理 + parse */
 export function safeJsonParseAiResponse(aiText) {
-  return parseJsonLenient(aiText)
+  return safeJsonParse(aiText)
 }

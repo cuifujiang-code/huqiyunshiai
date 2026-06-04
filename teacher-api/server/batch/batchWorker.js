@@ -90,23 +90,57 @@ async function processOneItem(item, meta, batchId, teacherId) {
     if (!result.success || result.insertedCount === 0) {
       const detailMsg = result.error || '稳健拆题未返回有效题目'
       await markItemFailed(item.id, detailMsg)
-      return { success: false, error: detailMsg, itemId: item.id, insertedCount: 0, questions: [], skipTaskFail: true }
+      const isJsonError = isJsonParseFailure(detailMsg)
+      return {
+        success: false,
+        error: detailMsg,
+        itemId: item.id,
+        insertedCount: 0,
+        questions: [],
+        skipTaskFail: !isJsonError,
+        jsonParseFailed: isJsonError,
+        rawPreview: result.rawPreview,
+      }
     }
 
     await markItemCompleted(item.id, result.questions)
     return { success: true, itemId: item.id, insertedCount: result.insertedCount, questions: result.questions }
   } catch (error) {
     const msg = error instanceof Error ? error.message : '拆题失败'
-    console.error('[batchWorker] 分块处理异常', { itemId: item.id, batchId, msg, detail: serializeError(error) })
+    const rawPreview = error?.rawPreview ?? error?.cause?.rawPreview
+    console.error('[batchWorker] 分块处理异常', {
+      itemId: item.id,
+      batchId,
+      msg,
+      rawPreview: rawPreview?.slice?.(0, 500) ?? undefined,
+      detail: serializeError(error),
+    })
+    const isJsonError = isJsonParseFailure(msg)
     const isDataIssue = /文本为空|缺少 batchId|缺少 teacherId|chunk_text/i.test(msg)
-    if (isDataIssue) {
+
+    if (isDataIssue || isJsonError) {
       await markItemFailed(item.id, msg)
     } else {
-      // 保持 processing 状态，等待 auto-retry cron 恢复
       console.warn('[batchWorker] 分块保持 processing，等待 auto-retry', { itemId: item.id, batchId, msg })
     }
-    return { success: false, error: msg, itemId: item.id, insertedCount: 0, questions: [], skipTaskFail: !isDataIssue }
+
+    return {
+      success: false,
+      error: msg,
+      itemId: item.id,
+      insertedCount: 0,
+      questions: [],
+      skipTaskFail: !isDataIssue && !isJsonError,
+      jsonParseFailed: isJsonError,
+      rawPreview,
+    }
   }
+}
+
+function isJsonParseFailure(message) {
+  return /JSON\s*解析|JSON\s*修复|repairJSON|Expected\s*','|Expected\s*'}'|JSON\.parse/i.test(
+    String(message ?? ''),
+  )
 }
 
 /** 串行处理一批分块（避免 DeepSeek 并发超时） */
@@ -118,6 +152,23 @@ async function runPool(items, meta, batchId, teacherId) {
     console.log('[batchWorker] 分块完成', { batchId, itemIndex: item.item_index, success: outcome.success, insertedCount: outcome.insertedCount ?? 0 })
   }
   await syncImportedQuestionsFromBank(batchId)
+
+  const jsonFailures = results.filter((r) => r.jsonParseFailed)
+  if (jsonFailures.length > 0) {
+    const first = jsonFailures[0]
+    const failMsg = `[JSON解析失败] ${first.error || 'repairJSON 失败'}`
+    const preview = String(first.rawPreview ?? '').slice(0, 1000)
+    console.error('[batchWorker] 分块 JSON 解析失败', {
+      batchId,
+      jsonFailCount: jsonFailures.length,
+      total: results.length,
+      preview,
+    })
+    if (jsonFailures.length === results.length && results.length > 0) {
+      await markBatchFailed(batchId, `${failMsg}\n原始内容前1000字符: ${preview}`)
+    }
+  }
+
   return results
 }
 

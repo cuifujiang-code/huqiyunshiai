@@ -20,7 +20,7 @@ import {
 } from './batchQualityPrompts.js'
 import { filterCompleteQuestions } from './questionCompleteness.js'
 import { normalizeQuestionsBatch } from './questionNormalizer.js'
-import { safeJsonParse } from './safeJson.js'
+import { repairJSON } from './jsonRepairEngine.js'
 import { countBatchQuestionsInBank } from './batchTaskStore.js'
 
 const BANK = 'batch_question_bank'
@@ -141,21 +141,24 @@ export function cleanAiResponseString(raw) {
   return { cleaned: s, arraySlice: s.slice(first, last + 1) }
 }
 
-/** JSON 解析：safeJson（注释清理 / JSON5 / 尾随逗号容错） */
+/** JSON 解析：jsonRepairEngine 终极修复 */
 export function parseJsonArrayWithFallback(jsonStr) {
   const str = String(jsonStr ?? '').trim()
   if (!str) return []
 
   try {
-    const parsed = safeJsonParse(str)
+    const parsed = repairJSON(str)
     return coerceToQuestionArray(parsed)
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
-    console.error('[robustDecomposer] JSON 解析失败', {
+    console.error('[robustDecomposer] repairJSON 失败', {
       message: msg,
-      preview: str.slice(0, 500),
+      preview: str.slice(0, 1000),
     })
-    throw err instanceof Error ? err : new Error(msg)
+    const wrapped = new Error(`拆题 JSON 解析失败: ${msg}`)
+    wrapped.cause = err
+    wrapped.rawPreview = str.slice(0, 1000)
+    throw wrapped
   }
 }
 
@@ -311,7 +314,7 @@ async function decomposeWithLegacyPrompt(text, taskMeta) {
           temperature: EXTRACT_TEMPERATURE,
           label: `robust-${label}`,
         })
-        const parsed = await parseBatchSplitAiResponse(aiResponse, meta, 0, extractJson, safeJsonParse)
+        const parsed = await parseBatchSplitAiResponse(aiResponse, meta, 0, extractJson, repairJSON)
         if (parsed.questions?.length) {
           return { rawArray: parsed.questions, model, fragmentMode: label }
         }
@@ -632,6 +635,7 @@ export async function forceDecomposeAndInsert(batchId, teacherId, text, subject,
 
     const realCount = await syncImportedQuestionsOnly(normalizedBatchId).catch(() => 0)
 
+    const rawPreview = err?.rawPreview ?? err?.cause?.rawPreview
     return {
       success: false,
       insertedCount: 0,
@@ -640,6 +644,8 @@ export async function forceDecomposeAndInsert(batchId, teacherId, text, subject,
       realCount,
       status: 'running',
       error: msg,
+      rawPreview,
+      jsonParseFailed: /JSON\s*解析|JSON\s*修复|repairJSON/i.test(msg),
     }
   }
 }
