@@ -24,8 +24,7 @@ import type {
   GanttData, WeeklyReport as WeeklyReportType, MonthlyReport as MonthlyReportType,
   PlanRouteCode,
 } from '../types/planning'
-
-const API_BASE = 'https://api.huqiyunshiai.online'
+import { getTeacherApiBase } from '../lib/apiBase'
 
 type Tab = 'create' | 'records' | 'reports' | 'binding'
 
@@ -193,7 +192,7 @@ export default function StudentPlanningPage() {
   const loadPlanProgress = useCallback(async (planRecord: SavedPlanningRecord) => {
     if (!profile?.id) return
     try {
-      const r = await fetch(`${API_BASE}/api/student/planning-progress?planId=${planRecord.id}&userId=${profile.id}`)
+      const r = await fetch(`${getTeacherApiBase()}/api/student/planning-progress?planId=${planRecord.id}&userId=${profile.id}`)
       const d = await r.json()
       if (d.success && d.progress?.length) {
         setSupabaseProgress(d.progress)
@@ -218,7 +217,7 @@ export default function StudentPlanningPage() {
     if (!planId || !profile?.id) return
     try {
       const taskName = activeReport?.phaseTasks?.[phaseIndex]?.tasks?.[taskIndex] || ''
-      await fetch(`${API_BASE}/api/student/planning-progress`, {
+      await fetch(`${getTeacherApiBase()}/api/student/planning-progress`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ planId, userId: profile.id, phaseIndex, taskIndex, taskName, completed: newCompleted }),

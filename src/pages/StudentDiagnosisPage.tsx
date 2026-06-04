@@ -10,8 +10,7 @@ import { runSequentialDiagnosis } from '../lib/fetchDiagnosis'
 import { exportToPdf } from '../lib/exportPdf'
 import { revokePreviewUrls } from '../lib/answerSheetCompress'
 import type { DiagnosisFormData, DiagnosisReport, DiagnosisHistoryItem, ClassComparison } from '../types/diagnosis'
-
-const API_BASE = 'https://api.huqiyunshiai.online'
+import { getTeacherApiBase } from '../lib/apiBase'
 
 type Step = 'input' | 'analyzing' | 'report'
 
@@ -49,13 +48,13 @@ export default function StudentDiagnosisPage() {
   useEffect(() => {
     if (step === 'report' && user?.id && form.subject) {
       const controller = new AbortController()
-      fetch(`${API_BASE}/api/student/diagnosis-history?userId=${user.id}&subject=${form.subject}&limit=10`, {
+      fetch(`${getTeacherApiBase()}/api/student/diagnosis-history?userId=${user.id}&subject=${form.subject}&limit=10`, {
         signal: controller.signal,
       }).then((r) => r.json()).then((d) => {
         if (d.success && d.history?.length >= 2) setDiagnosisHistory(d.history)
       }).catch(() => {})
 
-      fetch(`${API_BASE}/api/student/class-comparison?userId=${user.id}&subject=${form.subject}`, {
+      fetch(`${getTeacherApiBase()}/api/student/class-comparison?userId=${user.id}&subject=${form.subject}`, {
         signal: controller.signal,
       }).then((r) => r.json()).then((d) => {
         if (d.success && d.comparison) setClassComparison(d.comparison)

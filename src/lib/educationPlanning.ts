@@ -10,14 +10,14 @@ import type {
   ParentBinding, InviteCode, UserTaskRecord,
 } from '../types/planning'
 
-const API_BASE = import.meta.env.VITE_API_BASE || 'https://api.huqiyunshiai.online'
+import { getTeacherApiBase } from './apiBase'
 
 /** 家长绑定 API 优先走主站同源（Vercel /api/student、/api/parent） */
 function getBindingApiBase(): string {
   const env = import.meta.env.VITE_BINDING_API_BASE?.replace(/\/$/, '')
   if (env) return env
   if (typeof window !== 'undefined') return window.location.origin
-  return API_BASE
+  return getTeacherApiBase()
 }
 
 async function bindingGet<T>(path: string, params?: Record<string, string>): Promise<T> {
@@ -39,16 +39,20 @@ async function bindingPost<T>(path: string, body: unknown): Promise<T> {
 }
 
 async function apiGet<T>(path: string, params?: Record<string, string>): Promise<T> {
-  const url = new URL(`${API_BASE}${path}`)
+  const url = new URL(`${getTeacherApiBase()}${path}`)
   if (params) {
     Object.entries(params).forEach(([k, v]) => { if (v) url.searchParams.set(k, v) })
   }
-  const r = await fetch(url.toString(), { headers: { 'Content-Type': 'application/json' } })
+  const finalUrl = url.toString()
+  console.log('[educationPlanning] GET', { finalUrl })
+  const r = await fetch(finalUrl, { headers: { 'Content-Type': 'application/json' } })
   return r.json()
 }
 
 async function apiPost<T>(path: string, body: unknown): Promise<T> {
-  const r = await fetch(`${API_BASE}${path}`, {
+  const finalUrl = `${getTeacherApiBase()}${path}`
+  console.log('[educationPlanning] POST', { finalUrl })
+  const r = await fetch(finalUrl, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -99,8 +103,7 @@ export async function updateTaskProgress(data: { task_id: string; complete_rate?
 // ============================================================
 
 function getReportApiBase(): string {
-  if (typeof window !== 'undefined') return window.location.origin
-  return API_BASE
+  return getTeacherApiBase()
 }
 
 /** 获取周报（支持 studentId + weekStart，或兼容 plan_id） */
@@ -119,7 +122,9 @@ export async function fetchWeeklyReport(params: {
   if (params.weekStart || params.week_start) q.weekStart = params.weekStart || params.week_start || ''
   const url = new URL(`${getReportApiBase()}/api/planning/weekly-report`)
   Object.entries(q).forEach(([k, v]) => { if (v) url.searchParams.set(k, v) })
-  const r = await fetch(url.toString())
+  const finalUrl = url.toString()
+  console.log('[educationPlanning] GET weekly-report', { finalUrl })
+  const r = await fetch(finalUrl)
   return r.json()
 }
 
@@ -138,7 +143,9 @@ export async function fetchMonthlyReport(params: {
   if (params.month) q.month = params.month
   const url = new URL(`${getReportApiBase()}/api/planning/monthly-report`)
   Object.entries(q).forEach(([k, v]) => { if (v) url.searchParams.set(k, v) })
-  const r = await fetch(url.toString())
+  const finalUrl = url.toString()
+  console.log('[educationPlanning] GET monthly-report', { finalUrl })
+  const r = await fetch(finalUrl)
   return r.json()
 }
 

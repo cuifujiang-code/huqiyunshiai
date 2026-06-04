@@ -1,10 +1,8 @@
-import { getTeacherApiBase } from './apiBase'
+import { buildTeacherRootApiUrl } from './apiBase'
 import { postApiJson } from './postApiJson'
 
-const TEACHER_API_BASE = getTeacherApiBase()
-
 function catalogUrl(path: string) {
-  return `${TEACHER_API_BASE}/api/catalog/${path.replace(/^\//, '')}`
+  return buildTeacherRootApiUrl(`catalog/${path.replace(/^\//, '')}`)
 }
 
 export interface CatalogGroup {

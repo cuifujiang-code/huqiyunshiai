@@ -1,3 +1,5 @@
+import { getTeacherApiBase } from './apiBase'
+
 const LOG_PREFIX = '[华祺云师AI API]'
 
 export type ApiPostResult<T> =
@@ -26,11 +28,21 @@ function looksLikeJson(text: string) {
   return trimmed.startsWith('{') || trimmed.startsWith('[')
 }
 
-/** 解析绝对或相对 API 地址，支持跨域 teacher-api */
+/** 解析绝对或相对 API 地址；/api/teacher、/api/batch 等走独立 API 域 */
 function resolveRequestUrl(path: string): string {
-  if (/^https?:\/\//i.test(path)) return path
-  const origin = typeof window !== 'undefined' ? window.location.origin : ''
-  return `${origin}${path.startsWith('/') ? path : `/${path}`}`
+  if (/^https?:\/\//i.test(path)) {
+    console.log(`${LOG_PREFIX} resolveRequestUrl（绝对地址）`, { url: path })
+    return path
+  }
+  const p = path.startsWith('/') ? path : `/${path}`
+  const useTeacherApi =
+    /^\/api\/(teacher|batch|catalog|decompose|planning|ai)\b/i.test(p)
+  const base = useTeacherApi
+    ? getTeacherApiBase()
+    : (typeof window !== 'undefined' ? window.location.origin : getTeacherApiBase())
+  const url = `${base.replace(/\/$/, '')}${p}`
+  console.log(`${LOG_PREFIX} resolveRequestUrl`, { path, url, useTeacherApi })
+  return url
 }
 
 function createTimeoutSignal(timeoutMs?: number): { signal?: AbortSignal; cleanup: () => void } {

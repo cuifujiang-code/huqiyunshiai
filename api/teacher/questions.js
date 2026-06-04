@@ -1,21 +1,40 @@
 /**
  * 显式路由：/api/teacher/questions
  * Vercel 在存在 api/teacher/questions/ 子目录时，catch-all [...path].js 不会匹配本路径，导致回退 SPA。
+ * 修复：不导入 apiResponse.js（会触发 deepseekClient.js 依赖链导致 FUNCTION_INVOCATION_FAILED），
+ *       直接内联必需的 header 函数。
  */
 import '../../server/applyUrlShim.js'
 import { getSupabaseAdmin, isSupabaseAdminConfigured } from '../../server/supabaseAdmin.js'
-import { applyApiHeaders, handleOptions, setNoCacheHeaders } from '../../server/apiResponse.js'
 
 const TABLE = 'teacher_question_bank'
 
-function nowIso() {
-  return new Date().toISOString()
+function nowIso() { return new Date().toISOString() }
+
+function setCorsHeaders(req, res) {
+  const origin = req.headers.origin || '*'
+  res.setHeader('Access-Control-Allow-Origin', origin)
+  res.setHeader('Access-Control-Allow-Credentials', 'true')
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH')
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With')
+}
+
+function handleOptions(req, res) {
+  if (req.method === 'OPTIONS') {
+    setCorsHeaders(req, res)
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate')
+    res.status(204).end()
+    return true
+  }
+  return false
 }
 
 export default async function handler(req, res) {
   if (handleOptions(req, res)) return
-  applyApiHeaders(req, res)
-  setNoCacheHeaders(res)
+  setCorsHeaders(req, res)
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate')
+  res.setHeader('Pragma', 'no-cache')
+  res.setHeader('Expires', '0')
 
   const method = req.method
   const body = req.body ?? {}

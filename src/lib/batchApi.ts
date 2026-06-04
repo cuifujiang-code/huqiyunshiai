@@ -1,13 +1,8 @@
-import { getTeacherApiBase } from './apiBase'
+import { buildTeacherRootApiUrl } from './apiBase'
 import { postApiJson } from './postApiJson'
 
-function getBatchApiBase(): string {
-  return `${getTeacherApiBase()}/api`
-}
-
 function batchApiUrl(path: string) {
-  const normalized = path.replace(/^\//, '')
-  return `${getBatchApiBase()}/${normalized}`
+  return buildTeacherRootApiUrl(path.replace(/^\//, ''))
 }
 
 export interface BatchProgress {

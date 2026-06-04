@@ -7,21 +7,17 @@ import type {
   KnowledgeGraph,
   LessonPlan,
 } from '../types/teacher'
-import { getTeacherApiBase } from './apiBase'
+import { buildTeacherApiUrl, buildTeacherRootApiUrl } from './apiBase'
 import { postApiJson } from './postApiJson'
-
-const TEACHER_API_BASE = getTeacherApiBase()
 
 /** 教师业务 API（题库/组卷/讲义/辅导书等）→ /api/teacher/* */
 function teacherApiUrl(path: string) {
-  const normalized = path.replace(/^\//, '')
-  return `${TEACHER_API_BASE}/api/teacher/${normalized}`
+  return buildTeacherApiUrl(path)
 }
 
 /** 独立 teacher-api 上的拆题专用路由 → /api/decompose-* */
 function teacherDecomposeApiUrl(path: string) {
-  const normalized = path.replace(/^\//, '')
-  return `${TEACHER_API_BASE}/api/${normalized}`
+  return buildTeacherRootApiUrl(path)
 }
 
 export async function fetchQuestions(
