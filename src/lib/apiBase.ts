@@ -31,8 +31,27 @@ function normalizeTeacherApiBase(raw: string): string {
   return base
 }
 
+/** 主站 / 本地开发：API 走当前站点同源（Vercel /api/*），避免误打到不可达的 api 子域 */
+function isSameOriginTeacherApiHost(hostname: string): boolean {
+  return (
+    hostname === 'localhost' ||
+    hostname === '127.0.0.1' ||
+    hostname === 'huqiyunshiai.online' ||
+    /^www\.huqiyunshiai\.online$/i.test(hostname)
+  )
+}
+
 /** 解析教师/拆题 API 基址（不含 /api 后缀） */
 export function getTeacherApiBase(): string {
+  if (typeof window !== 'undefined') {
+    const host = window.location.hostname
+    if (isSameOriginTeacherApiHost(host)) {
+      const base = window.location.origin.replace(/\/$/, '')
+      console.log('[apiBase] 教师端 API 基址', { base, source: 'same-origin' })
+      return base
+    }
+  }
+
   const fromEnv = import.meta.env.VITE_TEACHER_API_URL ?? ''
   const base = fromEnv
     ? normalizeTeacherApiBase(fromEnv)

@@ -28,20 +28,43 @@ function looksLikeJson(text: string) {
   return trimmed.startsWith('{') || trimmed.startsWith('[')
 }
 
-/** 解析绝对或相对 API 地址；/api/teacher、/api/batch 等走独立 API 域 */
+const TEACHER_API_PATH_RE = /^\/api\/(teacher|batch|catalog|decompose|planning|ai|student)\b/i
+
+function isTeacherApiPathname(pathname: string): boolean {
+  const p = pathname.startsWith('/') ? pathname : `/${pathname}`
+  return TEACHER_API_PATH_RE.test(p.split('?')[0].split('#')[0])
+}
+
+function isMainSiteBrowser(): boolean {
+  if (typeof window === 'undefined') return false
+  const host = window.location.hostname
+  return host === 'huqiyunshiai.online' || /^www\.huqiyunshiai\.online$/i.test(host)
+}
+
+/** 解析绝对或相对 API 地址；主站走同源 /api/*，独立 API 域仅在其他 host 使用 */
 function resolveRequestUrl(path: string): string {
-  if (/^https?:\/\//i.test(path)) {
-    console.log(`${LOG_PREFIX} resolveRequestUrl（绝对地址）`, { url: path })
-    return path
+  const trimmed = path.trim()
+  if (/^https?:\/\//i.test(trimmed)) {
+    try {
+      const u = new URL(trimmed)
+      if (isMainSiteBrowser() && /api\.huqiyunshiai\.online/i.test(u.hostname) && isTeacherApiPathname(u.pathname)) {
+        const url = `${window.location.origin.replace(/\/$/, '')}${u.pathname}${u.search}`
+        console.log(`${LOG_PREFIX} resolveRequestUrl（api 子域→主站同源）`, { in: trimmed, url })
+        return url
+      }
+    } catch {
+      /* ignore malformed URL */
+    }
+    console.log(`${LOG_PREFIX} resolveRequestUrl（绝对地址）`, { url: trimmed })
+    return trimmed
   }
-  const p = path.startsWith('/') ? path : `/${path}`
-  const useTeacherApi =
-    /^\/api\/(teacher|batch|catalog|decompose|planning|ai)\b/i.test(p)
+  const p = trimmed.startsWith('/') ? trimmed : `/${trimmed}`
+  const useTeacherApi = isTeacherApiPathname(p)
   const base = useTeacherApi
     ? getTeacherApiBase()
-    : (typeof window !== 'undefined' ? window.location.origin : getTeacherApiBase())
+    : (typeof window !== 'undefined' ? window.location.origin.replace(/\/$/, '') : getTeacherApiBase())
   const url = `${base.replace(/\/$/, '')}${p}`
-  console.log(`${LOG_PREFIX} resolveRequestUrl`, { path, url, useTeacherApi })
+  console.log(`${LOG_PREFIX} resolveRequestUrl`, { path: p, url, useTeacherApi })
   return url
 }
 
