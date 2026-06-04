@@ -46,31 +46,39 @@
     },
     "api/teacher/decompose-submit.js": {
       "maxDuration": 60,
-      "includeFiles": "server/**"
+      "includeFiles": "{server/**,node_modules/@supabase/**}"
     },
     "api/teacher/decompose-process.js": {
       "maxDuration": 60,
-      "includeFiles": "{server/**,node_modules/mammoth/**,node_modules/pdf-parse/**,node_modules/pdfjs-dist/**}"
+      "includeFiles": "{server/**,node_modules/mammoth/**,node_modules/pdf-parse/**,node_modules/pdfjs-dist/**,node_modules/@supabase/**}"
     },
     "api/teacher/decompose-status.js": {
       "maxDuration": 60,
-      "includeFiles": "server/**"
+      "includeFiles": "{server/**,node_modules/@supabase/**}"
     },
     "api/teacher/decompose-tasks.js": {
       "maxDuration": 10,
-      "includeFiles": "server/**"
+      "includeFiles": "{server/**,node_modules/@supabase/**}"
     },
     "api/teacher/[...path].js": {
       "maxDuration": 60,
-      "includeFiles": "{server/**,node_modules/mammoth/**,node_modules/pdf-parse/**,node_modules/pdfjs-dist/**}"
+      "includeFiles": "{server/**,node_modules/mammoth/**,node_modules/pdf-parse/**,node_modules/pdfjs-dist/**,node_modules/@supabase/**}"
     },
     "api/teacher/questions.js": {
       "maxDuration": 60,
-      "includeFiles": "server/**"
+      "includeFiles": "{server/**,node_modules/@supabase/**}"
     },
     "api/teacher/questions/[id].js": {
       "maxDuration": 60,
-      "includeFiles": "server/**"
+      "includeFiles": "{server/**,node_modules/@supabase/**}"
+    },
+    "api/teacher/questions/stats.js": {
+      "maxDuration": 15,
+      "includeFiles": "{server/**,node_modules/@supabase/**}"
+    },
+    "api/teacher/questions/topics.js": {
+      "maxDuration": 15,
+      "includeFiles": "{server/**,node_modules/@supabase/**}"
     },
     "api/batch/upload.js": {
       "maxDuration": 60,
