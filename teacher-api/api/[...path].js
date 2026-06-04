@@ -10,6 +10,6 @@ export default async function handler(req, res) {
 }
 
 export const config = {
-  maxDuration: 60,
+  maxDuration: 300,
   includeFiles: '{server/**,node_modules/mammoth/**,node_modules/pdf-parse/**,node_modules/pdfjs-dist/**}',
 }
