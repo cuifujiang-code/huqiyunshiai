@@ -209,12 +209,74 @@ async function solveWithDeepSeek(ocrText, candidates) {
   }
 }
 
+async function runPhotoSearchViaOrchestrator({ userId, imageBase64, imageName }) {
+  const base = (
+    process.env.TEACHER_API_URL ||
+    process.env.VITE_TEACHER_API_URL ||
+    'https://api.huqiyunshiai.online'
+  ).replace(/\/$/, '')
+
+  const response = await fetch(`${base}/api/ai/orchestrate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify({
+      taskType: 'photo-search',
+      input: { userId, imageBase64, imageName },
+    }),
+    signal: AbortSignal.timeout(120000),
+  })
+
+  const text = await response.text()
+  let data
+  try {
+    data = JSON.parse(text)
+  } catch {
+    throw new Error('拍照搜题编排 API 返回非 JSON')
+  }
+
+  if (!response.ok || !data.success) {
+    throw new Error(data.error || data.message || `编排 API HTTP ${response.status}`)
+  }
+
+  return { ...data.result, orchestrated: true, meta: data.meta }
+}
+
 /**
- * 拍照搜题主流程：OCR → 题库匹配 → DeepSeek 解答 → 写入历史
+ * 拍照搜题主流程：优先 teacher-api 多 AI 编排，失败则单 AI 降级
  */
 export async function runPhotoSearch({ userId, imageBase64, imageName }) {
   if (!imageBase64?.trim()) {
     throw new Error('请上传题目图片')
+  }
+
+  if (process.env.USE_AI_ORCHESTRATOR !== 'false') {
+    try {
+      const orchestrated = await runPhotoSearchViaOrchestrator({ userId, imageBase64, imageName })
+      let historyId = null
+      try {
+        const row = await insertPhotoSearchRecord({
+          userId,
+          imageName: imageName || 'photo.jpg',
+          ocrText: orchestrated.ocrText,
+          question: orchestrated.question,
+          answer: orchestrated.answer,
+          analysis: orchestrated.analysis,
+          knowledgePoints: orchestrated.knowledgePoints,
+          source: orchestrated.source,
+          bankQuestionId: orchestrated.bankQuestionId,
+          bankTable: orchestrated.bankTable ?? null,
+          matchedQuestion: orchestrated.matchedQuestion ?? null,
+        })
+        historyId = row?.id ?? null
+      } catch (err) {
+        console.warn('[photoSearch] 历史记录保存失败', err)
+      }
+      return { ...orchestrated, historyId }
+    } catch (orchErr) {
+      console.warn('[photoSearch] 多 AI 编排失败，降级单 AI 模式', {
+        message: orchErr instanceof Error ? orchErr.message : String(orchErr),
+      })
+    }
   }
 
   if (!isAlibabaOcrConfigured()) {

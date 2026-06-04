@@ -1,7 +1,7 @@
 import { isSupabaseAdminConfigured, uploadQuestionImage } from '../server/supabaseAdmin.js'
 import * as questionBank from '../server/teacher/questionBankStore.js'
 import { splitExamToQuestions } from '../server/teacher/questionImportService.js'
-import { buildSmartExam } from '../server/teacher/examBuilderService.js'
+import { orchestrateAITask } from '../server/aiOrchestrator.js'
 import * as lessonPlan from '../server/teacher/lessonPlanStore.js'
 import * as handout from '../server/teacher/handoutStore.js'
 import * as book from '../server/teacher/bookStore.js'
@@ -166,8 +166,17 @@ export async function handleTeacherApi(req, res, pathSegments = []) {
 
     if (path === 'exam-builder' && method === 'POST') {
       const teacherId = requireTeacher(body, query)
-      const exam = await buildSmartExam(teacherId, body)
-      return res.status(200).json({ success: true, exam })
+      const outcome = await orchestrateAITask('exam-builder', { teacherId, config: body })
+      if (!outcome.success) {
+        return res.status(500).json({ success: false, message: outcome.error || '组卷失败' })
+      }
+      return res.status(200).json({
+        success: true,
+        exam: outcome.result?.exam,
+        reviewRequired: outcome.result?.reviewRequired ?? false,
+        validation: outcome.result?.validation,
+        meta: outcome.meta,
+      })
     }
 
     if (path === 'lesson-plans' && method === 'GET') {

@@ -57,6 +57,9 @@ teacher-api/
 | `DEEPSEEK_MODEL` | 建议 | 默认 `deepseek-chat` |
 | `TEACHER_API_URL` | ✅ **必设** | `https://api.huqiyunshiai.online`；内部触发 decompose-process/worker 用，**勿依赖 VERCEL_URL** |
 | `DECOMPOSE_PROCESS_SECRET` | 建议 | 与 `SUPABASE_SERVICE_ROLE_KEY` 二选一；保护 `/api/decompose-process` |
+| `DOUBAO_API_KEY` | 多 AI 协作 | 豆包仲裁/验证；未配置则自动跳过 |
+| `QIANWEN_API_KEY` | 多 AI 协作 | 千问验证层；未配置则自动跳过 |
+| `AI_ORCHESTRATOR_TIMEOUT_MS` | 可选 | 默认 `30000`（单次 AI 调用超时） |
 | `ALIBABA_ACCESS_KEY_ID` | 拆题/OCR 时需要 | 与主站诊断共用 |
 | `ALIBABA_ACCESS_KEY_SECRET` | 拆题/OCR 时需要 | 同上 |
 

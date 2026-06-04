@@ -10,6 +10,8 @@ import debugTasks from '../api/debug-tasks.js'
 import ocrCorrectApi from './batch/ocrCorrectApi.js'
 import studentApiHandler from './batch/studentApi.js'
 import educationPlanningApiHandler from './batch/educationPlanningApi.js'
+import aiOrchestrateHandler from '../api/ai/orchestrate.js'
+import photoSearchHandler from '../api/student/photo-search.js'
 
 function getRequestPathname(req) {
   if (typeof req.url !== 'string' || !req.url) return '/'
@@ -74,6 +76,9 @@ export async function dispatchApiRequest(req, res) {
     pathname.startsWith('/api/planning/') ||
     pathname.startsWith('/api/parent/')
   ) return educationPlanningApiHandler(req, res)
+
+  if (pathname === '/api/ai/orchestrate') return aiOrchestrateHandler(req, res)
+  if (pathname === '/api/student/photo-search') return photoSearchHandler(req, res)
 
   // 学生端 API 路由
   if (pathname.startsWith('/api/student/')) return studentApiHandler(req, res)
