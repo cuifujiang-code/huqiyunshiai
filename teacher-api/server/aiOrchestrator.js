@@ -4,6 +4,7 @@
  */
 import { buildSmartExam } from './teacher/examBuilderService.js'
 import { getSupabaseAdmin, isSupabaseAdminConfigured } from './supabaseAdmin.js'
+import { callDeepSeekVisionAI } from './deepseekClient.js'
 import {
   AI_CALL_TIMEOUT_MS,
   callDoubaoAI,
@@ -129,20 +130,43 @@ async function runPhotoSearchOrchestration(input) {
 
   const textA = dual.standard.ok ? dual.standard.result : ''
   const textB = dual.enhanced.ok ? dual.enhanced.result : ''
+
   if (!textA && !textB) {
-    if (!isAlibabaOcrAvailable()) meta.degraded = true
-    throw Object.assign(new Error('OCR 未配置或全部失败'), { searchStatus: 'blurry' })
+    // ============ OCR 全部失败 → DeepSeek 视觉降级 ============
+    meta.degraded = true
+    console.warn('[aiOrchestrator] 阿里云 OCR 双路均失败，触发 DeepSeek 视觉降级')
+    const vision = await safeAiCall('DeepSeek-Vision-fallback', isDeepSeekAvailable, () =>
+      callDeepSeekVisionAI(
+        '你是 K12 拍照搜题 OCR 专家。请仔细查看图片，提取其中的完整题目文字内容（包括公式和图表标注）。只输出纯文本题目，不要添加解释或评价。',
+        '请识别这张题目图片的完整文字内容，输出原文。',
+        imageBase64,
+        'image/jpeg',
+      ),
+    )
+    if (vision.ok) {
+      ocrText = String(vision.result || '').trim()
+      meta.providersUsed.push('deepseek-vision-fallback')
+      meta.ocrFallback = true
+      console.log('[aiOrchestrator] DeepSeek Vision 识别成功', { charCount: ocrText.length })
+    }
   }
 
-  const arbitration = await arbitrateOcrTexts(textA, textB, { imageName })
-  ocrText = arbitration.text
-  meta.ocrArbitration = arbitration
+  if (!ocrText) {
+    if (!textA && !textB) {
+      if (!isDeepSeekAvailable()) meta.degraded = true
+      throw Object.assign(new Error('OCR 未配置或全部失败，AI 视觉识别也未能成功'), { searchStatus: 'blurry' })
+    }
+    // 至少有单路 OCR 成功 → 进入仲裁
+    const arbitration = await arbitrateOcrTexts(textA, textB, { imageName })
+    ocrText = arbitration.text
+    meta.ocrArbitration = arbitration
+  }
 
   if (normalizeText(ocrText).length < 8) {
     throw Object.assign(new Error('图片字迹模糊无法识别'), { searchStatus: 'blurry' })
   }
 
-  const candidates = await findSimilarBankQuestions(ocrText)
+  const candidates = meta.ocrFallback ? [] : await findSimilarBankQuestions(ocrText)
   const best = candidates[0]
 
   let solveResult = null
@@ -179,6 +203,7 @@ async function runPhotoSearchOrchestration(input) {
         searchStatus: 'success',
         reviewRequired: false,
         userId,
+        ...(meta.ocrFallback ? { ocrFallback: true } : {}),
       },
       meta,
     }
@@ -186,6 +211,29 @@ async function runPhotoSearchOrchestration(input) {
 
   const answer = solveResult?.answer || best?.answer || ''
   const analysis = solveResult?.analysis || best?.analysis || ''
+
+  // ============ OCR 降级模式：跳过豆包和千问验证 ============
+  if (meta.ocrFallback) {
+    console.log('[aiOrchestrator] OCR 降级模式，跳过豆包/千问答案验证')
+    return {
+      success: true,
+      taskType: 'photo-search',
+      result: {
+        ocrText,
+        question: solveResult?.question || ocrText,
+        answer,
+        analysis,
+        knowledgePoints: Array.isArray(solveResult?.knowledgePoints) ? solveResult.knowledgePoints : [],
+        source: solveResult?.source || (best ? 'bank' : 'ai'),
+        bankQuestionId: solveResult?.bankQuestionId ?? (best ? String(best.id) : null),
+        searchStatus: 'success',
+        reviewRequired: false,
+        ocrFallback: true,
+        userId,
+      },
+      meta,
+    }
+  }
 
   const doubaoVerify = await safeAiCall('Doubao-verify', isDoubaoAvailable, () =>
     callDoubaoAI(

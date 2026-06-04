@@ -70,15 +70,18 @@ export async function recognizeHandwritingHttp(imageBase64, { fileName = 'image'
   if (!imageBuffer.length) throw new Error(`图片 ${fileName} 解码后为空`)
 
   const ocrFlags = OCR_MODES[mode] || OCR_MODES.standard
-  const requestOption = { method: 'POST', formatParams: false, timeout: 28000 }
+  // ⚡ 超时从 28s 缩短为 8s，避免拖垮整个拍照搜题流程
+  const requestOption = { method: 'POST', formatParams: false, timeout: 8000 }
 
+  // 最多重试 1 次（先 body-binary，失败后 fallback 到 ImageBase64）
   const attempts = [
     { label: 'body-binary', params: { ...ocrFlags, body: imageBuffer } },
     { label: 'ImageBase64', params: { ...ocrFlags, ImageBase64: imageBase64 } },
   ]
 
   let lastError = null
-  for (const attempt of attempts) {
+  for (let i = 0; i < attempts.length; i++) {
+    const attempt = attempts[i]
     try {
       const result = await client.request('RecognizeHandwriting', attempt.params, requestOption)
       const code = result?.Code ?? result?.code
@@ -91,6 +94,8 @@ export async function recognizeHandwritingHttp(imageBase64, { fileName = 'image'
     } catch (error) {
       lastError = error
       console.warn('[alibabaOcr] 尝试失败', { fileName, mode, attempt: attempt.label, message: error?.message })
+      // 第一次重试失败 → 立即返回，不再继续
+      if (i > 0) break
     }
   }
 

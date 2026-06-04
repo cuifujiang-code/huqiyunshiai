@@ -245,6 +245,12 @@ export default function PhotoSearchResultView({
         <p className="text-xs text-amber-400/90">AI 服务未配置或不可用，仅展示有限结果。</p>
       )}
 
+      {result.ocrFallback && (
+        <p className="rounded-lg bg-amber-500/10 px-3 py-2 text-xs text-amber-300 border border-amber-500/20">
+          ⚡ OCR 服务繁忙，已使用 AI 直接识别
+        </p>
+      )}
+
       {notice && (
         <p className="rounded-lg bg-emerald-500/10 px-3 py-2 text-xs text-emerald-300">{notice}</p>
       )}

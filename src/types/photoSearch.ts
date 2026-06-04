@@ -16,6 +16,8 @@ export interface PhotoSearchResult {
   similarity?: number
   historyId?: string | null
   isMockFallback?: boolean
+  /** OCR 降级标识：阿里云 OCR 超时时使用 DeepSeek 视觉识别 */
+  ocrFallback?: boolean
   /** 搜题状态码，前端据此切换 UI */
   searchStatus?: SearchStatus
 }
