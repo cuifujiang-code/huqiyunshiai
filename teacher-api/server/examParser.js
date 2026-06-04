@@ -550,7 +550,116 @@ async function parseDocx(buffer, fileName) {
   return result2
 }
 
-/** 解析 .pdf（含扫描版 PDF 检测 + OCR 回退） */
+/**
+ * 调用 MinerU API 对扫描版 PDF 进行 OCR
+ * MinerU API 端点：POST /file_parse（同步）
+ * 参数：files（multipart array）、parse_method="ocr"、lang_list=["ch"]、formula_enable=true
+ * 返回：{ "0": { "markdown": "...", "status": "done" } }
+ */
+async function parsePdfWithMinerU(buffer, fileName) {
+  const mineruUrl = process.env.MINERU_API_URL
+  if (!mineruUrl) {
+    throw new Error('MINERU_API_URL 未配置，无法处理扫描版 PDF')
+  }
+  // 去除末尾斜杠
+  const baseUrl = mineruUrl.replace(/\/$/, '')
+
+  console.log('[MinerU] 开始调用 MinerU API 解析扫描 PDF', {
+    fileName,
+    bytes: buffer.length,
+    baseUrl: baseUrl.slice(0, 60),
+  })
+
+  try {
+    // 手动拼 multipart/form-data（Vercel Serverless 中 globalThis.FormData 可能不支持 binary Blob）
+    const boundary = `----MinerUBoundary${Date.now()}`
+    const CRLF = '\r\n'
+    const safeFileName = (fileName || 'exam.pdf').replace(/[^\w.-]/g, '_')
+
+    // files 字段（PDF 文件）
+    const fileHeader = [
+      `--${boundary}`,
+      `Content-Disposition: form-data; name="files"; filename="${safeFileName}"`,
+      'Content-Type: application/pdf',
+      '',
+      '',
+    ].join(CRLF)
+
+    // 附加文本字段的工具函数
+    function textField(name, value) {
+      return `--${boundary}${CRLF}Content-Disposition: form-data; name="${name}"${CRLF}${CRLF}${value}${CRLF}`
+    }
+
+    const footer = `--${boundary}--${CRLF}`
+
+    const parts = [
+      Buffer.from(fileHeader, 'utf8'),
+      buffer,
+      Buffer.from(CRLF, 'utf8'),
+      Buffer.from(textField('parse_method', 'ocr'), 'utf8'),
+      Buffer.from(textField('lang_list', 'ch'), 'utf8'),
+      Buffer.from(textField('formula_enable', 'true'), 'utf8'),
+      Buffer.from(textField('table_enable', 'true'), 'utf8'),
+      Buffer.from(textField('return_md', 'true'), 'utf8'),
+      Buffer.from(textField('return_images', 'false'), 'utf8'),
+      Buffer.from(textField('response_format_zip', 'false'), 'utf8'),
+      Buffer.from(footer, 'utf8'),
+    ]
+
+    const body = Buffer.concat(parts)
+
+    const response = await fetch(`${baseUrl}/file_parse`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': `multipart/form-data; boundary=${boundary}`,
+        'Content-Length': String(body.length),
+      },
+      body,
+      signal: AbortSignal.timeout(120000), // 扫描版 PDF OCR 最多等 2 分钟
+    })
+
+    if (!response.ok) {
+      const errText = await response.text().catch(() => '')
+      throw new Error(`MinerU API 返回错误：${response.status} ${errText.slice(0, 300)}`)
+    }
+
+    const result = await response.json()
+    console.log('[MinerU] API 响应 keys', Object.keys(result || {}))
+
+    // MinerU /file_parse 返回格式：
+    // { "0": { "markdown": "...", "status": "done", ... }, "1": { ... } }
+    // 或 { "markdown": "...", "status": "done" }（单文件时可能直接返回）
+    let markdown = ''
+    if (result && typeof result === 'object') {
+      // 优先取 result["0"].markdown（新版格式）
+      const firstItem = result['0'] || result[0] || result
+      markdown =
+        firstItem?.markdown ||
+        firstItem?.md ||
+        result?.markdown ||
+        result?.content ||
+        result?.text ||
+        ''
+    }
+
+    if (!markdown || markdown.trim().length < 10) {
+      const resultStr = JSON.stringify(result).slice(0, 300)
+      throw new Error(`MinerU OCR 返回内容为空，响应：${resultStr}`)
+    }
+
+    console.log('[MinerU] OCR 成功', { charCount: markdown.length })
+    return {
+      text: markdown.trim(),
+      type: 'pdf_mineru_ocr',
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    console.error('[MinerU] 调用失败', { error: msg })
+    throw new Error(`MinerU OCR 失败：${msg}`)
+  }
+}
+
+/** 解析 .pdf（含扫描版 PDF 检测 + MinerU OCR 回退） */
 async function parsePdf(buffer, fileName) {
   console.log('[试卷解析] 开始 PDF', { fileName, bytes: buffer.length })
   const pdfParse = getPdfParse()
@@ -565,12 +674,16 @@ async function parsePdf(buffer, fileName) {
     pdfImages: pdfImages.length,
   })
 
-  // 文字层内容过少 → 判定为扫描版 PDF
+  // 文字层内容过少 → 判定为扫描版 PDF → 调用 MinerU OCR
   if (!text || text.length < 100) {
-    console.warn('[examParser] PDF 文字层内容过少，判定为扫描版 PDF')
-    throw new Error(
-      '检测到扫描版 PDF（无文字层），暂不支持自动 OCR。请将 PDF 导出为图片后上传，或使用"拍照录入"功能上传图片。',
-    )
+    console.warn('[examParser] PDF 文字层内容过少，判定为扫描版 PDF，尝试 MinerU OCR')
+    const mineruUrl = process.env.MINERU_API_URL
+    if (!mineruUrl) {
+      throw new Error(
+        '检测到扫描版 PDF（无文字层），且 MinerU OCR 服务未配置。请将 PDF 导出为图片后上传，或联系管理员开启 OCR 服务。',
+      )
+    }
+    return await parsePdfWithMinerU(buffer, fileName)
   }
 
   return { text, type: 'pdf', ...(pdfImages.length ? { images: pdfImages } : {}) }
