@@ -1,5 +1,6 @@
 import { getSupabaseAdmin } from '../supabaseAdmin.js'
-import { callDeepSeekAI, extractJson } from '../deepseekClient.js'
+import { callDeepSeekAI } from '../deepseekClient.js'
+import { repairJSON } from '../batch/jsonRepairEngine.js'
 
 const TABLE = 'handouts'
 
@@ -67,5 +68,5 @@ ${input.weakPoints ? `薄弱点：${JSON.stringify(input.weakPoints)}` : ''}
 ${input.questionSummary ? `参考题目：${input.questionSummary.slice(0, 3000)}` : ''}
 返回 JSON：{ title, modules: [{ id, title, content, items? }] }`
   const content = await callDeepSeekAI('只输出 JSON，不要 markdown', prompt)
-  return JSON.parse(extractJson(content))
+  return repairJSON(content)
 }

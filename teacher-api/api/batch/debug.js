@@ -1,20 +1,23 @@
 import '../../server/applyUrlShim.js'
 import { applyApiHeaders, handleOptions } from '../../server/apiResponse.js'
+import { verifyBatchWorkerSecret } from '../../server/batch/batchTrigger.js'
 import { getSupabaseAdmin, getServiceRoleKey } from '../../server/supabaseAdmin.js'
 
 export default async function handler(req, res) {
   if (handleOptions(req, res)) return
   applyApiHeaders(req, res)
 
+  if (!verifyBatchWorkerSecret(req)) {
+    return res.status(401).json({ success: false, message: '未授权：需要有效的 x-batch-worker-secret' })
+  }
+
   try {
     const admin = getSupabaseAdmin()
 
-    // 1. 检查环境变量
     const url = process.env.SUPABASE_URL || ''
     const key = getServiceRoleKey()
-    const keyInfo = key ? `SET (len=${key.length}, prefix=${key.slice(0, 10)}...)` : 'NOT SET'
+    const keyInfo = key ? `SET (len=${key.length})` : 'NOT SET'
 
-    // 2. 解码 JWT
     let jwtInfo = {}
     try {
       const parts = key.split('.')
@@ -24,19 +27,16 @@ export default async function handler(req, res) {
       jwtInfo = { error: e.message }
     }
 
-    // 3. 查询 batch_question_bank 总数
     const { count: bankCount, error: bankCountErr } = await admin
       .from('batch_question_bank')
       .select('id', { count: 'exact', head: true })
 
-    // 4. 查询最近 5 个任务（含真实 COUNT）
     const { data: tasks, error: tasksErr } = await admin
       .from('batch_decompose_tasks')
       .select('batch_id, status, file_name, total_items, completed_items, total_questions, imported_questions, error_message, created_at, updated_at')
       .order('created_at', { ascending: false })
       .limit(5)
 
-    // 5. 为每个任务查询 batch_question_bank 真实数量
     const tasksWithRealCount = tasks ? await Promise.all(
       tasks.map(async (t) => {
         try {
@@ -48,10 +48,9 @@ export default async function handler(req, res) {
         } catch (e) {
           return { ...t, real_bank_count: '查询失败', bank_error: e.message }
         }
-      })
+      }),
     ) : []
 
-    // 6. 测试写入一条数据（用 null item_id）
     const testBatchId = 'debug-' + Date.now()
     const { error: insertErr, status: insertStatus } = await admin
       .from('batch_question_bank')
@@ -68,7 +67,6 @@ export default async function handler(req, res) {
         analysis: '测试',
       })
 
-    // 7. COUNT 验证写入
     let verifyCount = 0
     if (!insertErr) {
       const { count } = await admin
@@ -76,7 +74,6 @@ export default async function handler(req, res) {
         .select('id', { count: 'exact', head: true })
         .eq('batch_id', testBatchId)
       verifyCount = count ?? 0
-      // 清理
       await admin.from('batch_question_bank').delete().eq('batch_id', testBatchId)
     }
 
@@ -95,7 +92,7 @@ export default async function handler(req, res) {
       recent_tasks_error: tasksErr ? tasksErr.message : null,
       write_test: {
         insertStatus,
-        insertError: insertErr ? { message: insertErr.message, code: insertErr.code, details: insertErr.details, hint: insertErr.hint } : null,
+        insertError: insertErr ? { message: insertErr.message, code: insertErr.code } : null,
         verifyCount,
       },
       timestamp: new Date().toISOString(),
@@ -104,7 +101,6 @@ export default async function handler(req, res) {
     return res.status(500).json({
       success: false,
       error: err instanceof Error ? err.message : String(err),
-      stack: err instanceof Error ? err.stack : undefined,
     })
   }
 }

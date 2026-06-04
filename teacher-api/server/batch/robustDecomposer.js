@@ -2,7 +2,7 @@
  * 批量拆题 · 稳健拆题核心
  * 单一入口 forceDecomposeAndInsert：DeepSeek 拆题 → 清洗解析 → 标准化 → SERVICE_ROLE 入库
  */
-import { callDeepSeekAI, DeepSeekApiError, extractJson } from '../deepseekClient.js'
+import { callDeepSeekAI, DeepSeekApiError } from '../deepseekClient.js'
 import { createServiceRoleClient, getSupabaseAdmin } from '../supabaseAdmin.js'
 import {
   backupPrompt,
@@ -19,7 +19,7 @@ import {
   LATEX_STRICT_RULE,
 } from './batchQualityPrompts.js'
 import { filterCompleteQuestions } from './questionCompleteness.js'
-import { normalizeQuestionsBatch } from './questionNormalizer.js'
+import { normalizeQuestionsBatch, normalizeQuestionType } from './questionNormalizer.js'
 import { repairJSON } from './jsonRepairEngine.js'
 import { countBatchQuestionsInBank } from './batchTaskStore.js'
 
@@ -190,11 +190,9 @@ function normalizeBankInsertRow(q, batchId, teacherId, itemId, fallbackIndex, ta
     ? Math.max(1, Number(q.sort_order))
     : fallbackIndex + 1
 
-  const VALID_TYPES = new Set(['选择题', '填空题', '计算题', '证明题', '实验题', '应用题'])
   const VALID_DIFFICULTY = new Set(['基础', '中等', '拔高'])
 
-  let questionType = String(q?.question_type ?? q?.type ?? '').trim() || '应用题'
-  if (!VALID_TYPES.has(questionType)) questionType = '应用题'
+  const questionType = normalizeQuestionType(q) || '应用题'
 
   let difficulty = String(q?.difficulty ?? '').trim() || '中等'
   if (/拔高|困难|难/.test(difficulty)) difficulty = '拔高'
@@ -327,7 +325,7 @@ async function decomposeWithLegacyPrompt(text, taskMeta) {
           temperature: EXTRACT_TEMPERATURE,
           label: `robust-${label}`,
         })
-        const parsed = await parseBatchSplitAiResponse(aiResponse, meta, 0, extractJson, repairJSON)
+        const parsed = await parseBatchSplitAiResponse(aiResponse, meta, 0)
         if (parsed.questions?.length) {
           return { rawArray: parsed.questions, model, fragmentMode: label }
         }

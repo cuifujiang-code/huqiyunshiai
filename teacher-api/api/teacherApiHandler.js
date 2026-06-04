@@ -6,7 +6,8 @@ import * as lessonPlan from '../server/teacher/lessonPlanStore.js'
 import * as handout from '../server/teacher/handoutStore.js'
 import * as book from '../server/teacher/bookStore.js'
 import * as bookAi from '../server/teacher/bookAi.js'
-import { callDeepSeekAI, extractJson } from '../server/deepseekClient.js'
+import { callDeepSeekAI } from '../server/deepseekClient.js'
+import { repairJSON } from '../server/batch/jsonRepairEngine.js'
 import { normalizeTeacherPath } from '../server/urlUtil.js'
 
 function requireTeacher(body, query) {
@@ -114,7 +115,7 @@ export async function handleTeacherApi(req, res, pathSegments = []) {
       const system = `你是 K12 题目 OCR/LaTeX 校正专家。修复 OCR 乱码、错误字符、缺失标点、LaTeX 公式格式（行内 $...$，独立 $$...$$），保留原意与选项结构。只输出 JSON：{"content":"...","options":["..."],"answer":"...","analysis":"..."}`
       const user = JSON.stringify({ content, options, answer, analysis, subject, grade, question_type })
       const raw = await callDeepSeekAI(system, user)
-      const fixed = JSON.parse(extractJson(raw))
+      const fixed = repairJSON(raw)
       return res.status(200).json({
         success: true,
         question: {
@@ -145,7 +146,7 @@ export async function handleTeacherApi(req, res, pathSegments = []) {
       const { subject, grade, question_type, difficulty, knowledge_point } = body
       const prompt = `生成一道${grade}${subject}${question_type}，难度${difficulty}，知识点${knowledge_point}。返回 JSON: content, options, answer, analysis, knowledge_point`
       const content = await callDeepSeekAI('只输出 JSON', prompt)
-      const q = JSON.parse(extractJson(content))
+      const q = repairJSON(content)
       return res.status(200).json({
         success: true,
         question: {

@@ -47,11 +47,6 @@ export function splitIntoCompleteQuestions(text) {
   return questions
 }
 
-/** @deprecated */
-export function splitChunkByQuestions(text) {
-  return splitIntoCompleteQuestions(text)
-}
-
 function mergeQuestionsIntoChunks(questions, maxLen = DEFAULT_CHUNK, questionsPerChunk = QUESTIONS_PER_CHUNK) {
   const chunks = []
   let buffer = []
@@ -216,8 +211,4 @@ export function splitTextIntoChunks(text, maxLen = DEFAULT_CHUNK) {
     markerCount,
   })
   return paraMeta.map((c) => c.text)
-}
-
-export function estimateItemCount(textLength, maxLen = DEFAULT_CHUNK) {
-  return Math.max(1, Math.ceil(textLength / maxLen))
 }

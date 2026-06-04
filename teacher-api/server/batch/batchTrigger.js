@@ -99,11 +99,3 @@ export async function triggerBatchWorker(batchId, req) {
     return { ok: false, status: 0, error: `${name}: ${msg}` }
   }
 }
-
-/**
- * 链式触发下一批 worker（新 Serverless 实例，走 HTTP）
- * 不在这里 markBatchFailed，交给 auto-retry 兜底
- */
-export function chainBatchWorker(batchId) {
-  triggerBatchWorker(batchId)
-}

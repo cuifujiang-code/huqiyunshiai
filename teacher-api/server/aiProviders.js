@@ -4,7 +4,6 @@
 import {
   callDeepSeekAI,
   callDeepSeekVisionAI,
-  extractJson,
   getDeepSeekConfig,
   getDeepSeekVisionModel,
   normalizeImageBase64,
@@ -210,4 +209,4 @@ export async function runDualAlibabaOcr(imageBase64, fileName = 'photo.jpg') {
   return { standard, enhanced }
 }
 
-export { callDeepSeekAI, extractJson, recognizeHandwritingHttp, getDeepSeekVisionModel, normalizeImageBase64 }
+export { callDeepSeekAI, recognizeHandwritingHttp, getDeepSeekVisionModel, normalizeImageBase64 }

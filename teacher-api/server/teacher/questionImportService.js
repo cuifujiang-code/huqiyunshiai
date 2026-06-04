@@ -1,4 +1,5 @@
-import { callDeepSeekAI, extractJson } from '../deepseekClient.js'
+import { callDeepSeekAI } from '../deepseekClient.js'
+import { repairJSON } from '../batch/jsonRepairEngine.js'
 
 const SYSTEM = '你是 K12 试卷拆题专家。只输出合法 JSON 数组，不要 markdown。'
 
@@ -46,7 +47,7 @@ export async function parseExamText(examBuffer, fileName) {
 
 export async function aiSplitExamText(text, meta) {
   const content = await callDeepSeekAI(SYSTEM, buildSplitPrompt(text, meta))
-  const raw = JSON.parse(extractJson(content))
+  const raw = repairJSON(content)
   return normalizeQuestions(raw, meta)
 }
 

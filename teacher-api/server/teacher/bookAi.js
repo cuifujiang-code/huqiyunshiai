@@ -1,4 +1,5 @@
-import { callDeepSeekAI, extractJson } from '../deepseekClient.js'
+import { callDeepSeekAI } from '../deepseekClient.js'
+import { repairJSON } from '../batch/jsonRepairEngine.js'
 
 /**
  * 根据题目列表生成知识网络图
@@ -21,7 +22,7 @@ export async function generateKnowledgeGraph(questions = []) {
 ${JSON.stringify(summary)}`
 
   const raw = await callDeepSeekAI('只输出 JSON，不要 markdown', prompt)
-  const parsed = JSON.parse(extractJson(raw))
+  const parsed = repairJSON(raw)
 
   const nodes = Array.isArray(parsed.nodes)
     ? parsed.nodes.map((n, i) => ({

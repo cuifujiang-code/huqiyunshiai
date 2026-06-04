@@ -10,7 +10,6 @@ import {
   callQianwenAI,
   callDeepSeekWithTimeout,
   callDeepSeekVisionSafe,
-  extractJson,
   isDeepSeekAvailable,
   isDoubaoAvailable,
   isQianwenAvailable,
@@ -19,6 +18,7 @@ import {
   runDualAlibabaOcr,
   safeAiCall,
 } from './aiProviders.js'
+import { repairJSON } from './batch/jsonRepairEngine.js'
 
 const SUPPORTED_TASKS = new Set(['photo-search', 'exam-builder', 'education-planning', 'diagnosis'])
 
@@ -79,7 +79,8 @@ async function findSimilarBankQuestions(ocrText, limit = 5) {
 
 function parseVerifierJson(raw, fallback = {}) {
   try {
-    return JSON.parse(extractJson(raw))
+    const parsed = repairJSON(raw)
+    return parsed && typeof parsed === 'object' ? parsed : fallback
   } catch {
     return fallback
   }
@@ -602,6 +603,4 @@ export async function orchestrateAITask(taskType, input = {}) {
       meta: { degraded: true },
     }
   }
-
-  throw new Error('未处理的 taskType')
 }

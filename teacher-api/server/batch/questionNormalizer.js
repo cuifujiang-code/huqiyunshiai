@@ -7,13 +7,15 @@ import { IMAGE_PLACEHOLDER, FORMULA_PLACEHOLDER } from './batchQualityPrompts.js
 import { enrichQuestionOptions, extractOptionsFromContent, isIncompleteQuestion } from './questionCompleteness.js'
 import { buildImageTag } from './imageExtractor.js'
 
-const VALID_TYPES = new Set([
+/** K12 全学科 26 种标准题型（入库与标准化统一使用） */
+export const VALID_QUESTION_TYPES = new Set([
   '选择题', '填空题', '计算题', '证明题', '实验题', '应用题', '解答题',
   '作图题', '识图题', '推断题',
   '阅读理解', '文言文阅读', '古诗词鉴赏', '语言运用', '默写', '作文',
   '完形填空', '七选五', '语法填空', '短文改错', '书面表达', '听力',
   '材料分析题', '论述题', '综合题', '读图题',
 ])
+const VALID_TYPES = VALID_QUESTION_TYPES
 const VALID_DIFFICULTY = new Set(['基础', '中等', '拔高'])
 const EMPTY_OPTION_RE = /^[A-Fa-f][\.．、\)）]?\s*$/
 
@@ -94,7 +96,7 @@ export function extractLatexBlocks(text) {
   return blocks
 }
 
-function normalizeQuestionType(raw) {
+export function normalizeQuestionType(raw) {
   const t = cleanText(raw?.question_type ?? raw?.type ?? '')
   if (VALID_TYPES.has(t)) return t
   const lower = t.toLowerCase()

@@ -1,4 +1,5 @@
-import { callDeepSeekAI, extractJson } from '../deepseekClient.js'
+import { callDeepSeekAI } from '../deepseekClient.js'
+import { repairJSON } from '../batch/jsonRepairEngine.js'
 import { pickQuestionsForExam } from './questionBankStore.js'
 
 function shuffle(arr) {
@@ -21,7 +22,7 @@ async function aiGenerateQuestion({ subject, grade, question_type, difficulty, k
   const prompt = `生成一道${grade}${subject}${question_type}，难度${difficulty}，知识点：${knowledge_point || '综合'}。
 返回 JSON：{ content, options, answer, analysis, knowledge_point }`
   const content = await callDeepSeekAI('只输出 JSON', prompt)
-  const q = JSON.parse(extractJson(content))
+  const q = repairJSON(content)
   return {
     subject,
     grade,

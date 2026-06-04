@@ -1,6 +1,7 @@
 /** 专业教育题库拆题 Prompt：LaTeX 公式、几何图形、空间图形全支持 */
 
-import { extractJsonFromAiText, sanitizeJsonForParse } from './safeJson.js'
+import { extractJsonBlock, repairJSON } from './jsonRepairEngine.js'
+import { normalizeQuestionsBatch } from './questionNormalizer.js'
 import { IMAGE_PLACEHOLDER, FORMULA_PLACEHOLDER, IMAGE_PLACEHOLDER_RULE, JSON_EXAMPLE_WITH_LATEX, LATEX_STRICT_RULE, COMPLETE_EXTRACTION_RULE, ANALYSIS_PRESERVATION_RULE } from './batchQualityPrompts.js'
 
 const JSON_PARSE_RETRY_DELAY_MS = 2000
@@ -59,21 +60,16 @@ export function preprocessAiJsonString(rawText) {
     return s.slice(arrStart, arrEnd + 1).trim()
   }
 
-  const extracted = extractJsonFromAiText(s)
-  const slice = extracted || s
-  return sanitizeJsonForParse(slice) || slice
+  return extractJsonBlock(s) || s
 }
 
-/**
- * 对预处理后的 JSON 字符串解析；失败则等待 2 秒重试一次，仍失败则记录原始内容并抛出
- */
-export async function parseJsonFromAiTextWithRetry(rawText, safeJsonParseFn) {
+async function parseJsonWithRepairRetry(rawText) {
   const fullRaw = String(rawText ?? '')
   let lastError = null
 
   for (let attempt = 0; attempt < 2; attempt++) {
     if (attempt > 0) {
-      console.warn('[batchPrompt] JSON.parse 失败，2秒后重试', { attempt })
+      console.warn('[batchPrompt] repairJSON 失败，2秒后重试', { attempt })
       await sleep(JSON_PARSE_RETRY_DELAY_MS)
     }
 
@@ -84,24 +80,22 @@ export async function parseJsonFromAiTextWithRetry(rawText, safeJsonParseFn) {
     }
 
     try {
-      const parsed = safeJsonParseFn(cleaned)
+      const parsed = repairJSON(cleaned)
       if (attempt > 0) {
-        console.log('[batchPrompt] JSON.parse 重试成功', { attempt, cleanedLength: cleaned.length })
+        console.log('[batchPrompt] repairJSON 重试成功', { attempt, cleanedLength: cleaned.length })
       }
       return parsed
     } catch (err) {
       lastError = err instanceof Error ? err : new Error(String(err))
-      console.warn('[batchPrompt] JSON.parse 失败，原始 content 前500字符=', fullRaw.slice(0, 500))
-      console.warn('[batchPrompt] JSON.parse 失败详情', {
+      console.warn('[batchPrompt] repairJSON 失败', {
         attempt,
         message: lastError.message,
-        cleanedPreview: cleaned.slice(0, 300),
+        preview: fullRaw.slice(0, 500),
       })
     }
   }
 
   const preview = fullRaw.slice(0, 500)
-  console.error('[batchPrompt] JSON.parse 最终失败，原始内容前500字符=', preview)
   const msg = lastError instanceof Error ? lastError.message : 'JSON 解析失败'
   throw new Error(`${msg}。原始内容前500字符: ${preview}`)
 }
@@ -280,11 +274,6 @@ ${JSON_EXAMPLE_WITH_LATEX}
 `
 }
 
-/** @deprecated 使用 backupPrompt */
-export function buildBatchSplitFallbackPrompt(chunkText, meta) {
-  return backupPrompt(chunkText, meta)
-}
-
 function isQuestionLike(obj) {
   if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return false
   return Boolean(
@@ -445,32 +434,11 @@ export function extractQuestionsFromAiRaw(raw, { logWarnings = true } = {}) {
   return []
 }
 
-export function normalizeBatchQuestions(raw, meta, startOrder = 0) {
-  const list = extractQuestionsFromAiRaw(raw)
-  return list.map((q, i) => ({
-    subject: q.subject || meta.subject || '数学',
-    grade: q.grade || meta.grade || '八年级',
-    knowledge_point: q.knowledge_point || q.knowledgePoint || '未分类',
-    question_type: q.question_type || q.type || '应用题',
-    difficulty: q.difficulty || '中等',
-    content: String(q.content || q.question || q.题干 || q.title || q.stem || `题目 ${startOrder + i + 1}`),
-    options: Array.isArray(q.options) ? q.options : Array.isArray(q.choices) ? q.choices : [],
-    answer: String(q.answer || q.correct_answer || q.答案 || '暂无'),
-    analysis: String(q.analysis || q.explanation || q.解析 || '暂无'),
-    geometry_desc: String(q.geometry_desc || q.geometryDesc || ''),
-    latex_blocks: Array.isArray(q.latex_blocks) ? q.latex_blocks : Array.isArray(q.latexBlocks) ? q.latexBlocks : [],
-    question_number: String(q.question_number ?? q.questionNumber ?? q.number ?? startOrder + i + 1),
-    source: '批量拆题',
-    tags: Array.isArray(q.tags) ? q.tags : [],
-    sort_order: Number.isFinite(Number(q.sort_order)) ? Number(q.sort_order) : startOrder + i + 1,
-  }))
-}
-
 /**
- * 从 AI 原始文本解析题目
+ * 从 AI 原始文本解析题目（统一 repairJSON + normalizeQuestionsBatch）
  * @returns {Promise<{ questions: object[], rawQuestions: object[], extractPath: string, parsed: unknown }>}
  */
-export async function parseBatchSplitAiResponse(aiText, meta, sortOffset, extractJson, safeJsonParse) {
+export async function parseBatchSplitAiResponse(aiText, meta, sortOffset = 0) {
   const chatContent = extractDeepSeekChatContent(aiText)
   const rawText = chatContent || String(aiText ?? '')
   const rawPreview500 = rawText.slice(0, 500)
@@ -495,12 +463,9 @@ export async function parseBatchSplitAiResponse(aiText, meta, sortOffset, extrac
 
   const jsonCandidates = [
     { label: 'preprocessAiJsonString', text: preprocessAiJsonString(rawText) },
-    { label: 'extractJsonFromAiText', text: extractJsonFromAiText(rawText) },
+    { label: 'extractJsonBlock', text: extractJsonBlock(rawText) },
+    { label: 'raw_trim', text: rawText.trim() },
   ]
-  if (typeof extractJson === 'function') {
-    jsonCandidates.push({ label: 'extractJson', text: extractJson(rawText) })
-  }
-  jsonCandidates.push({ label: 'raw_trim', text: rawText.trim() })
 
   for (const { label, text } of jsonCandidates) {
     if (!text) {
@@ -508,7 +473,7 @@ export async function parseBatchSplitAiResponse(aiText, meta, sortOffset, extrac
       continue
     }
     try {
-      parsed = await parseJsonFromAiTextWithRetry(text, safeJsonParse)
+      parsed = await parseJsonWithRepairRetry(text)
       parseSource = label
       attempts.push(`${label}:ok`)
       break
@@ -520,11 +485,11 @@ export async function parseBatchSplitAiResponse(aiText, meta, sortOffset, extrac
   // 最后一搏：对整个原始文本带重试解析
   if (parsed == null) {
     try {
-      parsed = await parseJsonFromAiTextWithRetry(rawText, safeJsonParse)
-      parseSource = 'parseJsonFromAiTextWithRetry_full'
-      attempts.push('parseJsonFromAiTextWithRetry_full:ok')
+      parsed = await parseJsonWithRepairRetry(rawText)
+      parseSource = 'repairJSON_full'
+      attempts.push('repairJSON_full:ok')
     } catch (err) {
-      attempts.push(`parseJsonFromAiTextWithRetry_full:${err instanceof Error ? err.message : String(err)}`)
+      attempts.push(`repairJSON_full:${err instanceof Error ? err.message : String(err)}`)
     }
   }
 
@@ -538,7 +503,7 @@ export async function parseBatchSplitAiResponse(aiText, meta, sortOffset, extrac
     console.warn('[batchWorker] JSON 解析全部失败，2秒后重试一次', { attempts, parseSource, rawPreview1000 })
     await sleep(JSON_PARSE_RETRY_DELAY_MS)
     try {
-      parsed = await parseJsonFromAiTextWithRetry(preprocessAiJsonString(rawText), safeJsonParse)
+      parsed = await parseJsonWithRepairRetry(preprocessAiJsonString(rawText))
       parseSource = 'retry_after_json_fail'
       attempts.push('retry_after_json_fail:ok')
     } catch (retryErr) {
@@ -614,7 +579,7 @@ export async function parseBatchSplitAiResponse(aiText, meta, sortOffset, extrac
     return { questions: [], rawQuestions: [], extractPath: 'all_paths_empty', parsed, rawPreview1000, attempts }
   }
 
-  const questions = normalizeBatchQuestions(rawQuestions, meta, sortOffset)
+  const { valid: questions } = normalizeQuestionsBatch(rawQuestions, meta, sortOffset)
   console.log('[batchWorker] 题目提取成功', { extractPath, rawCount: rawQuestions.length, normalizedCount: questions.length })
   return { questions, rawQuestions, extractPath, parsed, rawPreview1000, attempts }
 }
