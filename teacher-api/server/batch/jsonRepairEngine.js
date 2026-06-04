@@ -1,6 +1,6 @@
 /**
  * AI 拆题 JSON 终极修复引擎
- * 策略顺序：提取块 → 去注释 → 去尾逗号 → 单引号→双引号 → 补引号 → 补逗号 → JSON5 → 逐对象提取
+ * 策略顺序：提取块 → 去注释 → 去尾逗号 → 单引号→双引号 → 补引号 → 补逗号 → JSON5 → 逐对象提取 → 正则拆分逐个解析
  */
 import JSON5 from 'json5'
 
@@ -210,16 +210,147 @@ function buildRepairPipeline(base) {
   return uniqueStrings(steps)
 }
 
+/** 9. 最后兜底：按 },{ 拆分，逐个对象修复解析并合并 */
+export function extractAndParseIndividualObjects(text) {
+  const s = String(text ?? '').trim()
+  if (!s) return null
+
+  // 去掉外层 [ ]
+  let inner = s
+  if (inner.startsWith('[')) inner = inner.slice(1)
+  if (inner.endsWith(']')) inner = inner.slice(0, -1)
+  inner = inner.trim()
+  if (!inner) return null
+
+  // 按 },{ 拆分（保留对象间的分隔）
+  // 先尝试智能拆分：用深度跟踪找到每个顶层 { } 对象
+  const objectBoundaries = []
+  let depth = 0
+  let inString = false
+  let escape = false
+  let objStart = -1
+
+  for (let i = 0; i < inner.length; i++) {
+    const ch = inner[i]
+
+    if (inString) {
+      if (escape) { escape = false; continue }
+      if (ch === '\\') { escape = true; continue }
+      if (ch === '"') inString = false
+      continue
+    }
+
+    if (ch === '"') { inString = true; continue }
+    if (ch === '{') {
+      if (depth === 0) objStart = i
+      depth++
+    } else if (ch === '}') {
+      depth--
+      if (depth === 0 && objStart >= 0) {
+        objectBoundaries.push({ start: objStart, end: i })
+        objStart = -1
+      }
+    }
+  }
+
+  // 如果深度跟踪失败，回退到粗糙的 },{ 拆分
+  if (objectBoundaries.length === 0) {
+    const roughParts = inner.split(/},[\s\n\r]*{/)
+    if (roughParts.length <= 1) return null
+
+    const fragments = []
+    for (let i = 0; i < roughParts.length; i++) {
+      let piece = roughParts[i].trim()
+      if (!piece.startsWith('{')) piece = '{' + piece
+      if (i < roughParts.length - 1 && !piece.endsWith('}')) piece = piece + '}'
+      if (piece.startsWith('{') && piece.endsWith('}')) {
+        fragments.push(piece)
+      }
+    }
+    return tryParseFragments(fragments)
+  }
+
+  // 从深度跟踪结果中提取每个对象的字符串
+  const fragments = objectBoundaries.map(({ start, end }) => inner.slice(start, end + 1).trim())
+  return tryParseFragments(fragments)
+}
+
+function tryParseFragments(fragments) {
+  if (!fragments.length) return null
+
+  const parsed = []
+  let successCount = 0
+
+  for (const fragment of fragments) {
+    // 对每个对象独立走修复管线
+    const candidates = buildRepairPipeline(fragment)
+    let obj = null
+
+    for (const candidate of candidates) {
+      const native = tryNativeParse(candidate)
+      if (native.ok && native.value && typeof native.value === 'object' && !Array.isArray(native.value)) {
+        obj = native.value
+        break
+      }
+      const j5 = tryJson5Parse(candidate)
+      if (j5.ok && j5.value && typeof j5.value === 'object' && !Array.isArray(j5.value)) {
+        obj = j5.value
+        break
+      }
+    }
+
+    if (obj) {
+      parsed.push(obj)
+      successCount++
+    } else {
+      // 单个对象失败时记录日志但不中断
+      console.warn('[jsonRepairEngine] 第9步 - 单个对象解析失败', {
+        fragmentLength: fragment.length,
+        fragmentPreview: fragment.slice(0, 200),
+      })
+    }
+  }
+
+  if (successCount > 0) {
+    console.log('[jsonRepairEngine] 第9步正则拆分解析成功', {
+      totalObjects: fragments.length,
+      successfulObjects: successCount,
+      failedObjects: fragments.length - successCount,
+    })
+    return parsed
+  }
+
+  return null
+}
+
 function logRepairFailure(raw, lastError) {
   const preview = String(raw ?? '').slice(0, LOG_PREVIEW_LEN)
   const message = lastError instanceof Error ? lastError.message : String(lastError ?? '未知错误')
+
+  // 从错误消息中提取失败位置
+  const posMatch = message.match(/position\s*(\d+)/i)
+  const errorPos = posMatch ? Number(posMatch[1]) : null
+  let errorContext = '(位置未知)'
+  if (errorPos !== null && errorPos < raw.length) {
+    const ctxStart = Math.max(0, errorPos - 200)
+    const ctxEnd = Math.min(raw.length, errorPos + 200)
+    errorContext = raw.slice(ctxStart, ctxEnd)
+    console.error('[jsonRepairEngine] 失败位置上下文', {
+      errorPosition: errorPos,
+      totalLength: raw.length,
+      contextAroundError: errorContext,
+      pointer: ' '.repeat(Math.min(200, errorPos - ctxStart)) + '▲ pos ' + errorPos,
+    })
+  }
+
   console.error('[jsonRepairEngine] 全部修复策略失败', {
     message,
     previewLength: preview.length,
+    totalLength: raw.length,
     preview,
   })
   throw new Error(
-    `JSON 修复失败: ${message}。原始内容前${LOG_PREVIEW_LEN}字符: ${preview}`,
+    `JSON 修复失败: ${message}。总长度${raw.length}，位置${errorPos ?? '未知'}上下文: ${errorContext.slice(0, 300)}`,
   )
 }
 
@@ -265,6 +396,18 @@ export function repairJSON(rawString) {
     if (objects?.length) {
       console.log('[jsonRepairEngine] 解析成功', {
         strategy: 'extractObjectsByRegex',
+        count: objects.length,
+      })
+      return objects
+    }
+  }
+
+  // 第9步：正则拆分逐个对象解析（最后兜底）
+  for (const base of bases) {
+    const objects = extractAndParseIndividualObjects(base)
+    if (objects?.length) {
+      console.log('[jsonRepairEngine] 解析成功', {
+        strategy: 'extractAndParseIndividualObjects',
         count: objects.length,
       })
       return objects

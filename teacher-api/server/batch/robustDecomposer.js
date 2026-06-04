@@ -151,11 +151,24 @@ export function parseJsonArrayWithFallback(jsonStr) {
     return coerceToQuestionArray(parsed)
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
+    // 尝试从错误消息中提取失败位置
+    const posMatch = msg.match(/position\s*(\d+)/i)
+    const errorPosition = posMatch ? Number(posMatch[1]) : 3448
+    const ctxStart = Math.max(0, errorPosition - 200)
+    const ctxEnd = Math.min(str.length, errorPosition + 200)
+    const errorContext = str.slice(ctxStart, ctxEnd)
+    const pointer = ' '.repeat(Math.min(200, errorPosition - ctxStart)) + '▲ HERE (pos ' + errorPosition + ')'
+
     console.error('[robustDecomposer] repairJSON 失败', {
       message: msg,
-      preview: str.slice(0, 1000),
+      totalLength: str.length,
+      errorPosition,
+      previewHead: str.slice(0, 300),
+      previewTail: str.slice(Math.max(0, str.length - 300)),
+      errorContext: errorContext,
+      errorPointer: pointer,
     })
-    const wrapped = new Error(`拆题 JSON 解析失败: ${msg}`)
+    const wrapped = new Error(`拆题 JSON 解析失败: ${msg} [位置${errorPosition}/${str.length}，上下文: ${errorContext.slice(0, 100)}...]`)
     wrapped.cause = err
     wrapped.rawPreview = str.slice(0, 1000)
     throw wrapped
