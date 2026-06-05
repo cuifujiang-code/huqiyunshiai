@@ -65,9 +65,17 @@ const photoSearch = await safeImport('./api/student/photo-search.js', 'student/p
 
 // ─── 注册路由 ───
 
-// GET /api
+// GET /api 与根路径（Nginx 健康检查、apiRoot 自检）
+const healthPayload = () => ({
+  status: 'ok',
+  service: 'teacher-api',
+  timestamp: new Date().toISOString(),
+})
 app.get('/api', (req, res) => {
-  res.json({ status: 'ok', service: 'teacher-api', timestamp: new Date().toISOString() })
+  res.json(healthPayload())
+})
+app.get('/', (req, res) => {
+  res.json(healthPayload())
 })
 
 // batch/* — single handler handles all sub-routes via req.query.path

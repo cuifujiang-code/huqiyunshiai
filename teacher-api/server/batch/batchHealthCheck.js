@@ -12,7 +12,7 @@ function resolveApiRootUrl(req) {
 }
 
 export async function checkApiRootHealth(req) {
-  const rootUrl = `${resolveApiRootUrl(req)}/`
+  const rootUrl = `${resolveApiRootUrl(req)}/api`
   try {
     const response = await fetch(rootUrl, {
       headers: { Accept: 'application/json' },
