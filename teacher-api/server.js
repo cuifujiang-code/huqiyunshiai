@@ -51,6 +51,7 @@ async function safeImport(importPath, label) {
 
 // ─── 顺序加载所有 handler ───
 const batchRouter = await safeImport('./api/batch/[...path].js', 'batch catch-all')
+const batchHealth = await safeImport('./api/batch/health.js', 'batch/health')
 const teacherCatchAll = await safeImport('./api/teacher/[...path].js', 'teacher catch-all')
 const teacherQuestionsList = await safeImport('./api/teacher/questions.js', 'teacher/questions')
 const teacherQuestionsById = await safeImport('./api/teacher/questions/[id].js', 'teacher/questions/[id]')
@@ -73,7 +74,7 @@ app.get('/api', (req, res) => {
 app.all('/api/batch/upload', batchRouter)
 app.all('/api/batch/start', batchRouter)
 app.all('/api/batch/progress', batchRouter)
-app.all('/api/batch/health', batchRouter)
+app.all('/api/batch/health', batchHealth)
 app.all('/api/batch/worker', batchRouter)
 app.all('/api/batch/auto-retry', batchRouter)
 app.all('/api/batch/debug', batchRouter)
