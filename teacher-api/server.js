@@ -8,6 +8,7 @@ import express from 'express'
 import dotenv from 'dotenv'
 import { createServer } from 'http'
 
+dotenv.config({ path: '.env.local', override: true })
 dotenv.config()
 
 const app = express()

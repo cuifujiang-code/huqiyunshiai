@@ -18,40 +18,77 @@ function resolveHealthCheckUrl(req) {
   return `${resolveApiRootUrl(req)}/api`
 }
 
-export async function checkApiRootHealth(req) {
-  const rootUrl = resolveHealthCheckUrl(req)
+function isLoopbackUrl(urlString) {
   try {
-    const response = await fetch(rootUrl, {
-      headers: { Accept: 'application/json' },
-      signal: AbortSignal.timeout(8000),
-    })
-    const text = await response.text()
-    let data = null
-    try {
-      data = JSON.parse(text)
-    } catch {
-      return {
-        ok: false,
-        url: rootUrl,
-        httpStatus: response.status,
-        error: `根路径未返回 JSON（Content-Type 可能为 HTML）: ${text.slice(0, 120)}`,
-      }
-    }
-    if (response.ok && data?.status === 'ok') {
-      return {
-        ok: true,
-        url: rootUrl,
-        httpStatus: response.status,
-        message: data.message || 'Teacher API is running',
-      }
-    }
+    const host = new URL(urlString).hostname
+    return host === '127.0.0.1' || host === 'localhost' || host === '::1'
+  } catch {
+    return false
+  }
+}
+
+function localApiFallbackUrl() {
+  const port = Number(process.env.PORT) || 3001
+  return `http://127.0.0.1:${port}/api`
+}
+
+async function probeApiRoot(rootUrl) {
+  const response = await fetch(rootUrl, {
+    headers: { Accept: 'application/json' },
+    signal: AbortSignal.timeout(8000),
+  })
+  const text = await response.text()
+  let data = null
+  try {
+    data = JSON.parse(text)
+  } catch {
     return {
       ok: false,
       url: rootUrl,
       httpStatus: response.status,
-      error: `根路径健康检查异常: ${JSON.stringify(data).slice(0, 200)}`,
+      error: `根路径未返回 JSON（Content-Type 可能为 HTML）: ${text.slice(0, 120)}`,
     }
+  }
+  if (response.ok && data?.status === 'ok') {
+    return {
+      ok: true,
+      url: rootUrl,
+      httpStatus: response.status,
+      message: data.message || 'Teacher API is running',
+    }
+  }
+  return {
+    ok: false,
+    url: rootUrl,
+    httpStatus: response.status,
+    error: `根路径健康检查异常: ${JSON.stringify(data).slice(0, 200)}`,
+  }
+}
+
+export async function checkApiRootHealth(req) {
+  const rootUrl = resolveHealthCheckUrl(req)
+
+  // 本机地址：能处理 /api/batch/health 即说明 API 进程在线，无需自调用 fetch
+  if (isLoopbackUrl(rootUrl)) {
+    return {
+      ok: true,
+      url: rootUrl,
+      httpStatus: 200,
+      message: '本地 API 进程在线（本机自检跳过 fetch）',
+    }
+  }
+
+  try {
+    return await probeApiRoot(rootUrl)
   } catch (err) {
+    const fallback = localApiFallbackUrl()
+    if (fallback !== rootUrl) {
+      try {
+        return await probeApiRoot(fallback)
+      } catch {
+        // fall through
+      }
+    }
     return {
       ok: false,
       url: rootUrl,
