@@ -1,12 +1,11 @@
 {
-  "rewrites": {
-    "beforeFiles": [
-      {
-        "source": "/(.*)",
-        "destination": "/icp-maintenance.html"
-      }
-    ]
-  },
+  "redirects": [
+    {
+      "source": "/((?!icp-maintenance\\.html).*)",
+      "destination": "/icp-maintenance.html",
+      "statusCode": 307
+    }
+  ],
   "headers": [
     {
       "source": "/(.*)",
