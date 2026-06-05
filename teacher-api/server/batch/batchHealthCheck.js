@@ -11,8 +11,15 @@ function resolveApiRootUrl(req) {
   return 'https://api.huqiyunshiai.online'
 }
 
+/** 健康检查探测地址：优先 HEALTH_API_ROOT_URL（腾讯云本机建议 http://127.0.0.1:3001/api） */
+function resolveHealthCheckUrl(req) {
+  const explicit = process.env.HEALTH_API_ROOT_URL?.trim()
+  if (explicit) return explicit.replace(/\/$/, '')
+  return `${resolveApiRootUrl(req)}/api`
+}
+
 export async function checkApiRootHealth(req) {
-  const rootUrl = `${resolveApiRootUrl(req)}/api`
+  const rootUrl = resolveHealthCheckUrl(req)
   try {
     const response = await fetch(rootUrl, {
       headers: { Accept: 'application/json' },
