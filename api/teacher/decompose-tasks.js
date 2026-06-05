@@ -51,8 +51,8 @@ export default async function handler(req, res) {
       if (task.teacher_id !== teacherId) {
         return res.status(403).json({ success: false, message: '无权操作此任务' })
       }
-      if (task.status !== 'failed') {
-        return res.status(400).json({ success: false, message: '仅失败任务可重新拆题' })
+      if (task.status !== 'failed' && task.status !== 'processing') {
+        return res.status(400).json({ success: false, message: '仅失败或处理中任务可重新拆题' })
       }
 
       await resetDecomposeTaskForRetry(taskId)
