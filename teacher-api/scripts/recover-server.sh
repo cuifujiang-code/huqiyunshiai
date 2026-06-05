@@ -14,6 +14,10 @@ pm2 save
 sleep 2
 echo "=== 端口 ==="
 ss -tlnp | grep 3001 || { echo "3001 未监听"; pm2 logs teacher-api --lines 20 --nostream; exit 1; }
+echo "=== 依赖（本地 PG 模式需要 pg）==="
+npm install --omit=dev 2>/dev/null || npm install
+echo "=== 模块导入测试 ==="
+node --input-type=module -e "import('./api/batch/health.js').then(()=>console.log('health.js OK')).catch(e=>console.error('health.js FAIL:',e.message))"
 echo "=== 健康检查 ==="
 curl -sf http://127.0.0.1:3001/api | head -c 200
 echo
