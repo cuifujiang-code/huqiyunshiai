@@ -83,7 +83,7 @@ ${PLANNING_JSON_SCHEMA}
 8. risks 至少2条，需结合该生实际情况`
 }
 
-function normalizeReport(raw, form) {
+export function normalizeReport(raw, form) {
   if (!raw?.title || !raw?.studentProfile || !Array.isArray(raw.stageGoals)) {
     throw new Error('AI 返回的规划方案格式不完整')
   }

@@ -282,3 +282,19 @@ ${milestones.length > 0 ? `
   w.document.write(printHtml)
   w.document.close()
 }
+
+/** 从当前表单+报告导出 PDF（浏览器打印对话框 → 另存为 PDF） */
+export function exportPlanningReportPdf(
+  form: SavedPlanningRecord['form'],
+  report: SavedPlanningRecord['report'],
+) {
+  const record: SavedPlanningRecord = {
+    id: 'export-temp',
+    studentName: form.studentName,
+    createdBy: form.createdByRole === 'student' ? 'student' : 'teacher',
+    form,
+    report,
+    createdAt: report.generatedAt || new Date().toISOString(),
+  }
+  printPlanningReport(record)
+}

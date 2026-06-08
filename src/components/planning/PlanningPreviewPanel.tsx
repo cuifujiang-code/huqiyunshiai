@@ -59,7 +59,7 @@ export default function PlanningPreviewPanel({
             <div className="absolute inset-0 animate-spin rounded-full border-2 border-blue-500/20 border-t-cyan-400" />
             <div className="absolute inset-2 animate-pulse rounded-full bg-blue-500/10" />
           </div>
-          <p className="mt-6 text-sm text-blue-200">AI 正在分析学生画像，生成专属规划方案…</p>
+          <p className="mt-6 text-sm text-blue-200">多 AI 协同分析中：成绩波动 → 省考政策 → 规划生成 → 质检统稿…</p>
           <div className="mt-4 flex gap-1">
             {[0, 1, 2].map((i) => (
               <span
@@ -111,7 +111,7 @@ export default function PlanningPreviewPanel({
                   disabled={exporting}
                   className="rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-3 py-1.5 text-xs text-cyan-200 hover:bg-cyan-500/20 disabled:opacity-60"
                 >
-                  {exporting ? '导出中…' : '导出 PDF'}
+                  {exporting ? '打开中…' : '导出 PDF'}
                 </button>
               )}
             </div>

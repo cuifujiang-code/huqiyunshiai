@@ -10,7 +10,7 @@ import MonthlyReportCard from '../components/planning/MonthlyReportCard'
 import ParentBindingPanel from '../components/planning/ParentBindingPanel'
 import { printPlanningReport } from '../components/planning/PlanPrintView'
 import { useAuth } from '../context/AuthContext'
-import { exportToPdf } from '../lib/exportPdf'
+import { exportPlanningReportPdf } from '../components/planning/PlanPrintView'
 import { fetchPlanningReport } from '../lib/fetchPlanning'
 import { getStudentPlanningRecords, savePlanningRecord } from '../lib/planningStorage'
 import {
@@ -257,14 +257,21 @@ export default function StudentPlanningPage() {
     }
   }
 
-  const handleExportPdf = async () => {
-    const el = reportRef.current ?? document.getElementById('planning-report-content')
+  const handleExportPdf = () => {
     const activeReport = selectedRecord?.report ?? report
-    if (!el || !activeReport) return
+    const activeForm = selectedRecord?.form ?? form
+    if (!activeReport) return
     setExporting(true)
-    try { await exportToPdf(el as HTMLElement, `${activeReport.title}.pdf`) }
-    catch { setMessage('PDF 导出失败'); setIsWarning(true) }
-    finally { setExporting(false) }
+    try {
+      exportPlanningReportPdf(activeForm, activeReport)
+      setMessage('已打开打印窗口，请选择"另存为 PDF"完成导出')
+      setIsWarning(false)
+    } catch {
+      setMessage('PDF 导出失败，请允许浏览器弹出窗口')
+      setIsWarning(true)
+    } finally {
+      setExporting(false)
+    }
   }
 
   const viewRecord = (record: SavedPlanningRecord) => {

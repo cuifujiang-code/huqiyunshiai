@@ -110,6 +110,12 @@ export interface PlanningReport {
     interests: string[]
     parentExpectations: string
     specialNotes: string
+    /** 当前学期 */
+    academicTerm?: string
+    /** 省份考试制度摘要 */
+    examSystemNote?: string
+    /** 选考科目 */
+    electiveSubjects?: string[]
   }
   abilityDimensions: AbilityDimension[]
   stageGoals: StageGoal[]
@@ -117,7 +123,108 @@ export interface PlanningReport {
   phaseTasks: PhaseTaskGroup[]
   milestones: PlanningMilestone[]
   risks: PlanningRisk[]
-  source?: 'ai' | 'mock'
+  /** 数据驱动五阶段规划（planningEngine） */
+  fiveStagePlan?: FiveStagePlanItem[]
+  dataSourceCitations?: string[]
+  dataProvenance?: { engine: string; version?: string; citations: string[] }
+  targetUniversity?: string
+  targetMajor?: string
+  scoreGapAnalysis?: {
+    currentEstimate?: number
+    targetMinScore?: number
+    gap?: number
+    gapBand?: string
+  }
+  dynamicCalibrationNotes?: string
+  /** 量化成绩波动分析 */
+  scoreAnalysis?: ScoreAnalysisResult
+  /** 省份考试与志愿时间轴 */
+  examTimeline?: { month: string; event: string; note?: string }[]
+  /** 志愿填报策略 */
+  volunteerGuidance?: string[]
+  /** 选考科目专项建议 */
+  electiveAdvice?: { subject: string; level?: string; advice: string }[]
+  /** 多 AI 协同元数据 */
+  orchestrationMeta?: PlanningOrchestrationMeta
+  source?: 'ai' | 'mock' | 'ai-data-driven'
+}
+
+export interface FiveStagePlanItem {
+  stage: number
+  name: string
+  period: string
+  durationWeeks?: number
+  objectives: string[]
+  coreTasks: string[]
+  deliverables?: string[]
+  calibrationCheckpoint?: string
+}
+
+export interface UniversityLookupResult {
+  matched: boolean
+  university?: string
+  aliases?: string[]
+  tier?: string
+  province?: string
+  major?: string
+  year?: number
+  admission?: {
+    min_score?: number
+    min_rank?: number
+    elective_requirement?: string
+    notes?: string
+  }
+  source?: string
+  citation?: string
+  message?: string
+  emptyDataRule?: { message?: string; forbid_ai_hallucination?: boolean }
+}
+
+export interface PlanningOrchestrationMeta {
+  providersUsed: string[]
+  reviewRequired: boolean
+  scoreAnalystSummary?: string
+  provincialExpertSummary?: string
+  reviewerNotes?: string[]
+  finalNotes?: string
+}
+
+export interface ExamScoreRecord {
+  id: string
+  examName: string
+  examDate: string
+  academicYear: string
+  term: '上学期' | '下学期'
+  examType: string
+  subjectScores: SubjectScore[]
+  totalScore: number | null
+  schoolRank: number | null
+  classRank: number | null
+}
+
+export interface ScoreAnalysisSubjectInsight {
+  subject: string
+  isElective: boolean
+  latestScore: number
+  firstScore: number
+  delta: number
+  avgScore: number
+  volatility: number
+  ratePercent: number
+  trend: 'up' | 'stable' | 'down'
+  examCount: number
+}
+
+export interface ScoreAnalysisResult {
+  recordCount: number
+  overallTrend: 'up' | 'stable' | 'down'
+  overallDelta: number
+  volatilityIndex: number
+  subjectInsights: ScoreAnalysisSubjectInsight[]
+  weakSubjects: string[]
+  strongSubjects: string[]
+  rankTrend: { from: number; to: number; improved: boolean } | null
+  summary: string
 }
 
 export interface PlanningResponse {
@@ -125,6 +232,7 @@ export interface PlanningResponse {
   message?: string
   report?: PlanningReport
   isMockFallback?: boolean
+  orchestrationMeta?: PlanningOrchestrationMeta
   /** 调试：client-mock | server-mock | server-ai */
   debugSource?: string
   errorDetail?: unknown
@@ -438,6 +546,13 @@ export interface StudentSpecialty {
   description: string   // 详细描述
 }
 
+/** 一分一段：score 为分数，cumulativeRank 为累计位次（含同分） */
+export interface ScoreSegment {
+  score: number
+  cumulativeRank: number
+  sameScoreCount?: number
+}
+
 export interface ExamDataReference {
   province: string
   city: string
@@ -448,6 +563,7 @@ export interface ExamDataReference {
     avgScore: number
     topScore: number
     cutoffLines: { tier: string; score: number }[]
+    scoreSegments?: ScoreSegment[]
   }[]
   keySchools: { name: string; minScore: number; ranking: number }[]
   updatedAt: string
@@ -485,6 +601,15 @@ export interface EnhancedPlanningFormData {
   
   // 考试数据（AI获取）
   examDataRef?: ExamDataReference
-  
+
+  /** 当前规划所依据学期 */
+  academicTerm: '上学期' | '下学期'
+  /** 选考科目（如浙江7选3） */
+  electiveSubjects: string[]
+  /** 历次考试成绩 */
+  scoreHistory: ExamScoreRecord[]
+  /** 客户端预计算的成绩分析 */
+  scoreAnalysis?: ScoreAnalysisResult
+
   createdByRole?: 'teacher' | 'student'
 }

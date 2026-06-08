@@ -830,6 +830,28 @@ async function getParentStudentView(req, res) {
 }
 
 // ============================================================
+// 0. POST /api/planning/university-lookup — 目标院校数据检索
+// ============================================================
+async function postUniversityLookup(req, res) {
+  try {
+    const body = await getBody(req)
+    const { targetUniversity, province, major } = body ?? {}
+    if (!targetUniversity?.trim() || !province?.trim()) {
+      return json(res, { success: false, message: '请提供目标院校与省份' }, 400)
+    }
+    const { lookupTargetUniversity } = await import('../planningEngine.js')
+    const lookup = lookupTargetUniversity(
+      targetUniversity.trim(),
+      province.trim(),
+      (major || '通用').trim(),
+    )
+    return json(res, { success: true, lookup })
+  } catch (err) {
+    return json(res, { success: false, message: err.message }, 500)
+  }
+}
+
+// ============================================================
 // 主分发函数
 // ============================================================
 export default async function educationPlanningApiHandler(req, res) {
@@ -839,6 +861,11 @@ export default async function educationPlanningApiHandler(req, res) {
   if (req.method === 'OPTIONS') return handleOptions(req, res)
 
   try {
+    // POST /api/planning/university-lookup
+    if (pathname === '/api/planning/university-lookup' && req.method === 'POST') {
+      return postUniversityLookup(req, res)
+    }
+
     // GET /api/planning/routes
     if (pathname === '/api/planning/routes' && req.method === 'GET') return getRoutes(req, res)
 

@@ -3,13 +3,15 @@ import DashboardHeader from '../components/layout/DashboardHeader'
 import PlanningInputPanel, { defaultEnhancedForm } from '../components/planning/PlanningInputPanel'
 import PlanningPreviewPanel from '../components/planning/PlanningPreviewPanel'
 import PlanningReportView from '../components/planning/PlanningReportView'
+import PlanningUniversityConfirmModal from '../components/planning/PlanningUniversityConfirmModal'
+import { lookupPlanningUniversity } from '../lib/planningEngineApi'
 import GanttChart from '../components/planning/GanttChart'
 import WeeklyReportCard from '../components/planning/WeeklyReportCard'
 import MonthlyReportCard from '../components/planning/MonthlyReportCard'
 import ParentBindingPanel from '../components/planning/ParentBindingPanel'
-import { printPlanningReport } from '../components/planning/PlanPrintView'
+import { printPlanningReport, exportPlanningReportPdf } from '../components/planning/PlanPrintView'
 import { useAuth } from '../context/AuthContext'
-import { exportToPdf } from '../lib/exportPdf'
+import { analyzeScoreHistory } from '../lib/scoreAnalysis'
 import { fetchPlanningReport } from '../lib/fetchPlanning'
 import { savePlanningRecord, getTeacherPlanningRecords, deletePlanningRecord } from '../lib/planningStorage'
 import {
@@ -20,6 +22,7 @@ import type {
   EnhancedPlanningFormData, PlanningReport, PlanRoute, GanttData,
   WeeklyReport as WeeklyReportType, MonthlyReport as MonthlyReportType,
   TeacherStudentItem, PlanRouteCode, SavedPlanningRecord,
+  UniversityLookupResult,
 } from '../types/planning'
 
 type Tab = 'create' | 'overview' | 'detail' | 'reports' | 'binding' | 'archive'
@@ -50,6 +53,10 @@ export default function TeacherPlanningPage() {
 
   // 归档状态
   const [archiveViewingRecord, setArchiveViewingRecord] = useState<SavedPlanningRecord | null>(null)
+
+  const [universityLookup, setUniversityLookup] = useState<UniversityLookupResult | null>(null)
+  const [showUniversityConfirm, setShowUniversityConfirm] = useState(false)
+  const [confirmMajor, setConfirmMajor] = useState('通用')
 
   const archiveRecords = useMemo(() => {
     try { return getTeacherPlanningRecords(profile?.id) }
@@ -91,58 +98,115 @@ export default function TeacherPlanningPage() {
     } catch { /* 静默 */ }
   }, [])
 
-  /**
-   * 生成教育规划方案
-   * 将增强版表单数据转换为后端兼容格式后调用 API
-   */
-  const handleGenerate = async () => {
-    if (!form.studentName.trim()) { setMessage('请填写学生姓名'); setIsWarning(true); return }
+  const buildPayload = (confirmed?: UniversityLookupResult) => {
+    const scoreAnalysis = analyzeScoreHistory(form.scoreHistory, form.electiveSubjects)
+    return {
+      studentName: form.studentName,
+      grade: form.schoolInfo.grade as EnhancedPlanningFormData['schoolInfo']['grade'],
+      goalDirections: form.goalDirections,
+      scoreLevel: form.scoreLevel,
+      interests: form.interests,
+      parentExpectations: form.parentExpectations,
+      specialNotes: form.specialNotes,
+      createdByRole: 'teacher' as const,
+      targetUniversity: confirmed?.university || form.targetSchools[0] || '',
+      targetMajor: confirmMajor || confirmed?.major || '通用',
+      confirmedUniversityData: confirmed,
+      _enhanced: {
+        gender: form.gender,
+        birthDate: form.birthDate,
+        schoolInfo: form.schoolInfo,
+        ranking: form.ranking,
+        targetSchools: form.targetSchools,
+        subjectScores: form.subjectScores,
+        specialties: form.specialties,
+        examDataRef: form.examDataRef,
+        academicTerm: form.academicTerm,
+        electiveSubjects: form.electiveSubjects,
+        scoreHistory: form.scoreHistory,
+        scoreAnalysis,
+        targetMajor: confirmMajor || confirmed?.major || '通用',
+      },
+    }
+  }
+
+  const runGenerate = async (confirmed?: UniversityLookupResult) => {
     setLoading(true)
     setMessage(null)
     setIsWarning(false)
     setSaved(false)
-
     try {
-      // 构建提交 payload：将增强版字段映射到后端期望的格式
-      const payload = {
-        studentName: form.studentName,
-        grade: form.schoolInfo.grade as EnhancedPlanningFormData['schoolInfo']['grade'],
-        goalDirections: form.goalDirections,
-        scoreLevel: form.scoreLevel,
-        interests: form.interests,
-        parentExpectations: form.parentExpectations,
-        specialNotes: form.specialNotes,
-        createdByRole: 'teacher' as const,
-        // 增强版额外信息（供 AI 规划引擎使用）
-        _enhanced: {
-          gender: form.gender,
-          birthDate: form.birthDate,
-          schoolInfo: form.schoolInfo,
-          ranking: form.ranking,
-          targetSchools: form.targetSchools,
-          subjectScores: form.subjectScores,
-          specialties: form.specialties,
-          examDataRef: form.examDataRef,
-        },
+      const data = await fetchPlanningReport(buildPayload(confirmed))
+      if (!data.report) {
+        setMessage(data.message ?? '规划生成失败')
+        setIsWarning(true)
+        return
       }
-
-      const data = await fetchPlanningReport(payload)
-      setReport(data.report!)
+      setReport(data.report)
       setIsWarning(!!data.isMockFallback)
       setMessage(data.message ?? '教育规划方案生成成功')
     } catch (err) {
       setMessage(err instanceof Error ? err.message : '规划方案生成失败')
       setIsWarning(true)
-    } finally { setLoading(false) }
+    } finally {
+      setLoading(false)
+      setShowUniversityConfirm(false)
+    }
   }
 
-  const handleExportPdf = async () => {
-    const el = reportRef.current ?? document.getElementById('planning-report-content')
-    if (!el || !report) return
+  const handleGenerate = async () => {
+    if (!form.studentName.trim()) { setMessage('请填写学生姓名'); setIsWarning(true); return }
+    const targetUni = form.targetSchools[0]?.trim()
+    const province = form.schoolInfo.province?.trim()
+    if (!targetUni) {
+      setMessage('请在「目标学校」中添加至少一所目标院校（如：清华大学）')
+      setIsWarning(true)
+      return
+    }
+    if (!province) {
+      setMessage('请先选择省份')
+      setIsWarning(true)
+      return
+    }
+
+    setMessage(null)
+    setIsWarning(false)
+
+    const lookupRes = await lookupPlanningUniversity({
+      targetUniversity: targetUni,
+      province,
+      major: confirmMajor,
+    })
+
+    if (!lookupRes.lookup) {
+      setMessage(lookupRes.message ?? '院校检索失败')
+      setIsWarning(true)
+      return
+    }
+
+    setUniversityLookup(lookupRes.lookup)
+    setConfirmMajor(lookupRes.lookup.major || '通用')
+    setShowUniversityConfirm(true)
+  }
+
+  const handleConfirmUniversityAndGenerate = () => {
+    if (!universityLookup) return
+    runGenerate(universityLookup)
+  }
+
+  const handleExportPdf = () => {
+    if (!report) return
     setExporting(true)
-    try { await exportToPdf(el as HTMLElement, `${report.title}.pdf`) }
-    catch { setMessage('PDF 导出失败'); setIsWarning(true) }
-    finally { setExporting(false) }
+    try {
+      exportPlanningReportPdf({ ...form, createdByRole: 'teacher' }, report)
+      setMessage('已打开打印窗口，请选择"另存为 PDF"完成导出')
+      setIsWarning(false)
+    } catch {
+      setMessage('PDF 导出失败，请允许浏览器弹出窗口后重试')
+      setIsWarning(true)
+    } finally {
+      setExporting(false)
+    }
   }
 
   const handleSave = () => {
@@ -164,6 +228,20 @@ export default function TeacherPlanningPage() {
   return (
     <div className="min-h-screen bg-[#121722] text-[#E8ECF3]">
       <DashboardHeader title="AI教育规划 · 教师工作台" featureNavRole="teacher" />
+
+      {showUniversityConfirm && universityLookup && (
+        <PlanningUniversityConfirmModal
+          lookup={universityLookup}
+          targetMajor={confirmMajor}
+          onMajorChange={setConfirmMajor}
+          onConfirm={handleConfirmUniversityAndGenerate}
+          onCancel={() => {
+            setShowUniversityConfirm(false)
+            setUniversityLookup(null)
+          }}
+          loading={loading}
+        />
+      )}
 
       <main className="mx-auto max-w-[1600px] px-4 py-4 sm:px-6 sm:py-6">
         {/* Tab 导航 */}

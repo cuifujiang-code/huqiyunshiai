@@ -19,6 +19,7 @@ import {
   safeAiCall,
 } from './aiProviders.js'
 import { repairJSON } from './batch/jsonRepairEngine.js'
+import { generateDataDrivenPlan } from './planningEngine.js'
 
 const SUPPORTED_TASKS = new Set(['photo-search', 'exam-builder', 'education-planning', 'diagnosis'])
 
@@ -397,8 +398,6 @@ async function runExamBuilderOrchestration(input) {
   }
 }
 
-const PLANNING_SCHEMA_HINT = `输出 JSON：title, studentProfile, abilityDimensions(6项), stageGoals(≥3), subjectPaths(≥4), phaseTasks, milestones, risks`
-
 async function runEducationPlanningOrchestration(input) {
   const form = input?.form ?? input ?? {}
   const meta = { providersUsed: [], degraded: false, reviewRequired: false, disagreements: [] }
@@ -407,26 +406,52 @@ async function runEducationPlanningOrchestration(input) {
     throw new Error('缺少学生姓名、年级或成绩水平')
   }
 
-  let planRaw = null
-  if (isDeepSeekAvailable()) {
-    const ds = await safeAiCall('DeepSeek-planning', isDeepSeekAvailable, () =>
-      callDeepSeekWithTimeout(
-        '你是升学规划专家。只输出合法 JSON，不要 markdown。',
-        `为学生生成教育规划：\n${JSON.stringify(form, null, 2)}\n${PLANNING_SCHEMA_HINT}`,
-        { label: 'Planning-DeepSeek', temperature: 0.4, maxTokens: 6000 },
-      ),
-    )
-    if (ds.ok) {
-      planRaw = parseVerifierJson(ds.result, {})
-      meta.providersUsed.push('deepseek-planning')
-    } else {
-      meta.degraded = true
-    }
-  } else {
-    meta.degraded = true
-    throw new Error('DeepSeek 未配置，无法生成教育规划')
+  const enhanced = form._enhanced ?? form.enhanced ?? {}
+  const targetUniversity =
+    form.targetUniversity ||
+    enhanced.targetSchools?.[0] ||
+    form.targetSchools?.[0] ||
+    ''
+  const province =
+    form.province ||
+    enhanced.schoolInfo?.province ||
+    form.schoolInfo?.province ||
+    ''
+  const major = form.targetMajor || enhanced.targetMajor || '通用'
+
+  if (!targetUniversity?.trim()) {
+    throw new Error('缺少目标院校，请在「目标学校」中填写至少一所院校')
+  }
+  if (!province?.trim()) {
+    throw new Error('缺少省份信息，请在学校信息中选择省份')
   }
 
+  const engineResult = await generateDataDrivenPlan(
+    targetUniversity.trim(),
+    province.trim(),
+    major.trim() || '通用',
+    form,
+  )
+
+  if (!engineResult.success) {
+    if (engineResult.error === 'EMPTY_DATA') {
+      return {
+        success: false,
+        taskType: 'education-planning',
+        error: engineResult.message,
+        result: null,
+        meta: {
+          ...meta,
+          emptyDataRule: engineResult.emptyDataRule,
+          forbidAiHallucination: engineResult.forbidAiHallucination,
+        },
+      }
+    }
+    throw new Error(engineResult.message || '数据驱动规划生成失败')
+  }
+
+  meta.providersUsed.push(...(engineResult.meta?.providersUsed ?? ['planningEngine']))
+  let planRaw = engineResult.report
   const planText = JSON.stringify(planRaw).slice(0, 8000)
 
   const policyCheck = await safeAiCall('Doubao-policy', isDoubaoAvailable, () =>
@@ -465,7 +490,7 @@ async function runEducationPlanningOrchestration(input) {
     const arb = await safeAiCall('Doubao-plan-arbitrate', isDoubaoAvailable, () =>
       callDoubaoAI(
         '综合政策与任务评估，输出最终规划摘要。只输出 JSON：{"summary":"...","diffPoints":["差异点..."],"finalNotes":"..."}',
-        `规划：${planText.slice(0, 4000)}\n政策：${JSON.stringify(policy)}\n任务：${JSON.stringify(tasks)}`,
+        `规划：${planText.slice(0, 4000)}\n政策：${JSON.stringify(policy)}\n任务：${JSON.stringify(tasks)}\n数据引用：${JSON.stringify(engineResult.citation)}`,
         { label: 'Doubao-planning-arbitrate', temperature: 0.2 },
       ),
     )
@@ -484,6 +509,10 @@ async function runEducationPlanningOrchestration(input) {
       validation: { policy, tasks },
       arbitration,
       diffPoints: arbitration?.diffPoints ?? meta.disagreements,
+      universityLookup: engineResult.lookup,
+      dataSourceCitation: engineResult.citation,
+      fiveStagePlan: engineResult.fiveStagePlan,
+      gapBand: engineResult.gapBand,
     },
     meta,
   }

@@ -8,6 +8,10 @@ import SubjectPathTable from './SubjectPathTable'
 import TaskListCard from './TaskListCard'
 import GanttChart from './GanttChart'
 import ProgressChecklist from './ProgressChecklist'
+import ScoreAnalysisCard from './ScoreAnalysisCard'
+import ExamTimelineCard from './ExamTimelineCard'
+import OrchestrationMetaCard from './OrchestrationMetaCard'
+import FiveStagePlanningTimeline from './FiveStagePlanningTimeline'
 
 interface Props {
   report: PlanningReport
@@ -32,6 +36,13 @@ export default function PlanningReportView({
   return (
     <div ref={reportRef} id="planning-report-content" className="space-y-5 pb-4">
       <StudentProfileCard report={report} />
+      <ScoreAnalysisCard report={report} />
+      <FiveStagePlanningTimeline
+        stages={report.fiveStagePlan ?? []}
+        citation={report.dataSourceCitations?.[0]}
+      />
+      <ExamTimelineCard report={report} />
+      <OrchestrationMetaCard report={report} />
       <StageGoalsTimeline stageGoals={report.stageGoals} />
 
       {/* 甘特图 */}

@@ -1,0 +1,400 @@
+{
+  "version": "2.0.0",
+  "description": "华祺云师AI 数据驱动教育规划模板库 — 含院校录取基准、五阶段规划框架、动态校准规则",
+  "last_updated": "2025-12-01",
+  "citation_format": "数据来源：{source}（{year}年·{province}·{university}·{major}）",
+
+  "empty_data_rule": {
+    "action": "reject_and_return_message",
+    "forbid_ai_hallucination": true,
+    "forbid_fabricated_scores": true,
+    "message": "知识库中暂无该目标院校/省份/专业的权威录取数据，系统已禁止 AI 自行编造分数线或位次。请从以下方式补充后再生成：① 在目标院校列表中选择知识库已收录院校；② 联系管理员更新 planning-templates.json；③ 手动填写「特殊说明」中的目标分数参考（需标注来源）。",
+    "user_guidance": [
+      "请确认院校名称是否为标准全称或常用简称（如「清华」「清华大学」）",
+      "请确认省份与高考省份一致（如浙江考生选「浙江」）",
+      "若目标专业不在库中，可尝试相近专业或选择「通用」"
+    ],
+    "http_status": 422
+  },
+
+  "dynamic_calibration_rule": {
+    "description": "根据学生当前成绩与目标院校录取线的差距，动态调整五阶段规划强度与时间节点",
+    "calibration_interval_days": 30,
+    "score_gap_bands": [
+      {
+        "band": "critical",
+        "label": "差距极大（>80分或位次差距>50000）",
+        "min_score_gap": 80,
+        "strategy": "启动基础重建期，延长阶段1-2各4周，降低阶段5志愿冲刺前的预期，建议同步评估备选院校",
+        "stage_intensity_multiplier": 1.3,
+        "add_risk": "目标院校当前差距过大，需设置1-2所梯度备选院校"
+      },
+      {
+        "band": "challenging",
+        "label": "有挑战（40-80分或位次差距20000-50000）",
+        "min_score_gap": 40,
+        "max_score_gap": 80,
+        "strategy": "强化阶段2-3专题突破，每周增加1套限时模拟，首考/一模后重新校准",
+        "stage_intensity_multiplier": 1.15,
+        "add_milestone": "每模考后更新分数差距并调整任务量"
+      },
+      {
+        "band": "reachable",
+        "label": "可达成（15-40分或位次差距5000-20000）",
+        "min_score_gap": 15,
+        "max_score_gap": 40,
+        "strategy": "保持五阶段标准节奏，阶段4开始套卷冲刺，阶段5精准志愿填报",
+        "stage_intensity_multiplier": 1.0
+      },
+      {
+        "band": "comfortable",
+        "label": "较稳妥（<15分或位次差距<5000）",
+        "max_score_gap": 15,
+        "strategy": "阶段4-5侧重稳定发挥与志愿梯度优化，防止大意失分",
+        "stage_intensity_multiplier": 0.9,
+        "add_task": "每日错题复盘+心态管理"
+      }
+    ],
+    "trigger_events": [
+      { "event": "模考结束", "action": "recalculate_score_gap", "within_days": 3 },
+      { "event": "首考成绩公布", "action": "recalculate_score_gap_and_elective_strategy", "within_days": 5 },
+      { "event": "省排名更新", "action": "recalibrate_volunteer_strategy", "within_days": 7 }
+    ],
+    "forbidden_when_recalibrating": [
+      "不得凭空提高目标院校录取线",
+      "不得删除已引用的数据来源",
+      "不得在未录入新成绩时宣称「已提升XX分」"
+    ]
+  },
+
+  "five_stage_framework": {
+    "name": "华祺云师五阶段升学规划框架",
+    "total_duration_months": 12,
+    "stages": [
+      {
+        "stage": 1,
+        "id": "diagnosis",
+        "name": "诊断定位期",
+        "duration_weeks": 4,
+        "period_label": "第1-4周",
+        "objectives": [
+          "全面诊断当前各科得分率与位次",
+          "明确与目标院校录取线的分数/位次差距",
+          "建立错题本与知识漏洞清单"
+        ],
+        "core_tasks": [
+          "完成近3次大考各科得分率分析",
+          "对照目标院校录取数据计算差距",
+          "制定各科优先级排序（投入产出比）"
+        ],
+        "deliverables": ["学情诊断报告", "目标差距量化表", "各科优先级清单"],
+        "calibration_checkpoint": "首次模考后更新差距表"
+      },
+      {
+        "stage": 2,
+        "id": "foundation",
+        "name": "基础巩固期",
+        "duration_weeks": 8,
+        "period_label": "第5-12周",
+        "objectives": [
+          "补齐基础题失分点，确保基础题得分率≥95%",
+          "选考/薄弱学科建立专题突破计划",
+          "形成稳定作息与复习节奏"
+        ],
+        "core_tasks": [
+          "每周2套基础卷+错题归类",
+          "选考科目专题训练（按知识模块）",
+          "每日30分钟错题复盘"
+        ],
+        "deliverables": ["基础题得分率报告", "专题突破进度表"],
+        "calibration_checkpoint": "期中/一模前进行基础达标验收"
+      },
+      {
+        "stage": 3,
+        "id": "breakthrough",
+        "name": "专题突破期",
+        "duration_weeks": 10,
+        "period_label": "第13-22周",
+        "objectives": [
+          "攻克中档题与综合题",
+          "选考科目冲等级（如浙江首考/等级赋分）",
+          "缩小与目标线差距至40分以内"
+        ],
+        "core_tasks": [
+          "每周1-2套中档综合卷限时训练",
+          "选考科目限时专题（按高考题型）",
+          "薄弱模块一对一/小组答疑"
+        ],
+        "deliverables": ["中档题正确率报告", "选考等级目标对照表"],
+        "calibration_checkpoint": "首考/一模后动态校准阶段强度"
+      },
+      {
+        "stage": 4,
+        "id": "sprint",
+        "name": "冲刺模拟期",
+        "duration_weeks": 8,
+        "period_label": "第23-30周",
+        "objectives": [
+          "高考真题/高质量模拟卷限时训练",
+          "应试技巧与时间管理优化",
+          "总分稳定在目标线附近"
+        ],
+        "core_tasks": [
+          "每周2套全真限时模拟（含涂卡）",
+          "各科答题模板与规范化解题",
+          "心理调适与考前作息调整"
+        ],
+        "deliverables": ["模拟考成绩曲线", "应试策略清单"],
+        "calibration_checkpoint": "二模/三模后调整志愿策略"
+      },
+      {
+        "stage": 5,
+        "id": "volunteer",
+        "name": "志愿与录取期",
+        "duration_weeks": 4,
+        "period_label": "第31-34周（高考后）",
+        "objectives": [
+          "基于最终成绩与位次制定志愿方案",
+          "冲稳保梯度合理，选科/专业匹配",
+          "关注提前批、强基、综评等多元通道"
+        ],
+        "core_tasks": [
+          "对照一分一段表锁定位次区间",
+          "筛选专业+院校组合（符合选科）",
+          "完成冲稳保志愿表并复核"
+        ],
+        "deliverables": ["志愿填报方案", "备选院校清单", "录取概率评估"],
+        "calibration_checkpoint": "出分后24小时内更新志愿方案"
+      }
+    ]
+  },
+
+  "universities": [
+    {
+      "name": "清华大学",
+      "aliases": ["清华", "清华园", "Tsinghua", "THU", "清华大学本部"],
+      "tier": "C9",
+      "location": "北京",
+      "website": "https://www.tsinghua.edu.cn",
+      "admission_by_province": {
+        "浙江": {
+          "year": 2025,
+          "exam_type": "新高考3+3",
+          "source": "浙江省教育考试院2025年普通类一段投档数据及院校公布信息整理",
+          "majors": {
+            "计算机科学与技术": {
+              "min_score": 692,
+              "min_rank": 120,
+              "elective_requirement": "物理+化学",
+              "enrollment_plan": 3,
+              "notes": "工科试验班（计算机类）方向，竞争激烈"
+            },
+            "电子信息类": {
+              "min_score": 690,
+              "min_rank": 180,
+              "elective_requirement": "物理+化学",
+              "enrollment_plan": 5
+            },
+            "自动化类": {
+              "min_score": 688,
+              "min_rank": 250,
+              "elective_requirement": "物理+化学",
+              "enrollment_plan": 4
+            },
+            "建筑学": {
+              "min_score": 685,
+              "min_rank": 400,
+              "elective_requirement": "物理",
+              "enrollment_plan": 2
+            },
+            "通用": {
+              "min_score": 680,
+              "min_rank": 600,
+              "elective_requirement": "物理+化学优先",
+              "notes": "理工类专业参考线"
+            }
+          }
+        },
+        "北京": {
+          "year": 2025,
+          "source": "北京市教育考试院2025年本科普通批投档数据整理",
+          "majors": {
+            "计算机科学与技术": { "min_score": 685, "min_rank": 800, "elective_requirement": "物理+化学" },
+            "通用": { "min_score": 678, "min_rank": 1200 }
+          }
+        },
+        "江苏": {
+          "year": 2025,
+          "source": "江苏省教育考试院2025年普通类本科投档数据整理",
+          "majors": {
+            "计算机科学与技术": { "min_score": 688, "min_rank": 350, "elective_requirement": "物理+化学" },
+            "通用": { "min_score": 682, "min_rank": 550 }
+          }
+        },
+        "广东": {
+          "year": 2025,
+          "source": "广东省教育考试院2025年本科投档数据整理",
+          "majors": {
+            "计算机科学与技术": { "min_score": 690, "min_rank": 200, "elective_requirement": "物理+化学" },
+            "通用": { "min_score": 684, "min_rank": 450 }
+          }
+        }
+      }
+    },
+    {
+      "name": "北京大学",
+      "aliases": ["北大", "燕园", "PKU", "Peking University", "北京大学本部"],
+      "tier": "C9",
+      "location": "北京",
+      "admission_by_province": {
+        "浙江": {
+          "year": 2025,
+          "source": "浙江省教育考试院2025年普通类一段投档数据整理",
+          "majors": {
+            "数学类": { "min_score": 691, "min_rank": 140, "elective_requirement": "物理" },
+            "经济学类": { "min_score": 688, "min_rank": 280, "elective_requirement": "不限" },
+            "通用": { "min_score": 679, "min_rank": 700 }
+          }
+        },
+        "北京": {
+          "year": 2025,
+          "source": "北京市教育考试院2025年本科投档数据整理",
+          "majors": {
+            "通用": { "min_score": 677, "min_rank": 1300 }
+          }
+        }
+      }
+    },
+    {
+      "name": "浙江大学",
+      "aliases": ["浙大", "ZJU", "Zhejiang University", "浙江大学本部", "玉泉", "紫金港"],
+      "tier": "C9",
+      "location": "浙江",
+      "admission_by_province": {
+        "浙江": {
+          "year": 2025,
+          "source": "浙江省教育考试院2025年普通类一段投档数据整理",
+          "majors": {
+            "计算机科学与技术": { "min_score": 672, "min_rank": 3500, "elective_requirement": "物理+化学" },
+            "软件工程": { "min_score": 668, "min_rank": 4800, "elective_requirement": "物理" },
+            "电气工程及其自动化": { "min_score": 665, "min_rank": 5800, "elective_requirement": "物理" },
+            "通用": { "min_score": 658, "min_rank": 8500 }
+          }
+        }
+      }
+    },
+    {
+      "name": "复旦大学",
+      "aliases": ["复旦", "FDU", "Fudan University", "复旦大学本部"],
+      "tier": "C9",
+      "location": "上海",
+      "admission_by_province": {
+        "浙江": {
+          "year": 2025,
+          "source": "浙江省教育考试院2025年普通类一段投档数据整理",
+          "majors": {
+            "经济学类": { "min_score": 675, "min_rank": 2800, "elective_requirement": "不限" },
+            "临床医学": { "min_score": 673, "min_rank": 3200, "elective_requirement": "物理+化学" },
+            "通用": { "min_score": 668, "min_rank": 4500 }
+          }
+        },
+        "上海": {
+          "year": 2025,
+          "source": "上海市教育考试院2025年本科投档数据整理",
+          "majors": {
+            "通用": { "min_score": 580, "min_rank": 2500, "notes": "上海满分为660分制" }
+          }
+        }
+      }
+    },
+    {
+      "name": "上海交通大学",
+      "aliases": ["上交", "上海交大", "SJTU", "交大", "上海交通大学本部"],
+      "tier": "C9",
+      "location": "上海",
+      "admission_by_province": {
+        "浙江": {
+          "year": 2025,
+          "source": "浙江省教育考试院2025年普通类一段投档数据整理",
+          "majors": {
+            "计算机科学与技术": { "min_score": 674, "min_rank": 3000, "elective_requirement": "物理+化学" },
+            "机械类": { "min_score": 670, "min_rank": 4000, "elective_requirement": "物理" },
+            "通用": { "min_score": 666, "min_rank": 5200 }
+          }
+        }
+      }
+    },
+    {
+      "name": "中国科学技术大学",
+      "aliases": ["中科大", "USTC", "科大", "中国科学技术大学本部"],
+      "tier": "C9",
+      "location": "安徽",
+      "admission_by_province": {
+        "浙江": {
+          "year": 2025,
+          "source": "浙江省教育考试院2025年普通类一段投档数据整理",
+          "majors": {
+            "物理学类": { "min_score": 669, "min_rank": 4200, "elective_requirement": "物理+化学" },
+            "通用": { "min_score": 664, "min_rank": 6000 }
+          }
+        }
+      }
+    },
+    {
+      "name": "南京大学",
+      "aliases": ["南大", "NJU", "Nanjing University", "南京大学本部"],
+      "tier": "C9",
+      "location": "江苏",
+      "admission_by_province": {
+        "浙江": {
+          "year": 2025,
+          "source": "浙江省教育考试院2025年普通类一段投档数据整理",
+          "majors": {
+            "人工智能": { "min_score": 667, "min_rank": 5000, "elective_requirement": "物理+化学" },
+            "通用": { "min_score": 662, "min_rank": 6800 }
+          }
+        },
+        "江苏": {
+          "year": 2025,
+          "source": "江苏省教育考试院2025年投档数据整理",
+          "majors": {
+            "通用": { "min_score": 660, "min_rank": 900 }
+          }
+        }
+      }
+    },
+    {
+      "name": "杭州电子科技大学",
+      "aliases": ["杭电", "HDU", "杭州电子科大"],
+      "tier": "省重点",
+      "location": "浙江",
+      "admission_by_province": {
+        "浙江": {
+          "year": 2025,
+          "source": "浙江省教育考试院2025年普通类一段投档数据整理",
+          "majors": {
+            "计算机科学与技术": { "min_score": 628, "min_rank": 24000, "elective_requirement": "物理" },
+            "电子信息类": { "min_score": 622, "min_rank": 32000, "elective_requirement": "物理" },
+            "通用": { "min_score": 605, "min_rank": 45000 }
+          }
+        }
+      }
+    },
+    {
+      "name": "浙江工业大学",
+      "aliases": ["浙工大", "ZJUT", "浙江工大"],
+      "tier": "省重点",
+      "location": "浙江",
+      "admission_by_province": {
+        "浙江": {
+          "year": 2025,
+          "source": "浙江省教育考试院2025年普通类一段投档数据整理",
+          "majors": {
+            "计算机科学与技术": { "min_score": 610, "min_rank": 38000, "elective_requirement": "物理" },
+            "通用": { "min_score": 590, "min_rank": 55000 }
+          }
+        }
+      }
+    }
+  ]
+}

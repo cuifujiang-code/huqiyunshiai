@@ -16,23 +16,21 @@ import {
   PLANNING_GRADES,
   SCORE_LEVELS,
 } from '../../types/planning'
-import { fetchExamData, getSupportedProvinces, getCitiesByProvince } from '../../lib/examDataApi'
+import {
+  buildDefaultSubjectScores,
+  examTypeFromGrade,
+  fetchExamData,
+  getSupportedProvinces,
+  getCitiesByProvince,
+} from '../../lib/examDataApi'
+import PlanningExamContextSection from './PlanningExamContextSection'
+import PlanningScoreHistorySection from './PlanningScoreHistorySection'
 
 // ============================================================
 // 默认表单数据
 // ============================================================
 
-const defaultSubjectScores: SubjectScore[] = [
-  { subject: '语文', score: null, fullScore: 150, classRank: null, schoolRank: null, scoreTrend: 'stable' },
-  { subject: '数学', score: null, fullScore: 150, classRank: null, schoolRank: null, scoreTrend: 'stable' },
-  { subject: '英语', score: null, fullScore: 150, classRank: null, schoolRank: null, scoreTrend: 'stable' },
-  { subject: '物理', score: null, fullScore: 100, classRank: null, schoolRank: null, scoreTrend: 'stable' },
-  { subject: '化学', score: null, fullScore: 100, classRank: null, schoolRank: null, scoreTrend: 'stable' },
-  { subject: '生物', score: null, fullScore: 100, classRank: null, schoolRank: null, scoreTrend: 'stable' },
-  { subject: '历史', score: null, fullScore: 100, classRank: null, schoolRank: null, scoreTrend: 'stable' },
-  { subject: '地理', score: null, fullScore: 100, classRank: null, schoolRank: null, scoreTrend: 'stable' },
-  { subject: '政治', score: null, fullScore: 100, classRank: null, schoolRank: null, scoreTrend: 'stable' },
-]
+const defaultSubjectScores: SubjectScore[] = buildDefaultSubjectScores('default', '初二')
 
 export const defaultEnhancedForm: EnhancedPlanningFormData = {
   studentName: '',
@@ -60,6 +58,9 @@ export const defaultEnhancedForm: EnhancedPlanningFormData = {
   specialties: [],
   parentExpectations: '希望冲击重点高中，同时保持学习兴趣和身心健康。',
   specialNotes: '',
+  academicTerm: '上学期',
+  electiveSubjects: [],
+  scoreHistory: [],
   createdByRole: 'teacher',
 }
 
@@ -191,9 +192,24 @@ export default function PlanningInputPanel({
   const provinceOptions = getSupportedProvinces()
   const cityOptions = getCitiesByProvince(form.schoolInfo.province)
 
-  // 当省份变化时清空城市
+  const syncSubjectScoresFor = (province: string, grade: string) =>
+    buildDefaultSubjectScores(province || 'default', grade, form.subjectScores)
+
+  // 当省份变化时清空城市，并按当地科目结构更新满分
   const handleProvinceChange = (province: string) => {
-    updateSchoolInfo({ province, city: '', district: '' })
+    onChange({
+      ...form,
+      schoolInfo: { ...form.schoolInfo, province, city: '', district: '' },
+      subjectScores: syncSubjectScoresFor(province, form.schoolInfo.grade),
+    })
+  }
+
+  const handleGradeChange = (grade: string) => {
+    onChange({
+      ...form,
+      schoolInfo: { ...form.schoolInfo, grade },
+      subjectScores: syncSubjectScoresFor(form.schoolInfo.province, grade),
+    })
   }
 
   // ---- AI 获取考试数据 ----
@@ -206,9 +222,7 @@ export default function PlanningInputPanel({
     setExamLoading(true)
     setExamMessage(null)
     try {
-      // 根据年级判断考试类型
-      const isHighSchool = ['高一', '高二', '高三'].includes(form.schoolInfo.grade)
-      const examType: '中考' | '高考' = isHighSchool ? '高考' : '中考'
+      const examType = examTypeFromGrade(form.schoolInfo.grade)
 
       const result = await fetchExamData({
         province: form.schoolInfo.province,
@@ -218,7 +232,9 @@ export default function PlanningInputPanel({
 
       if (result.success && result.data) {
         updateForm({ examDataRef: result.data })
-        setExamMessage(`已获取 ${result.data.province}${result.data.city}${examType}参考数据`)
+        setExamMessage(
+          `已获取 ${result.data.year}年 ${result.data.province}${result.data.city}${examType}参考数据`,
+        )
       } else {
         setExamMessage(result.message ?? '获取失败')
       }
@@ -336,7 +352,7 @@ export default function PlanningInputPanel({
             <FormField label="年级">
               <select
                 value={form.schoolInfo.grade}
-                onChange={(e) => updateSchoolInfo({ grade: e.target.value })}
+                onChange={(e) => handleGradeChange(e.target.value)}
                 className={selectClass}
               >
                 {PLANNING_GRADES.map((g) => (
@@ -355,6 +371,8 @@ export default function PlanningInputPanel({
             </FormField>
           </div>
         </SectionBlock>
+
+        <PlanningExamContextSection form={form} onChange={onChange} />
 
         {/* ===== Section 3: 成绩排名 ===== */}
         <SectionBlock title="成绩排名" icon="📊" desc="当前在校/班级排名及各科成绩详情">
@@ -454,8 +472,18 @@ export default function PlanningInputPanel({
                         className="w-full rounded-lg border border-[#2A3444] bg-transparent px-2 py-1 text-center text-[#E8ECF3] outline-none focus:border-[#2584FF]"
                       />
                     </td>
-                    <td className="px-3 py-2 text-center text-[#6B7588]">
-                      {subj.fullScore}
+                    <td className="px-3 py-2">
+                      <input
+                        type="number"
+                        min={1}
+                        value={subj.fullScore}
+                        onChange={(e) => {
+                          const fullScore = Number(e.target.value)
+                          if (!Number.isFinite(fullScore) || fullScore < 1) return
+                          updateSubjectScore(idx, { fullScore })
+                        }}
+                        className="w-full rounded-lg border border-[#2A3444] bg-transparent px-2 py-1 text-center text-[#E8ECF3] outline-none focus:border-[#2584FF]"
+                      />
                     </td>
                     <td className="px-3 py-2">
                       <input
@@ -751,6 +779,8 @@ export default function PlanningInputPanel({
           </div>
         </SectionBlock>
 
+        <PlanningScoreHistorySection form={form} onChange={onChange} />
+
         {/* ===== Section 7: AI 考试数据 ===== */}
         <SectionBlock
           title="AI 考试数据"
@@ -770,7 +800,7 @@ export default function PlanningInputPanel({
                   正在获取数据...
                 </>
               ) : (
-                <>获取{['高一', '高二', '高三'].includes(form.schoolInfo.grade) ? '高考' : '中考'}参考数据</>
+                <>获取{examTypeFromGrade(form.schoolInfo.grade)}参考数据</>
               )}
             </button>
 
@@ -788,53 +818,7 @@ export default function PlanningInputPanel({
 
             {/* 已获取的考试数据展示 */}
             {form.examDataRef && (
-              <div className="mt-2 overflow-x-auto rounded-xl border border-green-500/15 bg-green-500/[0.03] p-4">
-                <div className="mb-3 text-xs font-semibold text-green-400">
-                  {form.examDataRef.province} · {form.examDataRef.city} ·{' '}
-                  {form.examDataRef.year}年{form.examDataRef.examType}参考数据
-                </div>
-
-                {/* 分数线 */}
-                <div className="mb-3">
-                  <div className="mb-1 text-[11px] font-medium text-[#8A94A9]">
-                    参考分数线
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    {form.examDataRef.subjects[0]?.cutoffLines?.map((line) => (
-                      <span
-                        key={line.tier}
-                        className="rounded-full bg-green-500/10 px-2.5 py-1 text-xs text-green-300/90"
-                      >
-                        {line.tier}：<strong>{line.score}</strong> 分
-                      </span>
-                    ))}
-                  </div>
-                </div>
-
-                {/* 重点学校 */}
-                <div>
-                  <div className="mb-1 text-[11px] font-medium text-[#8A94A9]">
-                    重点学校参考录取分
-                  </div>
-                  <div className="grid grid-cols-1 gap-1 sm:grid-cols-2">
-                    {form.examDataRef.keySchools.slice(0, 5).map((school) => (
-                      <div
-                        key={school.name}
-                        className="flex items-center justify-between rounded-lg bg-[#151C28] px-3 py-1.5"
-                      >
-                        <span className="text-xs text-[#B0B9C8]">{school.name}</span>
-                        <span className="text-xs font-medium text-green-400">
-                          ≥ {school.minScore}分
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                <p className="mt-2 text-[10px] text-[#5A6478]">
-                  数据来源：{form.examDataRef.source}
-                </p>
-              </div>
+              <ExamDataRefDisplay data={form.examDataRef} />
             )}
           </div>
         </SectionBlock>
@@ -856,6 +840,98 @@ export default function PlanningInputPanel({
 // ============================================================
 // 子组件
 // ============================================================
+
+function ExamDataRefDisplay({ data }: { data: ExamDataReference }) {
+  const [trackIdx, setTrackIdx] = useState(0)
+  const subject = data.subjects[trackIdx] ?? data.subjects[0]
+  const hasMultipleTracks = data.subjects.length > 1
+
+  return (
+    <div className="mt-2 overflow-x-auto rounded-xl border border-green-500/15 bg-green-500/[0.03] p-4">
+      <div className="mb-3 text-xs font-semibold text-green-400">
+        {data.province} · {data.city} · {data.year}年{data.examType}参考数据
+      </div>
+
+      {hasMultipleTracks && (
+        <div className="mb-3 flex flex-wrap gap-2">
+          {data.subjects.map((s, idx) => (
+            <button
+              key={s.subject}
+              type="button"
+              onClick={() => setTrackIdx(idx)}
+              className={`rounded-lg px-3 py-1 text-xs transition ${
+                trackIdx === idx
+                  ? 'bg-green-500/20 text-green-300'
+                  : 'bg-[#151C28] text-[#8A94A9] hover:text-[#B0B9C8]'
+              }`}
+            >
+              {s.subject}
+            </button>
+          ))}
+        </div>
+      )}
+
+      <div className="mb-3">
+        <div className="mb-1 text-[11px] font-medium text-[#8A94A9]">参考分数线</div>
+        <div className="flex flex-wrap gap-2">
+          {subject?.cutoffLines?.map((line) => (
+            <span
+              key={line.tier}
+              className="rounded-full bg-green-500/10 px-2.5 py-1 text-xs text-green-300/90"
+            >
+              {line.tier}：<strong>{line.score}</strong> 分
+            </span>
+          ))}
+        </div>
+      </div>
+
+      {subject?.scoreSegments && subject.scoreSegments.length > 0 && (
+        <div className="mb-3">
+          <div className="mb-1 text-[11px] font-medium text-[#8A94A9]">一分一段（累计位次）</div>
+          <div className="max-h-48 overflow-y-auto rounded-lg border border-white/[0.05]">
+            <table className="w-full text-xs">
+              <thead className="sticky top-0 bg-[#151C28]">
+                <tr className="text-left text-[#6B7588]">
+                  <th className="px-3 py-1.5 font-medium">分数</th>
+                  <th className="px-3 py-1.5 font-medium">累计位次</th>
+                  <th className="px-3 py-1.5 font-medium">同分人数</th>
+                </tr>
+              </thead>
+              <tbody>
+                {subject.scoreSegments.map((row) => (
+                  <tr key={row.score} className="border-t border-white/[0.03]">
+                    <td className="px-3 py-1 text-[#E8ECF3]">{row.score}</td>
+                    <td className="px-3 py-1 text-green-300/90">{row.cumulativeRank.toLocaleString()}</td>
+                    <td className="px-3 py-1 text-[#8A94A9]">
+                      {row.sameScoreCount ?? '—'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      <div>
+        <div className="mb-1 text-[11px] font-medium text-[#8A94A9]">重点学校参考录取分</div>
+        <div className="grid grid-cols-1 gap-1 sm:grid-cols-2">
+          {data.keySchools.slice(0, 8).map((school) => (
+            <div
+              key={school.name}
+              className="flex items-center justify-between rounded-lg bg-[#151C28] px-3 py-1.5"
+            >
+              <span className="text-xs text-[#B0B9C8]">{school.name}</span>
+              <span className="text-xs font-medium text-green-400">≥ {school.minScore}分</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <p className="mt-2 text-[10px] text-[#5A6478]">数据来源：{data.source}</p>
+    </div>
+  )
+}
 
 function SectionBlock({
   title,
