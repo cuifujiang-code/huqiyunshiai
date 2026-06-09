@@ -1,4 +1,5 @@
 import { handwritingToHandout } from '../teacher/handoutOcrService.js'
+import handoutOcrProcess from '../api/handouts/ocr-process.js'
 
 export function registerOcrRoutes(app) {
   app.post('/api/ocr/handwriting-to-handout', async (req, res) => {
@@ -14,4 +15,6 @@ export function registerOcrRoutes(app) {
       })
     }
   })
+
+  app.all('/api/handouts/ocr-process', (req, res) => handoutOcrProcess(req, res))
 }
