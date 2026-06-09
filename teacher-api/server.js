@@ -70,6 +70,7 @@ const debugTasks = await safeImport('./api/debug-tasks.js', 'debug-tasks')
 const aiOrchestrate = await safeImport('./api/ai/orchestrate.js', 'ai/orchestrate')
 const photoSearch = await safeImport('./api/student/photo-search.js', 'student/photo-search')
 const volunteerApi = await safeImport('./server/batch/volunteerApi.js', 'volunteer')
+const handwritingHandout = await safeImport('./api/ocr/handwriting-to-handout.js', 'ocr/handwriting-to-handout')
 const catalogRouter = await safeImport('./api/catalog/[...path].js', 'catalog catch-all')
 
 // ─── 注册路由 ───
@@ -127,6 +128,8 @@ app.all('/api/student/photo-search', photoSearch)
 app.all('/api/volunteer/generate', volunteerApi)
 app.all('/api/volunteer/schemes', volunteerApi)
 app.all('/api/volunteer/scheme/:id', volunteerApi)
+
+app.all('/api/ocr/handwriting-to-handout', handwritingHandout)
 
 // ─── 404 兜底 ───
 app.use('/api', (req, res) => {

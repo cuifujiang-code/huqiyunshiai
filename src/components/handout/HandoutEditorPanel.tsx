@@ -2,14 +2,30 @@ import { useState } from 'react'
 import type { HandoutContent, HandoutModule } from '../../types/teacher'
 import { btnSecondary, inputClass } from '../../types/teacher'
 import { MODULE_PALETTE, createModule } from './handoutConstants'
+import { FONT_FAMILIES } from './HandoutOcrImportModal'
 
 interface Props {
   content: HandoutContent
   onChange: (next: HandoutContent) => void
+  onImportOcr?: () => void
+  onGenerateSummary?: (knowledgePoint: string) => void
+  summaryLoading?: boolean
+  knowledgePoint?: string
+  onKnowledgePointChange?: (v: string) => void
 }
 
-export default function HandoutEditorPanel({ content, onChange }: Props) {
+export default function HandoutEditorPanel({
+  content,
+  onChange,
+  onImportOcr,
+  onGenerateSummary,
+  summaryLoading,
+  knowledgePoint = '',
+  onKnowledgePointChange,
+}: Props) {
   const [dragIdx, setDragIdx] = useState<number | null>(null)
+
+  const missingCount = content.modules.filter((m) => m.missingAnswer).length
 
   const updateModule = (i: number, patch: Partial<HandoutModule>) => {
     const modules = [...content.modules]
@@ -17,7 +33,7 @@ export default function HandoutEditorPanel({ content, onChange }: Props) {
     onChange({ ...content, modules })
   }
 
-  const updateStyle = (i: number, patch: { fontSize?: number; color?: string }) => {
+  const updateStyle = (i: number, patch: { fontSize?: number; color?: string; fontFamily?: string }) => {
     const mod = content.modules[i]
     updateModule(i, { style: { ...mod.style, ...patch } })
   }
@@ -38,6 +54,42 @@ export default function HandoutEditorPanel({ content, onChange }: Props) {
 
   return (
     <div className="space-y-4">
+      <div className="flex flex-wrap gap-2">
+        {onImportOcr && (
+          <button type="button" className={btnSecondary} onClick={onImportOcr}>
+            📥 从 OCR 结果导入
+          </button>
+        )}
+        {onGenerateSummary && (
+          <button
+            type="button"
+            className={btnSecondary}
+            disabled={summaryLoading}
+            onClick={() => onGenerateSummary(knowledgePoint)}
+          >
+            {summaryLoading ? '生成中…' : '🤖 AI 知识点总结'}
+          </button>
+        )}
+      </div>
+
+      {onGenerateSummary && (
+        <div className="rounded-lg border border-cyan-500/30 bg-cyan-500/5 p-3">
+          <input
+            className={`${inputClass} text-sm py-2`}
+            placeholder="知识点名称（如：牛顿第二定律）"
+            value={knowledgePoint}
+            onChange={(e) => onKnowledgePointChange?.(e.target.value)}
+          />
+          <p className="mt-1 text-xs text-slate-500">根据已选题目与知识点，调用 DeepSeek 生成总结模块</p>
+        </div>
+      )}
+
+      {missingCount > 0 && (
+        <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+          ⚠ 共 {missingCount} 处题目「答案待补充」，导出时将自动标注。
+        </div>
+      )}
+
       <div className="rounded-xl border border-violet-500/30 bg-violet-500/5 p-4">
         <h3 className="mb-3 text-sm font-semibold text-violet-200">讲义封面</h3>
         <div className="grid gap-2 sm:grid-cols-2">
@@ -115,10 +167,13 @@ export default function HandoutEditorPanel({ content, onChange }: Props) {
           onDragEnd={() => setDragIdx(null)}
           className={`rounded-xl border p-3 transition ${
             dragIdx === i ? 'border-cyan-400 bg-cyan-500/10' : 'border-slate-700 bg-slate-800/40'
-          }`}
+          } ${mod.missingAnswer ? 'border-amber-500/50' : ''}`}
         >
           <div className="mb-2 flex items-center gap-2 text-xs text-slate-500">
             <span className="cursor-grab">⋮⋮ 拖拽排序</span>
+            {mod.missingAnswer && (
+              <span className="rounded bg-amber-500/20 px-2 py-0.5 text-amber-300">答案待补充</span>
+            )}
             <button type="button" className="ml-auto text-red-400" onClick={() => removeModule(i)}>
               删除
             </button>
@@ -134,11 +189,23 @@ export default function HandoutEditorPanel({ content, onChange }: Props) {
               <input
                 type="number"
                 min={12}
-                max={24}
+                max={28}
                 className="w-14 rounded border border-slate-600 bg-slate-900 px-1 py-0.5 text-white"
                 value={mod.style?.fontSize ?? 14}
                 onChange={(e) => updateStyle(i, { fontSize: Number(e.target.value) || 14 })}
               />
+            </label>
+            <label className="flex items-center gap-1 text-xs text-slate-400">
+              字体
+              <select
+                className="rounded border border-slate-600 bg-slate-900 px-1 py-0.5 text-white text-xs"
+                value={mod.style?.fontFamily ?? 'Microsoft YaHei'}
+                onChange={(e) => updateStyle(i, { fontFamily: e.target.value })}
+              >
+                {FONT_FAMILIES.map((f) => (
+                  <option key={f.value} value={f.value}>{f.label}</option>
+                ))}
+              </select>
             </label>
             <label className="flex items-center gap-1 text-xs text-slate-400">
               颜色
@@ -160,7 +227,7 @@ export default function HandoutEditorPanel({ content, onChange }: Props) {
       ))}
 
       {content.modules.length === 0 && (
-        <p className="text-center text-sm text-slate-500">点击上方按钮添加模块，或拖拽调整顺序</p>
+        <p className="text-center text-sm text-slate-500">点击上方按钮添加模块，或从 OCR 导入</p>
       )}
     </div>
   )

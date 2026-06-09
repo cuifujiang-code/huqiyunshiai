@@ -162,6 +162,10 @@ export async function handleTeacherApi(req, res, pathSegments = []) {
         const draft = await handout.generateHandoutDraft(body.mode, body)
         return res.status(200).json({ success: true, draft })
       }
+      if (body.action === 'knowledge-summary') {
+        const summary = await handout.generateKnowledgeSummary(body)
+        return res.status(200).json({ success: true, summary })
+      }
       const data = await handout.saveHandout(teacherId, body)
       return res.status(200).json({ success: true, handout: data })
     }
@@ -188,6 +192,12 @@ export async function handleTeacherApi(req, res, pathSegments = []) {
       const questions = body.questions ?? []
       const graph = await bookAi.generateKnowledgeGraph(questions)
       return res.status(200).json({ success: true, graph })
+    }
+
+    if (path === 'books/foreword-epilogue' && method === 'POST') {
+      requireTeacher(body, query)
+      const { foreword, epilogue } = await bookAi.generateForewordEpilogue(body)
+      return res.status(200).json({ success: true, foreword, epilogue })
     }
 
     if (path === 'books' && method === 'POST') {

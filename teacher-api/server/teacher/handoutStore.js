@@ -59,6 +59,20 @@ const MODE_TEMPLATES = {
   custom: ['知识点讲解', '例题', '练习', '总结'],
 }
 
+export async function generateKnowledgeSummary(input) {
+  const { subject, grade, knowledgePoint, questions = [] } = input
+  const qText = questions
+    .slice(0, 15)
+    .map((q, i) => `${i + 1}. ${String(q.content || q).slice(0, 200)}`)
+    .join('\n')
+
+  const prompt = `为${grade || ''}${subject || ''}「${knowledgePoint || '本讲知识点'}」撰写知识点总结（300-500字）。
+${qText ? `参考题目：\n${qText}` : ''}
+要求：条理清晰，含核心概念、常见考点、易错提醒。只输出正文，不要 markdown 标题。`
+
+  return callDeepSeekAI('你是资深学科教师', prompt)
+}
+
 export async function generateHandoutDraft(mode, input) {
   const modules = MODE_TEMPLATES[mode] || MODE_TEMPLATES.school
   const prompt = `为${input.grade || ''}${input.subject || ''}生成「${input.title}」讲义草稿，模式：${mode}。

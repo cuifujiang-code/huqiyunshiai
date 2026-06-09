@@ -1,13 +1,25 @@
 import html2canvas from 'html2canvas'
-import jsPDF from 'jspdf'
+import { jsPDF } from 'jspdf'
+
+export interface PdfExportOptions {
+  /** 章节书签（标题列表，按文档顺序） */
+  bookmarks?: { title: string; level?: number }[]
+  /** 可打印版更大边距 */
+  mode?: 'print' | 'digital'
+}
 
 export async function exportExamToPdf(element: HTMLElement, filename: string): Promise<void> {
   return exportToPdf(element, filename)
 }
 
-export async function exportToPdf(element: HTMLElement, filename: string): Promise<void> {
+export async function exportToPdf(
+  element: HTMLElement,
+  filename: string,
+  options: PdfExportOptions = {},
+): Promise<void> {
+  const scale = options.mode === 'print' ? 2.5 : 2
   const canvas = await html2canvas(element, {
-    scale: 2,
+    scale,
     useCORS: true,
     backgroundColor: '#ffffff',
     logging: false,
@@ -17,13 +29,14 @@ export async function exportToPdf(element: HTMLElement, filename: string): Promi
   const pdf = new jsPDF('p', 'mm', 'a4')
   const pageWidth = pdf.internal.pageSize.getWidth()
   const pageHeight = pdf.internal.pageSize.getHeight()
-  const margin = 10
+  const margin = options.mode === 'print' ? 12 : 10
 
   const imgWidth = pageWidth - margin * 2
   const imgHeight = (canvas.height * imgWidth) / canvas.width
 
   let heightLeft = imgHeight
   let position = margin
+  const pageCount = Math.max(1, Math.ceil(imgHeight / (pageHeight - margin * 2)))
 
   pdf.addImage(imgData, 'PNG', margin, position, imgWidth, imgHeight)
   heightLeft -= pageHeight - margin * 2
@@ -35,16 +48,35 @@ export async function exportToPdf(element: HTMLElement, filename: string): Promi
     heightLeft -= pageHeight - margin * 2
   }
 
-  pdf.save(filename)
+  // jsPDF 4.x 大纲书签
+  if (options.bookmarks?.length) {
+    try {
+      const outline = (pdf as unknown as { outline?: { add: (...args: unknown[]) => void } }).outline
+      if (outline?.add) {
+        options.bookmarks.forEach((bm, idx) => {
+          const pageNum = Math.min(
+            pageCount,
+            Math.max(1, Math.floor((idx / options.bookmarks!.length) * pageCount) + 1),
+          )
+          outline.add(null, bm.title, { pageNumber: pageNum })
+        })
+      }
+    } catch {
+      /* 书签不可用时忽略 */
+    }
+  }
+
+  pdf.save(filename.endsWith('.pdf') ? filename : `${filename}.pdf`)
 }
 
 export async function exportExamToWord(element: HTMLElement, filename: string): Promise<void> {
   const html = `<!DOCTYPE html>
-<html>
+<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word">
 <head>
   <meta charset="utf-8">
   <meta name="generator" content="华祺云师AI">
   <title>${filename.replace('.docx', '')}</title>
+  <!--[if gte mso 9]><xml><w:WordDocument><w:View>Print</w:View></w:WordDocument></xml><![endif]-->
   <style>
     body { font-family: 'SimSun', '宋体', serif; font-size: 12pt; line-height: 1.6; color: #000; margin: 20mm; }
     h1 { text-align: center; font-size: 16pt; }
@@ -58,9 +90,7 @@ ${element.innerHTML}
 </body>
 </html>`
 
-  const blob = new Blob(['\ufeff' + html], {
-    type: 'application/msword',
-  })
+  const blob = new Blob(['\ufeff' + html], { type: 'application/msword' })
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url

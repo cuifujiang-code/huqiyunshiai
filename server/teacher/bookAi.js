@@ -45,6 +45,34 @@ ${JSON.stringify(summary)}`
   return { nodes, edges }
 }
 
+/** 根据全书内容生成前言与后记 */
+export async function generateForewordEpilogue(book = {}) {
+  const outline = (book.chapters ?? [])
+    .map((ch) => {
+      const secs = (ch.sections ?? []).map((s) => s.title).join('、')
+      return `${ch.title}${secs ? `（${secs}）` : ''}`
+    })
+    .join('\n')
+
+  const prompt = `为一本 K12 辅导书撰写前言与后记。
+
+书名：${book.title || '辅导书'}
+年级：${book.grade || ''} · 层次：${book.level || '基础'}
+章节大纲：
+${outline || '（待补充）'}
+
+返回 JSON：{ "foreword": "前言正文200-400字", "epilogue": "后记正文150-300字" }
+前言：说明编写目的、适用对象、使用建议。
+后记：总结全书、鼓励读者、致谢。`
+
+  const raw = await callDeepSeekAI('只输出 JSON，不要 markdown', prompt)
+  const parsed = JSON.parse(extractJson(raw))
+  return {
+    foreword: String(parsed.foreword ?? ''),
+    epilogue: String(parsed.epilogue ?? ''),
+  }
+}
+
 /**
  * 按知识点将题目归类到章节结构
  */

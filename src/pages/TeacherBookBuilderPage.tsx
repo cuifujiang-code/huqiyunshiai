@@ -4,12 +4,25 @@ import BookQuestionPicker from '../components/book/BookQuestionPicker'
 import KnowledgeGraphView from '../components/book/KnowledgeGraphView'
 import { useAuth } from '../context/AuthContext'
 import { groupQuestionsIntoChapters } from '../lib/bookGrouping'
-import { bookToExportHtml } from '../lib/bookExport'
+import { bookToExportHtml, bookBookmarkOutline } from '../lib/bookExport'
+import { BOOK_LAYOUT_TEMPLATES, applyBookLayoutSettings } from '../lib/bookLayoutTemplates'
 import { exportHtmlAsWord } from '../lib/exportDoc'
 import { exportToPdf } from '../lib/exportPdf'
 import { incrementFeatureUsage } from '../lib/featureUsage'
-import { generateBookKnowledgeGraph, saveBook } from '../lib/teacherApi'
-import type { BankQuestion, BookChapter, BookCoverStyle, BookRecord, BookSection } from '../types/teacher'
+import {
+  generateBookForewordEpilogue,
+  generateBookKnowledgeGraph,
+  saveBook,
+} from '../lib/teacherApi'
+import type {
+  BankQuestion,
+  BookChapter,
+  BookCoverStyle,
+  BookLayoutTemplateId,
+  BookRecord,
+  BookSection,
+  ExportMode,
+} from '../types/teacher'
 import { btnPrimary, btnSecondary, inputClass } from '../types/teacher'
 
 const COVER_OPTIONS: { id: BookCoverStyle; label: string; desc: string }[] = [
@@ -31,6 +44,12 @@ export default function TeacherBookBuilderPage() {
   const [grade, setGrade] = useState('八年级')
   const [level, setLevel] = useState('基础')
   const [coverStyle, setCoverStyle] = useState<BookCoverStyle>('academic')
+  const [layoutTemplate, setLayoutTemplate] = useState<BookLayoutTemplateId>('classic')
+  const [layoutSettings, setLayoutSettings] = useState(applyBookLayoutSettings('classic'))
+  const [foreword, setForeword] = useState('')
+  const [epilogue, setEpilogue] = useState('')
+  const [exportMode, setExportMode] = useState<ExportMode>('print')
+  const [forewordLoading, setForewordLoading] = useState(false)
   const [chapters, setChapters] = useState<BookChapter[]>([
     { id: newId('ch'), title: '第一章', sections: [{ id: newId('sec'), title: '第一节', blocks: [] }] },
   ])
@@ -51,7 +70,54 @@ export default function TeacherBookBuilderPage() {
     chapters,
     coverStyle,
     knowledgeGraph,
+    layoutTemplate,
+    layoutSettings,
+    foreword,
+    epilogue,
+    exportMode,
   })
+
+  const applyTemplate = (id: BookLayoutTemplateId) => {
+    setLayoutTemplate(id)
+    setLayoutSettings(applyBookLayoutSettings(id))
+    setMessage(`已应用排版模板：${BOOK_LAYOUT_TEMPLATES.find((t) => t.id === id)?.name}`)
+  }
+
+  const handleAutoFormat = () => {
+    const settings = applyBookLayoutSettings(layoutTemplate, layoutSettings)
+    setLayoutSettings(settings)
+    const styled = chapters.map((ch) => ({
+      ...ch,
+      sections: ch.sections.map((sec) => ({
+        ...sec,
+        blocks: sec.blocks.map((b) => ({
+          ...b,
+          style: {
+            fontSize: settings.fontSize,
+            color: settings.bodyColor,
+            fontFamily: settings.fontFamily?.split(',')[0]?.trim(),
+          },
+        })),
+      })),
+    }))
+    setChapters(styled)
+    setMessage('已统一全书字体、字号与颜色')
+  }
+
+  const handleGenerateForewordEpilogue = async () => {
+    setForewordLoading(true)
+    setMessage(null)
+    try {
+      const { foreword: fw, epilogue: ep } = await generateBookForewordEpilogue(bookRecord())
+      setForeword(fw)
+      setEpilogue(ep)
+      setMessage('前言与后记已生成')
+    } catch (e) {
+      setMessage(e instanceof Error ? e.message : '生成失败')
+    } finally {
+      setForewordLoading(false)
+    }
+  }
 
   const addChapter = () => {
     setChapters([...chapters, { id: newId('ch'), title: `第${chapters.length + 1}章`, sections: [] }])
@@ -184,6 +250,38 @@ export default function TeacherBookBuilderPage() {
 
               <div className="h-px bg-white/[0.06]" />
 
+              <div className="space-y-1">
+                <p className="text-[11px] text-[#8A94A9]">排版模板</p>
+                {BOOK_LAYOUT_TEMPLATES.map((t) => (
+                  <button
+                    key={t.id}
+                    type="button"
+                    onClick={() => applyTemplate(t.id)}
+                    className={`w-full rounded-[8px] px-2 py-1.5 text-left text-xs transition ${
+                      layoutTemplate === t.id
+                        ? 'bg-emerald-500/15 text-emerald-300 ring-1 ring-emerald-500/30'
+                        : 'text-[#8A94A9] hover:bg-[#222B3E]'
+                    }`}
+                  >
+                    {t.name} · {t.desc}
+                  </button>
+                ))}
+              </div>
+
+              <button type="button" className={`${btnSecondary} w-full text-xs`} onClick={handleAutoFormat}>
+                一键统一全书排版
+              </button>
+              <button
+                type="button"
+                className={`${btnSecondary} w-full text-xs`}
+                disabled={forewordLoading}
+                onClick={() => void handleGenerateForewordEpilogue()}
+              >
+                {forewordLoading ? '生成中…' : 'AI 生成前言/后记'}
+              </button>
+
+              <div className="h-px bg-white/[0.06]" />
+
               <BookQuestionPicker teacherId={teacherId} selected={pickedQuestions} onChange={setPickedQuestions} />
 
               <button type="button" className={`${btnSecondary} w-full text-xs`} onClick={applyQuestionsToChapters}>
@@ -243,6 +341,23 @@ export default function TeacherBookBuilderPage() {
 
             <KnowledgeGraphView graph={knowledgeGraph ?? null} loading={graphLoading} />
 
+            {(foreword || epilogue) && (
+              <div className="mb-4 space-y-2 rounded-[8px] border border-white/[0.06] bg-[#222B3E] p-3">
+                {foreword && (
+                  <div>
+                    <p className="text-[11px] text-[#8A94A9]">前言</p>
+                    <textarea className={`${inputClass} mt-1 text-sm`} rows={3} value={foreword} onChange={(e) => setForeword(e.target.value)} />
+                  </div>
+                )}
+                {epilogue && (
+                  <div>
+                    <p className="text-[11px] text-[#8A94A9]">后记</p>
+                    <textarea className={`${inputClass} mt-1 text-sm`} rows={3} value={epilogue} onChange={(e) => setEpilogue(e.target.value)} />
+                  </div>
+                )}
+              </div>
+            )}
+
             {chapter?.sections.map((sec: BookSection) => (
               <div key={sec.id} className="mb-4">
                 <input
@@ -296,20 +411,45 @@ export default function TeacherBookBuilderPage() {
               </button>
               <button
                 type="button"
+                className={`rounded px-3 py-1.5 text-xs ${exportMode === 'print' ? 'bg-[#2584FF] text-white' : 'bg-slate-700 text-slate-300'}`}
+                onClick={() => setExportMode('print')}
+              >
+                可打印版
+              </button>
+              <button
+                type="button"
+                className={`rounded px-3 py-1.5 text-xs ${exportMode === 'digital' ? 'bg-[#2584FF] text-white' : 'bg-slate-700 text-slate-300'}`}
+                onClick={() => setExportMode('digital')}
+              >
+                电子阅读版
+              </button>
+              <button
+                type="button"
                 className={btnSecondary}
-                onClick={() => exportHtmlAsWord(bookToExportHtml(bookRecord()), title)}
+                onClick={() =>
+                  exportHtmlAsWord(bookToExportHtml(bookRecord(), { mode: exportMode }), title, {
+                    mode: exportMode,
+                    title,
+                  })
+                }
               >
                 导出 Word
               </button>
               <button
                 type="button"
                 className={btnSecondary}
-                onClick={() => previewRef.current && exportToPdf(previewRef.current, `${title}.pdf`)}
+                onClick={() =>
+                  previewRef.current &&
+                  exportToPdf(previewRef.current, `${title}.pdf`, {
+                    mode: exportMode,
+                    bookmarks: bookBookmarkOutline(bookRecord()),
+                  })
+                }
               >
                 导出 PDF
               </button>
             </div>
-            <p className="mt-2 text-[11px] text-[#8A94A9]">导出含统一章节标题、页码与封面样式</p>
+            <p className="mt-2 text-[11px] text-[#8A94A9]">5 种排版模板 · PDF 章节书签 · Word 保留分栏样式</p>
           </div>
         </section>
 
@@ -334,7 +474,7 @@ export default function TeacherBookBuilderPage() {
             <div
               ref={previewRef}
               className="mt-2 max-h-[calc(100vh-12rem)] overflow-y-auto rounded-[8px] bg-white p-4 text-sm text-black"
-              dangerouslySetInnerHTML={{ __html: bookToExportHtml(bookRecord()) }}
+              dangerouslySetInnerHTML={{ __html: bookToExportHtml(bookRecord(), { mode: exportMode }) }}
             />
           )}
         </aside>

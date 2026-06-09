@@ -45,6 +45,31 @@ ${JSON.stringify(summary)}`
   return { nodes, edges }
 }
 
+export async function generateForewordEpilogue(book = {}) {
+  const outline = (book.chapters ?? [])
+    .map((ch) => {
+      const secs = (ch.sections ?? []).map((s) => s.title).join('、')
+      return `${ch.title}${secs ? `（${secs}）` : ''}`
+    })
+    .join('\n')
+
+  const prompt = `为一本 K12 辅导书撰写前言与后记。
+
+书名：${book.title || '辅导书'}
+年级：${book.grade || ''} · 层次：${book.level || '基础'}
+章节大纲：
+${outline || '（待补充）'}
+
+返回 JSON：{ "foreword": "前言正文200-400字", "epilogue": "后记正文150-300字" }`
+
+  const raw = await callDeepSeekAI('只输出 JSON，不要 markdown', prompt)
+  const parsed = repairJSON(raw)
+  return {
+    foreword: String(parsed.foreword ?? ''),
+    epilogue: String(parsed.epilogue ?? ''),
+  }
+}
+
 export function groupQuestionsIntoChapters(questions) {
   const groups = new Map()
   for (const q of questions) {

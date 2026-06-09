@@ -20,6 +20,7 @@ import { registerAdminRoutes } from './admin/adminRoute.js'
 import { registerStudentRoutes } from './studentRoute.js'
 import { registerParentRoutes } from './parentRoute.js'
 import { registerVolunteerRoutes } from './volunteerRoute.js'
+import { registerOcrRoutes } from './ocrRoute.js'
 import { resolveChatCompletionsUrl } from './urlUtil.js'
 
 const app = express()
@@ -50,6 +51,7 @@ registerAdminRoutes(app)
 registerStudentRoutes(app)
 registerParentRoutes(app)
 registerVolunteerRoutes(app)
+registerOcrRoutes(app)
 
 app.post('/api/auth/ensure-mock-user', async (req, res) => {
   const { phone, role } = req.body ?? {}

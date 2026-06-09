@@ -90,6 +90,7 @@ export type HandoutModuleType = 'knowledge' | 'example' | 'exercise' | 'summary'
 export interface HandoutModuleStyle {
   fontSize?: number
   color?: string
+  fontFamily?: string
 }
 
 export interface HandoutModule {
@@ -99,6 +100,9 @@ export interface HandoutModule {
   content: string
   items?: string[]
   style?: HandoutModuleStyle
+  /** 例题/练习缺少答案 */
+  missingAnswer?: boolean
+  answer?: string
 }
 
 export interface HandoutCover {
@@ -108,12 +112,16 @@ export interface HandoutCover {
   date?: string
 }
 
+export type ExportMode = 'print' | 'digital'
+
 export interface HandoutContent {
   title: string
   cover?: HandoutCover
   modules: HandoutModule[]
   headerText?: string
   footerText?: string
+  exportMode?: ExportMode
+  ocrMeta?: { source?: string; importedAt?: string }
 }
 
 export interface HandoutRecord {
@@ -133,6 +141,8 @@ export interface BookBlock {
   title: string
   content: string
   questionId?: string
+  missingAnswer?: boolean
+  style?: HandoutModuleStyle
 }
 
 export interface BookSection {
@@ -148,6 +158,23 @@ export interface BookChapter {
 }
 
 export type BookCoverStyle = 'minimal' | 'academic' | 'fresh'
+
+export type BookLayoutTemplateId =
+  | 'classic'
+  | 'cornell'
+  | 'two-column'
+  | 'knowledge-example'
+  | 'workbook'
+
+export interface BookLayoutSettings {
+  fontFamily?: string
+  fontSize?: number
+  lineHeight?: number
+  marginMm?: number
+  columnGapMm?: number
+  headingColor?: string
+  bodyColor?: string
+}
 
 export interface KnowledgeGraphNode {
   id: string
@@ -174,6 +201,11 @@ export interface BookRecord {
   chapters: BookChapter[]
   coverStyle?: BookCoverStyle
   knowledgeGraph?: KnowledgeGraph | null
+  layoutTemplate?: BookLayoutTemplateId
+  layoutSettings?: BookLayoutSettings
+  foreword?: string
+  epilogue?: string
+  exportMode?: ExportMode
   created_at?: string
   updated_at?: string
 }

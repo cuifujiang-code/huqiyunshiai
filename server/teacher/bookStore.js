@@ -32,6 +32,12 @@ export async function saveBook(teacherId, payload) {
     grade: payload.grade || '',
     level: payload.level || '基础',
     chapters: payload.chapters ?? [],
+    cover_style: payload.coverStyle ?? payload.cover_style ?? 'academic',
+    knowledge_graph: payload.knowledgeGraph ?? payload.knowledge_graph ?? null,
+    layout_template: payload.layoutTemplate ?? payload.layout_template ?? 'classic',
+    layout_settings: payload.layoutSettings ?? payload.layout_settings ?? {},
+    foreword: payload.foreword ?? '',
+    epilogue: payload.epilogue ?? '',
     updated_at: nowIso(),
   }
   if (payload.id) {

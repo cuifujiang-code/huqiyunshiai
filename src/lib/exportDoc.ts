@@ -1,6 +1,45 @@
-/** 导出 Word 兼容 HTML（.doc） */
-export function exportHtmlAsWord(html: string, filename: string) {
-  const doc = `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>${html}</body></html>`
+/** 导出 Word 兼容 HTML（.doc），保留字体/颜色/分栏 */
+
+export interface WordExportOptions {
+  mode?: 'print' | 'digital'
+  title?: string
+}
+
+export function exportHtmlAsWord(html: string, filename: string, options: WordExportOptions = {}) {
+  const mode = options.mode ?? 'print'
+  const margin = mode === 'print' ? '25.4mm 31.7mm' : '19mm 25.4mm'
+
+  const doc = `<!DOCTYPE html>
+<html xmlns:o="urn:schemas-microsoft-com:office:office"
+      xmlns:w="urn:schemas-microsoft-com:office:word"
+      xmlns="http://www.w3.org/TR/REC-html40">
+<head>
+<meta charset="utf-8">
+<meta name="ProgId" content="Word.Document">
+<meta name="Generator" content="华祺云师 AI">
+<title>${options.title ?? filename}</title>
+<!--[if gte mso 9]>
+<xml>
+<w:WordDocument>
+  <w:View>Print</w:View>
+  <w:Zoom>100</w:Zoom>
+</w:WordDocument>
+</xml>
+<![endif]-->
+<style>
+@page Section1 { size: 595.3pt 841.9pt; margin: ${margin}; mso-page-orientation: portrait; }
+div.Section1 { page: Section1; }
+body { font-family: "Microsoft YaHei", SimSun, 宋体, serif; }
+p, div, span, h1, h2, h3, h4 { mso-style-parent: ""; }
+</style>
+</head>
+<body>
+<div class="Section1">
+${html}
+</div>
+</body>
+</html>`
+
   const blob = new Blob(['\ufeff', doc], { type: 'application/msword' })
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')

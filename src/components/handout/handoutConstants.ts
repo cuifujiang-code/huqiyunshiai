@@ -18,7 +18,7 @@ export function createModule(type: HandoutModuleType, title?: string): HandoutMo
     type,
     title: title ?? meta?.label ?? '模块',
     content: '',
-    style: { fontSize: 14, color: '#111827' },
+    style: { fontSize: 14, color: '#111827', fontFamily: 'Microsoft YaHei' },
   }
 }
 

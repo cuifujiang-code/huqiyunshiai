@@ -7,7 +7,7 @@ import type {
   KnowledgeGraph,
   LessonPlan,
 } from '../types/teacher'
-import { buildTeacherApiUrl, buildTeacherDecomposeApiUrl } from './apiBase'
+import { buildTeacherApiUrl, buildTeacherDecomposeApiUrl, buildTeacherRootApiUrl } from './apiBase'
 import { postApiJson } from './postApiJson'
 
 /** 教师业务 API（题库/组卷/讲义/辅导书等）→ /api/teacher/* */
@@ -365,6 +365,55 @@ export async function fetchHandouts(teacherId: string) {
   throw new Error(r.kind === 'fallback' ? r.reason : '加载讲义失败')
 }
 
+export async function fetchHandout(teacherId: string, id: string) {
+  const r = await postApiJson<{ success: boolean; handout: HandoutRecord }>(
+    `${teacherApiUrl(`handouts/${id}`)}?teacherId=${encodeURIComponent(teacherId)}`,
+    null,
+    '讲义详情',
+    { method: 'GET' },
+  )
+  if (r.kind === 'success' && r.data.success) return r.data.handout
+  throw new Error(r.kind === 'fallback' ? r.reason : '加载讲义失败')
+}
+
+export async function generateKnowledgeSummary(input: {
+  subject?: string
+  grade?: string
+  knowledgePoint?: string
+  questions?: { content?: string }[]
+}) {
+  const r = await postApiJson<{ success: boolean; summary: string }>(
+    teacherApiUrl('handouts'),
+    { action: 'knowledge-summary', ...input },
+    '知识点总结',
+    { timeoutMs: 60000 },
+  )
+  if (r.kind === 'success' && r.data.success) return r.data.summary
+  throw new Error(r.kind === 'fallback' ? r.reason : '生成知识点总结失败')
+}
+
+export async function handwritingToHandout(payload: {
+  teacherId: string
+  pageImages?: { name: string; base64: string }[]
+  workbuddyJson?: Record<string, unknown>
+  title?: string
+  subject?: string
+  grade?: string
+  mode?: string
+  saveToDb?: boolean
+  teacherName?: string
+}) {
+  const url = buildTeacherRootApiUrl('/ocr/handwriting-to-handout')
+  const r = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  const data = await r.json()
+  if (!data.success) throw new Error(data.message || '手写解析转换失败')
+  return data as { handout?: HandoutRecord; content: HandoutContent; workbuddyJson?: unknown }
+}
+
 export async function saveBook(teacherId: string, book: Partial<BookRecord>) {
   const r = await postApiJson<{ success: boolean; book: BookRecord }>(
     teacherApiUrl('books'),
@@ -384,6 +433,19 @@ export async function generateBookKnowledgeGraph(questions: Partial<BankQuestion
   )
   if (r.kind === 'success' && r.data.success) return r.data.graph
   throw new Error(r.kind === 'fallback' ? r.reason : '生成知识网络图失败')
+}
+
+export async function generateBookForewordEpilogue(book: Partial<BookRecord>) {
+  const r = await postApiJson<{ success: boolean; foreword: string; epilogue: string }>(
+    teacherApiUrl('books/foreword-epilogue'),
+    book,
+    '前言后记',
+    { timeoutMs: 90000 },
+  )
+  if (r.kind === 'success' && r.data.success) {
+    return { foreword: r.data.foreword, epilogue: r.data.epilogue }
+  }
+  throw new Error(r.kind === 'fallback' ? r.reason : '生成前言后记失败')
 }
 
 export async function fetchBooks(teacherId: string) {
