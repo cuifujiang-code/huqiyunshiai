@@ -19,6 +19,13 @@ const FEATURES = [
     cta: '查看规划',
   },
   {
+    icon: '🎓',
+    title: '高考志愿填报',
+    desc: '输入分数位次与选科，智能生成冲稳保志愿推荐方案',
+    path: '/student/volunteer',
+    cta: '开始填报',
+  },
+  {
     icon: '📷',
     title: '拍照搜题',
     desc: '拍照或上传题目，OCR 识别后智能搜题，优先匹配题库标准答案',

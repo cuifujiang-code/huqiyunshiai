@@ -1,4 +1,11 @@
-import 'dotenv/config'
+import dotenv from 'dotenv'
+import { fileURLToPath } from 'url'
+import { dirname, join } from 'path'
+
+const __dirname = dirname(fileURLToPath(import.meta.url))
+dotenv.config({ path: join(__dirname, '..', '.env.local'), override: true })
+dotenv.config()
+
 import './applyUrlShim.js'
 import express from 'express'
 import cors from 'cors'
@@ -12,6 +19,7 @@ import { registerTeacherRoutes } from './teacherRoute.js'
 import { registerAdminRoutes } from './admin/adminRoute.js'
 import { registerStudentRoutes } from './studentRoute.js'
 import { registerParentRoutes } from './parentRoute.js'
+import { registerVolunteerRoutes } from './volunteerRoute.js'
 import { resolveChatCompletionsUrl } from './urlUtil.js'
 
 const app = express()
@@ -24,6 +32,14 @@ app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', service: '华祺云师AI API' })
 })
 
+app.get('/', (_req, res) => {
+  res.json({
+    status: 'ok',
+    service: '华祺云师AI API',
+    hint: '请访问前端 http://localhost:5173 ，API 健康检查见 /api/health',
+  })
+})
+
 registerGenerateExamRoute(app)
 registerDiagnosisRoute(app)
 registerDiagnosisAsyncRoutes(app)
@@ -33,6 +49,7 @@ registerTeacherRoutes(app)
 registerAdminRoutes(app)
 registerStudentRoutes(app)
 registerParentRoutes(app)
+registerVolunteerRoutes(app)
 
 app.post('/api/auth/ensure-mock-user', async (req, res) => {
   const { phone, role } = req.body ?? {}

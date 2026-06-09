@@ -11,6 +11,7 @@ import StudentDashboard from './pages/StudentDashboard'
 import StudentDiagnosisPage from './pages/StudentDiagnosisPage'
 import StudentPlanningPage from './pages/StudentPlanningPage'
 import StudentPhotoSearchPage from './pages/StudentPhotoSearchPage'
+import VolunteerFilling from './pages/student/VolunteerFilling'
 import TeacherBookBuilderPage from './pages/TeacherBookBuilderPage'
 import TeacherDashboard from './pages/TeacherDashboard'
 import TeacherExamBuilderPage from './pages/TeacherExamBuilderPage'
@@ -189,6 +190,14 @@ export default function App() {
               element={
                 <ProtectedRoute requiredRole="student">
                   <StudentPlanningPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/student/volunteer"
+              element={
+                <ProtectedRoute requiredRole="student">
+                  <VolunteerFilling />
                 </ProtectedRoute>
               }
             />

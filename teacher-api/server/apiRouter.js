@@ -10,6 +10,7 @@ import debugTasks from '../api/debug-tasks.js'
 import ocrCorrectApi from './batch/ocrCorrectApi.js'
 import studentApiHandler from './batch/studentApi.js'
 import educationPlanningApiHandler from './batch/educationPlanningApi.js'
+import volunteerApiHandler from './batch/volunteerApi.js'
 import aiOrchestrateHandler from '../api/ai/orchestrate.js'
 import photoSearchHandler from '../api/student/photo-search.js'
 
@@ -76,6 +77,9 @@ export async function dispatchApiRequest(req, res) {
     pathname.startsWith('/api/planning/') ||
     pathname.startsWith('/api/parent/')
   ) return educationPlanningApiHandler(req, res)
+
+  // 高考志愿填报 API
+  if (pathname.startsWith('/api/volunteer/')) return volunteerApiHandler(req, res)
 
   if (pathname === '/api/ai/orchestrate') return aiOrchestrateHandler(req, res)
   if (pathname === '/api/student/photo-search') return photoSearchHandler(req, res)
