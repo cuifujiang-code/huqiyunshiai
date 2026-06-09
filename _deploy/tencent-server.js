@@ -7,14 +7,7 @@ import './server/applyUrlShim.js'
 import express from 'express'
 import dotenv from 'dotenv'
 import { createServer } from 'http'
-import { fileURLToPath } from 'url'
-import { dirname, join } from 'path'
 
-const __dirname = dirname(fileURLToPath(import.meta.url))
-const rootEnvLocal = join(__dirname, '..', '.env.local')
-
-dotenv.config({ path: rootEnvLocal, override: true })
-dotenv.config({ path: '.env.local', override: true })
 dotenv.config()
 
 const app = express()
@@ -70,21 +63,12 @@ const debugTasks = await safeImport('./api/debug-tasks.js', 'debug-tasks')
 const aiOrchestrate = await safeImport('./api/ai/orchestrate.js', 'ai/orchestrate')
 const photoSearch = await safeImport('./api/student/photo-search.js', 'student/photo-search')
 const volunteerApi = await safeImport('./server/batch/volunteerApi.js', 'volunteer')
-const catalogRouter = await safeImport('./api/catalog/[...path].js', 'catalog catch-all')
 
 // ─── 注册路由 ───
 
-// GET /api 与根路径（Nginx 健康检查、apiRoot 自检）
-const healthPayload = () => ({
-  status: 'ok',
-  service: 'teacher-api',
-  timestamp: new Date().toISOString(),
-})
+// GET /api
 app.get('/api', (req, res) => {
-  res.json(healthPayload())
-})
-app.get('/', (req, res) => {
-  res.json(healthPayload())
+  res.json({ status: 'ok', service: 'teacher-api', timestamp: new Date().toISOString() })
 })
 
 // batch/* — single handler handles all sub-routes via req.query.path
@@ -112,12 +96,6 @@ app.all('/api/decompose-status', decomposeStatus)
 app.all('/api/decompose-tasks', decomposeTasks)
 app.all('/api/decompose-process', decomposeProcess)
 app.all('/api/debug-tasks', debugTasks)
-
-// catalog
-app.use((req, res, next) => {
-  if (!req.path.startsWith('/api/catalog')) return next()
-  return catalogRouter(req, res)
-})
 
 // AI & student
 app.all('/api/ai/orchestrate', aiOrchestrate)

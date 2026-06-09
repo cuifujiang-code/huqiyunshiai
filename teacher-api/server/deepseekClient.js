@@ -315,6 +315,23 @@ export async function callDeepSeekVisionAI(systemPrompt, userPrompt, imageBase64
   )
 }
 
+export function extractJson(text) {
+  const trimmed = String(text ?? '').trim()
+  const codeBlock = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/)
+  if (codeBlock) return codeBlock[1].trim()
+
+  const arrStart = trimmed.indexOf('[')
+  const arrEnd = trimmed.lastIndexOf(']')
+  const objStart = trimmed.indexOf('{')
+  const objEnd = trimmed.lastIndexOf('}')
+
+  if (arrStart >= 0 && arrEnd > arrStart && (objStart < 0 || arrStart <= objStart)) {
+    return trimmed.slice(arrStart, arrEnd + 1)
+  }
+  if (objStart >= 0 && objEnd > objStart) return trimmed.slice(objStart, objEnd + 1)
+  return trimmed
+}
+
 export function serializeError(error) {
   if (error instanceof DeepSeekApiError) {
     return error.toJSON()

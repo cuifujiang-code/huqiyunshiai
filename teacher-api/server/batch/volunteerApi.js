@@ -7,16 +7,11 @@
  * PUT  /api/volunteer/scheme/:id   — 更新方案
  */
 
-import { createClient } from '@supabase/supabase-js'
+import { createServiceRoleClient } from '../supabaseAdmin.js'
 import { generateVolunteerRecommendations } from '../volunteerEngine.js'
 
 function getSupabase() {
-  const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || ''
-  const key =
-    process.env.SUPABASE_SERVICE_ROLE_KEY ||
-    process.env.SUPABASE_SERVICE_KEY ||
-    ''
-  return createClient(url, key, { auth: { persistSession: false } })
+  return createServiceRoleClient()
 }
 
 async function getBody(req) {

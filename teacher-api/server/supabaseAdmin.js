@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js'
+import ws from 'ws'
 
 /** 仅使用 service_role URL/key，禁止 anon key */
 export function getSupabaseUrl() {
@@ -76,6 +77,7 @@ export function createServiceRoleClient() {
   console.log('[Supabase] 创建 service_role 客户端', { url: logUrl, keyLen: String(key).length })
   return createClient(url, key, {
     auth: { autoRefreshToken: false, persistSession: false },
+    global: { WebSocket: ws },
   })
 }
 
