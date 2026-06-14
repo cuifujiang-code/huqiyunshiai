@@ -20,14 +20,15 @@
     "json5": "^2.2.3",
     "jspdf": "^4.2.1",
     "mammoth": "^1.12.0",
-    "pg": "^8.16.0",
     "pdf-parse": "1.1.1",
+    "pg": "^8.16.0",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
     "react-router-dom": "^7.15.1",
     "sharp": "^0.34.5",
     "tesseract.js": "^7.0.0",
-    "ws": "^8.18.3"
+    "ws": "^8.18.3",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

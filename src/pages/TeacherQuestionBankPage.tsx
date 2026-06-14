@@ -6,6 +6,7 @@ import LatexFormulaEditor from '../components/common/LatexFormulaEditor'
 import GeometryBoard from '../components/common/GeometryBoard'
 import { useAuth } from '../context/AuthContext'
 import { prepareExamFileForDecompose } from '../lib/examUploadPrepare'
+import QuestionImportModal from '../components/QuestionImportModal'
 import {
   batchImportQuestions,
   batchUpdateTags,
@@ -15,6 +16,7 @@ import {
   fetchQuestions,
   fetchQuestionStats,
   fetchTopics,
+  importQuestionsFromExcel,
   submitDecomposeTask,
   updateQuestion,
 } from '../lib/teacherApi'
@@ -1170,6 +1172,8 @@ export default function TeacherQuestionBankPage() {
   // Decompose / Import
   const [splitPreview, setSplitPreview] = useState<Partial<BankQuestion>[] | null>(null)
   const [importing, setImporting] = useState(false)
+  const [excelImportOpen, setExcelImportOpen] = useState(false)
+  const [excelImporting, setExcelImporting] = useState(false)
 
   // Exam basket
   const [examBasket, setExamBasket] = useState<string[]>([])
@@ -1470,6 +1474,21 @@ export default function TeacherQuestionBankPage() {
     }
   }
 
+  const handleExcelImport = async (file: File) => {
+    if (!teacherId) throw new Error('请先登录')
+    setExcelImporting(true)
+    try {
+      const result = await importQuestionsFromExcel(teacherId, file)
+      if (result.successCount > 0) {
+        load()
+        setMessage(`Excel 导入完成：成功 ${result.successCount} 条${result.failureCount ? `，失败 ${result.failureCount} 条` : ''}`)
+      }
+      return result
+    } finally {
+      setExcelImporting(false)
+    }
+  }
+
   /* ---- Toggle question selection ---- */
   const toggleSelect = useCallback((id: string) => {
     setSelected((prev) =>
@@ -1602,6 +1621,9 @@ export default function TeacherQuestionBankPage() {
               <div className="flex items-center gap-2">
                 <button type="button" className={btnPrimary} style={{ fontSize: 12, padding: '6px 12px' }} onClick={() => setEditing(emptyQuestion())}>
                   单题录入
+                </button>
+                <button type="button" className={btnSecondary} style={{ fontSize: 12, padding: '6px 12px' }} onClick={() => setExcelImportOpen(true)}>
+                  批量导入
                 </button>
                 <label className={`${btnSecondary} cursor-pointer ${importing ? 'opacity-50 pointer-events-none' : ''}`} style={{ fontSize: 12, padding: '6px 12px' }}>
                   {importing ? '提交中…' : '上传拆题'}
@@ -1799,6 +1821,13 @@ export default function TeacherQuestionBankPage() {
           </div>
         </div>
       )}
+
+      <QuestionImportModal
+        open={excelImportOpen}
+        onClose={() => setExcelImportOpen(false)}
+        onImport={handleExcelImport}
+        loading={excelImporting}
+      />
     </div>
   )
 }

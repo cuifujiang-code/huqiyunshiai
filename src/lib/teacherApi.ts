@@ -8,6 +8,7 @@ import type {
   LessonPlan,
 } from '../types/teacher'
 import { buildTeacherApiUrl, buildTeacherDecomposeApiUrl, buildTeacherRootApiUrl } from './apiBase'
+import { fileToBase64 } from './fileBase64'
 import { postApiJson } from './postApiJson'
 
 /** 教师业务 API（题库/组卷/讲义/辅导书等）→ /api/teacher/* */
@@ -143,6 +144,30 @@ export async function batchImportQuestions(teacherId: string, questions: Partial
   )
   if (r.kind === 'success' && r.data.success) return r.data.questions
   throw new Error(r.kind === 'fallback' ? r.reason : '入库失败')
+}
+
+export interface QuestionImportResult {
+  successCount: number
+  failureCount: number
+  errors: { row: number; message: string }[]
+}
+
+export async function importQuestionsFromExcel(teacherId: string, file: File): Promise<QuestionImportResult> {
+  const fileBase64 = await fileToBase64(file)
+  const r = await postApiJson<{ success: boolean } & QuestionImportResult>(
+    teacherApiUrl('questions/import'),
+    { teacherId, fileBase64, fileName: file.name },
+    'Excel 批量导入',
+    { timeoutMs: 120000 },
+  )
+  if (r.kind === 'success' && r.data.success) {
+    return {
+      successCount: r.data.successCount,
+      failureCount: r.data.failureCount,
+      errors: r.data.errors ?? [],
+    }
+  }
+  throw new Error(r.kind === 'fallback' ? r.reason : 'Excel 导入失败')
 }
 
 export interface DecomposeSubmitResponse {
@@ -403,15 +428,65 @@ export async function handwritingToHandout(payload: {
   saveToDb?: boolean
   teacherName?: string
 }) {
-  const url = buildTeacherRootApiUrl('/ocr/handwriting-to-handout')
-  const r = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  })
-  const data = await r.json()
-  if (!data.success) throw new Error(data.message || '手写解析转换失败')
-  return data as { handout?: HandoutRecord; content: HandoutContent; workbuddyJson?: unknown }
+  const r = await postApiJson<{
+    success: boolean
+    message?: string
+    handout?: HandoutRecord
+    content: HandoutContent
+    workbuddyJson?: unknown
+  }>(
+    buildTeacherRootApiUrl('/ocr/handwriting-to-handout'),
+    payload,
+    '手写讲义 OCR',
+    { timeoutMs: 600_000 },
+  )
+  if (r.kind === 'success' && r.data.success) {
+    return r.data as { handout?: HandoutRecord; content: HandoutContent; workbuddyJson?: unknown }
+  }
+  throw new Error(
+    r.kind === 'fallback'
+      ? `${r.reason}（请确认后端 node server/index.js 已启动在 3001 端口）`
+      : r.data?.message || '手写解析转换失败',
+  )
+}
+
+export async function handwritingToBook(payload: {
+  teacherId: string
+  pageImages?: { name: string; base64: string; mimeType?: string }[]
+  bookJson?: Record<string, unknown>
+  workbuddyJson?: Record<string, unknown>
+  title?: string
+  subject?: string
+  grade?: string
+  level?: string
+  saveToDb?: boolean
+}) {
+  const r = await postApiJson<{
+    success: boolean
+    message?: string
+    error?: string
+    book?: BookRecord
+    title: string
+    grade: string
+    level: string
+    chapters: BookRecord['chapters']
+    foreword?: string
+    epilogue?: string
+    ocrText?: string
+  }>(
+    buildTeacherRootApiUrl('/ocr/handwriting-to-book'),
+    payload,
+    '辅导书 OCR',
+    { timeoutMs: 600_000 },
+  )
+  if (r.kind === 'success' && r.data.success) {
+    return r.data
+  }
+  throw new Error(
+    r.kind === 'fallback'
+      ? `${r.reason}（请确认后端 node server/index.js 已启动在 3001 端口）`
+      : r.data?.message || r.data?.error || '辅导书 OCR 失败',
+  )
 }
 
 export async function saveBook(teacherId: string, book: Partial<BookRecord>) {
@@ -421,7 +496,12 @@ export async function saveBook(teacherId: string, book: Partial<BookRecord>) {
     '保存辅导书',
   )
   if (r.kind === 'success' && r.data.success) return r.data.book
-  throw new Error(r.kind === 'fallback' ? r.reason : '保存失败')
+  const apiMsg = r.kind === 'success' ? (r.data as { message?: string }).message : undefined
+  throw new Error(
+    r.kind === 'fallback'
+      ? `${r.reason}（请确认后端 node server/index.js 已启动在 3001 端口）`
+      : apiMsg || '保存失败',
+  )
 }
 
 export async function generateBookKnowledgeGraph(questions: Partial<BankQuestion>[]) {
@@ -432,7 +512,11 @@ export async function generateBookKnowledgeGraph(questions: Partial<BankQuestion
     { timeoutMs: 90000 },
   )
   if (r.kind === 'success' && r.data.success) return r.data.graph
-  throw new Error(r.kind === 'fallback' ? r.reason : '生成知识网络图失败')
+  throw new Error(
+    r.kind === 'fallback'
+      ? `${r.reason}（请确认后端 node server/index.js 已启动在 3001 端口）`
+      : '生成知识网络图失败',
+  )
 }
 
 export async function generateBookForewordEpilogue(book: Partial<BookRecord>) {
@@ -445,7 +529,26 @@ export async function generateBookForewordEpilogue(book: Partial<BookRecord>) {
   if (r.kind === 'success' && r.data.success) {
     return { foreword: r.data.foreword, epilogue: r.data.epilogue }
   }
-  throw new Error(r.kind === 'fallback' ? r.reason : '生成前言后记失败')
+  throw new Error(
+    r.kind === 'fallback'
+      ? `${r.reason}（请确认后端 node server/index.js 已启动在 3001 端口）`
+      : '生成前言后记失败',
+  )
+}
+
+export async function formatBookLayout(book: Partial<BookRecord> & { subject?: string }) {
+  const r = await postApiJson<{ success: boolean; chapters: BookRecord['chapters'] }>(
+    teacherApiUrl('books/format-layout'),
+    book,
+    'AI 排版校准',
+    { timeoutMs: 180000 },
+  )
+  if (r.kind === 'success' && r.data.success) return r.data.chapters
+  throw new Error(
+    r.kind === 'fallback'
+      ? `${r.reason}（请确认后端 node server/index.js 已启动在 3001 端口）`
+      : 'AI 排版校准失败',
+  )
 }
 
 export async function fetchBooks(teacherId: string) {

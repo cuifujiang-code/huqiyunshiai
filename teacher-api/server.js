@@ -61,6 +61,7 @@ const batchRouter = await safeImport('./api/batch/[...path].js', 'batch catch-al
 const batchHealth = await safeImport('./api/batch/health.js', 'batch/health')
 const teacherCatchAll = await safeImport('./api/teacher/[...path].js', 'teacher catch-all')
 const teacherQuestionsList = await safeImport('./api/teacher/questions.js', 'teacher/questions')
+const teacherQuestionsImport = await safeImport('./api/teacher/questions/import.js', 'teacher/questions/import')
 const teacherQuestionsById = await safeImport('./api/teacher/questions/[id].js', 'teacher/questions/[id]')
 const decomposeSubmit = await safeImport('./api/decompose-submit.js', 'decompose-submit')
 const decomposeStatus = await safeImport('./api/decompose-status.js', 'decompose-status')
@@ -71,6 +72,7 @@ const aiOrchestrate = await safeImport('./api/ai/orchestrate.js', 'ai/orchestrat
 const photoSearch = await safeImport('./api/student/photo-search.js', 'student/photo-search')
 const volunteerApi = await safeImport('./server/batch/volunteerApi.js', 'volunteer')
 const handwritingHandout = await safeImport('./api/ocr/handwriting-to-handout.js', 'ocr/handwriting-to-handout')
+const handwritingBook = await safeImport('./api/ocr/handwriting-to-book.js', 'ocr/handwriting-to-book')
 const handoutOcrProcess = await safeImport('./api/handouts/ocr-process.js', 'handouts/ocr-process')
 const catalogRouter = await safeImport('./api/catalog/[...path].js', 'catalog catch-all')
 
@@ -99,6 +101,7 @@ app.all('/api/batch/auto-retry', batchRouter)
 app.all('/api/batch/debug', batchRouter)
 
 // teacher（显式 questions，其余走 catch-all handler，不用 Express 通配符）
+app.all('/api/teacher/questions/import', teacherQuestionsImport)
 app.all('/api/teacher/questions/:id', teacherQuestionsById)
 app.all('/api/teacher/questions', teacherQuestionsList)
 app.use((req, res, next) => {
@@ -131,6 +134,7 @@ app.all('/api/volunteer/schemes', volunteerApi)
 app.all('/api/volunteer/scheme/:id', volunteerApi)
 
 app.all('/api/ocr/handwriting-to-handout', handwritingHandout)
+app.all('/api/ocr/handwriting-to-book', handwritingBook)
 
 app.all('/api/handouts/ocr-process', handoutOcrProcess)
 

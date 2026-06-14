@@ -1,11 +1,13 @@
 import { isSupabaseAdminConfigured } from './supabaseAdmin.js'
 import * as questionBank from './teacher/questionBankStore.js'
+import { importQuestionsFromExcel } from './teacher/questionExcelImport.js'
 import { splitExamToQuestions } from './teacher/questionImportService.js'
 import { buildSmartExam } from './teacher/examBuilderService.js'
 import * as lessonPlan from './teacher/lessonPlanStore.js'
 import * as handout from './teacher/handoutStore.js'
 import * as book from './teacher/bookStore.js'
 import * as bookAi from './teacher/bookAi.js'
+import { formatBookLayoutWithAi } from './teacher/bookFormatAi.js'
 import { callDeepSeekAI, extractJson } from './deepseekClient.js'
 
 function requireTeacher(body, query) {
@@ -72,6 +74,17 @@ export async function handleTeacherApi(req, res, pathSegments = []) {
       const teacherId = requireTeacher(body, query)
       const data = await questionBank.createQuestionsBatch(teacherId, body.questions ?? [])
       return res.status(200).json({ success: true, questions: data })
+    }
+
+    if (path === 'questions/import' && method === 'POST') {
+      const teacherId = requireTeacher(body, query)
+      const { fileBase64, fileName } = body
+      if (!fileBase64) {
+        return res.status(400).json({ success: false, message: '请上传 Excel 文件' })
+      }
+      const buffer = Buffer.from(fileBase64, 'base64')
+      const result = await importQuestionsFromExcel(teacherId, buffer)
+      return res.status(200).json({ success: true, ...result })
     }
 
     if (path === 'questions-import/split' && method === 'POST') {
@@ -157,7 +170,6 @@ export async function handleTeacherApi(req, res, pathSegments = []) {
     }
 
     if (path === 'handouts' && method === 'POST') {
-      const teacherId = requireTeacher(body, query)
       if (body.action === 'generate') {
         const draft = await handout.generateHandoutDraft(body.mode, body)
         return res.status(200).json({ success: true, draft })
@@ -166,6 +178,7 @@ export async function handleTeacherApi(req, res, pathSegments = []) {
         const summary = await handout.generateKnowledgeSummary(body)
         return res.status(200).json({ success: true, summary })
       }
+      const teacherId = requireTeacher(body, query)
       const data = await handout.saveHandout(teacherId, body)
       return res.status(200).json({ success: true, handout: data })
     }
@@ -198,6 +211,18 @@ export async function handleTeacherApi(req, res, pathSegments = []) {
       requireTeacher(body, query)
       const { foreword, epilogue } = await bookAi.generateForewordEpilogue(body)
       return res.status(200).json({ success: true, foreword, epilogue })
+    }
+
+    if (path === 'books/format-layout' && method === 'POST') {
+      requireTeacher(body, query)
+      const chapters = await formatBookLayoutWithAi({
+        chapters: body.chapters ?? [],
+        subject: body.subject,
+        title: body.title,
+        grade: body.grade,
+        level: body.level,
+      })
+      return res.status(200).json({ success: true, chapters })
     }
 
     if (path === 'books' && method === 'POST') {
