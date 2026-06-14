@@ -62,6 +62,8 @@ const batchHealth = await safeImport('./api/batch/health.js', 'batch/health')
 const teacherCatchAll = await safeImport('./api/teacher/[...path].js', 'teacher catch-all')
 const teacherQuestionsList = await safeImport('./api/teacher/questions.js', 'teacher/questions')
 const teacherQuestionsImport = await safeImport('./api/teacher/questions/import.js', 'teacher/questions/import')
+const teacherQuestionVersions = await safeImport('./api/teacher/questions/[id]/versions.js', 'teacher/questions/[id]/versions')
+const teacherQuestionVersionRestore = await safeImport('./api/teacher/questions/[id]/versions/restore.js', 'teacher/questions/[id]/versions/restore')
 const teacherQuestionsById = await safeImport('./api/teacher/questions/[id].js', 'teacher/questions/[id]')
 const decomposeSubmit = await safeImport('./api/decompose-submit.js', 'decompose-submit')
 const decomposeStatus = await safeImport('./api/decompose-status.js', 'decompose-status')
@@ -102,6 +104,8 @@ app.all('/api/batch/debug', batchRouter)
 
 // teacher（显式 questions，其余走 catch-all handler，不用 Express 通配符）
 app.all('/api/teacher/questions/import', teacherQuestionsImport)
+app.all('/api/teacher/questions/:id/versions/restore', teacherQuestionVersionRestore)
+app.all('/api/teacher/questions/:id/versions', teacherQuestionVersions)
 app.all('/api/teacher/questions/:id', teacherQuestionsById)
 app.all('/api/teacher/questions', teacherQuestionsList)
 app.use((req, res, next) => {

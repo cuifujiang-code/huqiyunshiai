@@ -1,8 +1,10 @@
 import { getSupabaseAdmin, isSupabaseAdminConfigured } from '../supabaseAdmin.js'
+import { normalizeQuestionPayload } from '../knowledge/knowledgePointIds.js'
+import { archiveQuestionVersion, listQuestionVersions, restoreQuestionVersion } from './questionVersionStore.js'
 
 const TABLE = 'teacher_question_bank'
 
-export { isSupabaseAdminConfigured }
+export { isSupabaseAdminConfigured, listQuestionVersions, restoreQuestionVersion }
 
 function nowIso() {
   return new Date().toISOString()
@@ -65,7 +67,9 @@ export async function createQuestion(teacherId, payload) {
 }
 
 export async function createQuestionsBatch(teacherId, questions) {
-  const rows = questions.map((q) => ({
+  const { sanitizeQuestionsForStorage } = await import('../batch/questionContentSanitizer.js')
+  const cleaned = await sanitizeQuestionsForStorage(questions)
+  const rows = cleaned.map((q) => ({
     teacher_id: teacherId,
     subject: q.subject,
     grade: q.grade,
@@ -88,15 +92,54 @@ export async function createQuestionsBatch(teacherId, questions) {
 
 export async function updateQuestion(teacherId, id, payload) {
   const admin = getSupabaseAdmin()
+  const { data: existing, error: fetchErr } = await admin
+    .from(TABLE)
+    .select('content, answer, analysis')
+    .eq('id', id)
+    .eq('teacher_id', teacherId)
+    .maybeSingle()
+  if (fetchErr) throw new Error(fetchErr.message)
+  if (!existing) throw new Error('题目不存在或无权访问')
+
+  await archiveQuestionVersion(admin, id, teacherId, existing)
+
+  const normalized = normalizeQuestionPayload(payload)
+  const row = {
+    subject: normalized.subject,
+    grade: normalized.grade,
+    knowledge_point: normalized.knowledge_point || '',
+    knowledge_point_ids: normalized.knowledge_point_ids ?? [],
+    question_type: normalized.question_type,
+    difficulty: normalized.difficulty || '中等',
+    content: normalized.content,
+    options: normalized.options ?? [],
+    answer: normalized.answer || '',
+    analysis: normalized.analysis || '',
+    source: normalized.source || '手动录入',
+    ability_dimension: normalized.ability_dimension || '',
+    suitable_stage: normalized.suitable_stage || '',
+    estimated_time: normalized.estimated_time,
+    tags: normalized.tags ?? [],
+    visibility: normalized.visibility,
+    updated_at: nowIso(),
+  }
   const { data, error } = await admin
     .from(TABLE)
-    .update({ ...payload, updated_at: nowIso() })
+    .update(row)
     .eq('id', id)
     .eq('teacher_id', teacherId)
     .select('*')
     .single()
   if (error) throw new Error(error.message)
   return data
+}
+
+export async function fetchQuestionVersions(teacherId, questionId) {
+  return listQuestionVersions(getSupabaseAdmin(), teacherId, questionId)
+}
+
+export async function restoreQuestionToVersion(teacherId, questionId, versionId) {
+  return restoreQuestionVersion(getSupabaseAdmin(), teacherId, questionId, versionId)
 }
 
 export async function deleteQuestions(teacherId, ids) {

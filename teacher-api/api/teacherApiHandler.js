@@ -59,6 +59,27 @@ export async function handleTeacherApi(req, res, pathSegments = []) {
       return res.status(200).json({ success: true, question: data })
     }
 
+    const questionPathParts = path.split('/')
+    if (questionPathParts[0] === 'questions' && questionPathParts.length >= 3) {
+      const qid = questionPathParts[1]
+      const subPath = questionPathParts.slice(2).join('/')
+
+      if (subPath === 'versions' && method === 'GET') {
+        const teacherId = query.teacherId
+        if (!teacherId) return res.status(400).json({ success: false, message: '缺少 teacherId' })
+        const versions = await questionBank.fetchQuestionVersions(teacherId, qid)
+        return res.status(200).json({ success: true, versions })
+      }
+
+      if (subPath === 'versions/restore' && method === 'POST') {
+        const teacherId = requireTeacher(body, query)
+        const versionId = body.versionId?.trim()
+        if (!versionId) return res.status(400).json({ success: false, message: '缺少 versionId' })
+        const question = await questionBank.restoreQuestionToVersion(teacherId, qid, versionId)
+        return res.status(200).json({ success: true, question })
+      }
+    }
+
     if (path.startsWith('questions/') && method === 'PUT') {
       const id = path.split('/')[1]
       const teacherId = requireTeacher(body, query)

@@ -6,6 +6,7 @@ import FormulaEditButton from './common/FormulaEditButton'
 import QuestionRichTextEditor, {
   type QuestionRichTextEditorHandle,
 } from './QuestionRichTextEditor'
+import QuestionVersionPanel from './QuestionVersionPanel'
 import { fileToBase64 } from '../lib/fileBase64'
 import { ocrCorrectQuestion, uploadQuestionImage } from '../lib/teacherApi'
 import type { BankQuestion } from '../types/teacher'
@@ -25,6 +26,16 @@ import { compressForScene } from '../utils/imageCompress'
 const OPTION_LABELS = ['A', 'B', 'C', 'D', 'E', 'F']
 
 type EditField = 'content' | 'answer' | 'analysis' | `option-${number}`
+
+function KatexPreview({ text, label }: { text: string; label: string }) {
+  if (!text.trim()) return null
+  return (
+    <div className="mt-2 rounded-lg border border-cyan-500/20 bg-cyan-500/5 px-3 py-2">
+      <div className="mb-1 text-[10px] font-medium uppercase tracking-wide text-cyan-400/80">{label}</div>
+      <MathRenderer text={text} className="text-sm leading-relaxed text-slate-200" />
+    </div>
+  )
+}
 
 export interface QuestionEditModalProps {
   question: BankQuestion
@@ -50,6 +61,7 @@ export default function QuestionEditModal({
   const [error, setError] = useState<string | null>(null)
   const [latexOpen, setLatexOpen] = useState(false)
   const [geoBoardOpen, setGeoBoardOpen] = useState(false)
+  const [versionPanelOpen, setVersionPanelOpen] = useState(false)
   const [activeField, setActiveField] = useState<EditField>('content')
 
   const contentEditorRef = useRef<QuestionRichTextEditorHandle>(null)
@@ -62,11 +74,11 @@ export default function QuestionEditModal({
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !latexOpen && !geoBoardOpen) onCancel()
+      if (e.key === 'Escape' && !latexOpen && !geoBoardOpen && !versionPanelOpen) onCancel()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [latexOpen, geoBoardOpen, onCancel])
+  }, [latexOpen, geoBoardOpen, versionPanelOpen, onCancel])
 
   const getEditorRef = useCallback((field: EditField) => {
     if (field === 'content') return contentEditorRef
@@ -137,10 +149,7 @@ export default function QuestionEditModal({
   }
 
   const handlePasteImage = useCallback(
-    async (file: File) => {
-      const url = await uploadImageFile(file)
-      return url
-    },
+    async (file: File) => uploadImageFile(file),
     [uploadImageFile],
   )
 
@@ -171,22 +180,36 @@ export default function QuestionEditModal({
     }
   }
 
+  const buildPayload = useCallback((): BankQuestion => ({
+    ...draft,
+    analysis: sanitizeAnalysisText(draft.analysis),
+    knowledge_point: draft.knowledge_point
+      || knowledgeIdsToLegacyString(draft.knowledge_point_ids ?? []),
+    knowledge_point_ids: draft.knowledge_point_ids ?? [],
+    source: draft.source || '手动录入',
+    ability_dimension: draft.ability_dimension ?? '',
+    suitable_stage: draft.suitable_stage ?? '',
+    estimated_time: draft.estimated_time ?? undefined,
+  }), [draft])
+
   const handleSave = async () => {
     setSaving(true)
     setError(null)
     try {
-      const payload: BankQuestion = {
-        ...draft,
-        analysis: sanitizeAnalysisText(draft.analysis),
-        knowledge_point: draft.knowledge_point
-          || knowledgeIdsToLegacyString(draft.knowledge_point_ids ?? []),
-        knowledge_point_ids: draft.knowledge_point_ids ?? [],
-      }
-      await onSave(payload)
+      await onSave(buildPayload())
     } catch (e) {
       setError(e instanceof Error ? e.message : '保存失败')
       setSaving(false)
     }
+  }
+
+  const handleVersionRestored = (restored: BankQuestion) => {
+    setDraft({
+      ...restored,
+      options: [...(restored.options ?? [])],
+      tags: [...(restored.tags ?? [])],
+    })
+    setError(null)
   }
 
   const addOption = () => {
@@ -205,11 +228,19 @@ export default function QuestionEditModal({
   return (
     <>
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-3">
-        <div className="flex h-[92vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl">
-          {/* 头部 */}
+        <div className="flex h-[92vh] w-full max-w-7xl flex-col overflow-hidden rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl">
           <div className="flex shrink-0 items-center justify-between border-b border-slate-700 px-5 py-3">
             <h3 className="text-lg font-semibold text-white">编辑题目</h3>
             <div className="flex items-center gap-2">
+              {draft.id && (
+                <button
+                  type="button"
+                  className={btnSecondary}
+                  onClick={() => setVersionPanelOpen(true)}
+                >
+                  历史版本
+                </button>
+              )}
               <button
                 type="button"
                 className={btnSecondary}
@@ -230,12 +261,9 @@ export default function QuestionEditModal({
             </p>
           )}
 
-          {/* 左右分栏 */}
           <div className="flex min-h-0 flex-1">
-            {/* 左侧编辑区 */}
             <div className="flex w-1/2 flex-col border-r border-slate-700">
               <div className="flex-1 overflow-y-auto p-4 space-y-4">
-                {/* 题目属性 */}
                 <div className="grid grid-cols-3 gap-2">
                   <div>
                     <label className={fieldLabel()}>题型</label>
@@ -268,7 +296,6 @@ export default function QuestionEditModal({
                   onChange={(patch) => setDraft((d) => ({ ...d, ...patch }))}
                 />
 
-                {/* 工具栏 */}
                 <div className="flex flex-wrap items-center gap-2">
                   <button
                     type="button"
@@ -306,7 +333,6 @@ export default function QuestionEditModal({
                   <span className="text-xs text-slate-500">支持 Ctrl+V 粘贴图片与 MathType 公式</span>
                 </div>
 
-                {/* 题干 */}
                 <div>
                   <label className={fieldLabel()}>题干</label>
                   <QuestionRichTextEditor
@@ -318,9 +344,9 @@ export default function QuestionEditModal({
                     placeholder="支持 LaTeX：$行内$ 或 $$独立公式$$；可粘贴 MathType 公式与图片"
                     minRows={5}
                   />
+                  <KatexPreview text={draft.content} label="题干 · 公式预览" />
                 </div>
 
-                {/* 选项 */}
                 {(isChoice || (draft.options?.length ?? 0) > 0) && (
                   <div>
                     <div className="mb-2 flex items-center justify-between">
@@ -365,7 +391,6 @@ export default function QuestionEditModal({
                   </button>
                 )}
 
-                {/* 答案 */}
                 <div>
                   <label className={fieldLabel()}>答案</label>
                   <QuestionRichTextEditor
@@ -379,7 +404,6 @@ export default function QuestionEditModal({
                   />
                 </div>
 
-                {/* 解析 — Markdown/LaTeX 纯文本，不支持图片 */}
                 <div>
                   <label className={fieldLabel()}>解析（Markdown/LaTeX，块级 $$...$$）</label>
                   <QuestionRichTextEditor
@@ -390,10 +414,10 @@ export default function QuestionEditModal({
                     placeholder="题目解析（仅文本与 LaTeX）"
                     minRows={4}
                   />
+                  <KatexPreview text={draft.analysis} label="解析 · 公式预览" />
                 </div>
               </div>
 
-              {/* 底部按钮 */}
               <div className="flex shrink-0 justify-end gap-2 border-t border-slate-700 p-4">
                 <button type="button" className={btnSecondary} onClick={onCancel} disabled={saving}>
                   取消
@@ -404,7 +428,6 @@ export default function QuestionEditModal({
               </div>
             </div>
 
-            {/* 右侧预览区 */}
             <div className="flex w-1/2 flex-col bg-slate-950/50">
               <div className="border-b border-slate-700 px-4 py-2 text-sm font-medium text-slate-300">
                 实时预览
@@ -417,12 +440,42 @@ export default function QuestionEditModal({
                   <span className="rounded border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-amber-300">
                     {draft.difficulty}
                   </span>
+                  {draft.subject && (
+                    <span className="rounded border border-slate-600 bg-slate-800 px-2 py-0.5 text-slate-400">
+                      {draft.subject} · {draft.grade}
+                    </span>
+                  )}
                   {draft.knowledge_point && (
                     <span className="rounded border border-slate-600 bg-slate-800 px-2 py-0.5 text-slate-400">
                       {draft.knowledge_point}
                     </span>
                   )}
                 </div>
+
+                {(draft.source || draft.ability_dimension || draft.suitable_stage || draft.estimated_time) && (
+                  <div className="mb-4 grid grid-cols-2 gap-2 text-xs text-slate-400">
+                    {draft.source && (
+                      <div className="rounded border border-slate-700 bg-slate-800/40 px-2 py-1.5">
+                        <span className="text-slate-500">题源：</span>{draft.source}
+                      </div>
+                    )}
+                    {draft.ability_dimension && (
+                      <div className="rounded border border-slate-700 bg-slate-800/40 px-2 py-1.5">
+                        <span className="text-slate-500">能力维度：</span>{draft.ability_dimension}
+                      </div>
+                    )}
+                    {draft.suitable_stage && (
+                      <div className="rounded border border-slate-700 bg-slate-800/40 px-2 py-1.5">
+                        <span className="text-slate-500">适用阶段：</span>{draft.suitable_stage}
+                      </div>
+                    )}
+                    {draft.estimated_time != null && draft.estimated_time > 0 && (
+                      <div className="rounded border border-slate-700 bg-slate-800/40 px-2 py-1.5">
+                        <span className="text-slate-500">预估时间：</span>{draft.estimated_time} 秒
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 <div className="mb-4 text-sm leading-relaxed text-slate-200">
                   <MathRenderer text={draft.content || '（题干为空）'} />
@@ -461,6 +514,16 @@ export default function QuestionEditModal({
           </div>
         </div>
       </div>
+
+      {draft.id && (
+        <QuestionVersionPanel
+          open={versionPanelOpen}
+          questionId={draft.id}
+          teacherId={teacherId}
+          onClose={() => setVersionPanelOpen(false)}
+          onRestored={handleVersionRestored}
+        />
+      )}
 
       <LatexPanel
         isOpen={latexOpen}

@@ -56,6 +56,17 @@ export type QuestionType = (typeof ALL_QUESTION_TYPES)[number]
 export type QuestionDifficulty = (typeof DIFFICULTIES)[number]
 export type QuestionSource = (typeof QUESTION_SOURCES)[number]
 
+export interface QuestionVersion {
+  id: string
+  question_id: string
+  version_number: number
+  content: string
+  answer: string
+  analysis: string
+  editor_id: string
+  created_at: string
+}
+
 export interface BankQuestion {
   id?: string
   teacher_id?: string

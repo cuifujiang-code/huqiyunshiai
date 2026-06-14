@@ -6,6 +6,7 @@ import type {
   HandoutRecord,
   KnowledgeGraph,
   LessonPlan,
+  QuestionVersion,
 } from '../types/teacher'
 import { buildTeacherApiUrl, buildTeacherDecomposeApiUrl, buildTeacherRootApiUrl } from './apiBase'
 import { fileToBase64 } from './fileBase64'
@@ -65,6 +66,29 @@ export async function updateQuestion(teacherId: string, id: string, question: Pa
   )
   if (r.kind === 'success' && r.data.success) return r.data.question
   throw new Error(r.kind === 'fallback' ? r.reason : '更新失败')
+}
+
+export async function fetchQuestionVersions(teacherId: string, questionId: string) {
+  const params = new URLSearchParams({ teacherId })
+  const r = await postApiJson<{ success: boolean; versions: QuestionVersion[] }>(
+    `${teacherApiUrl(`questions/${questionId}/versions`)}?${params}`,
+    null,
+    '题目版本列表',
+    { method: 'GET' },
+  )
+  if (r.kind === 'success' && r.data.success) return r.data.versions ?? []
+  throw new Error(r.kind === 'fallback' ? r.reason : '加载版本历史失败')
+}
+
+export async function restoreQuestionVersion(teacherId: string, questionId: string, versionId: string) {
+  const r = await postApiJson<{ success: boolean; question: BankQuestion }>(
+    teacherApiUrl(`questions/${questionId}/versions/restore`),
+    { teacherId, versionId },
+    '恢复题目版本',
+    { method: 'POST' },
+  )
+  if (r.kind === 'success' && r.data.success) return r.data.question
+  throw new Error(r.kind === 'fallback' ? r.reason : '恢复版本失败')
 }
 
 export async function uploadQuestionImage(
