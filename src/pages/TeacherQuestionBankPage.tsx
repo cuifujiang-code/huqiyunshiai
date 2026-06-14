@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import DashboardHeader from '../components/layout/DashboardHeader'
 import MathRenderer from '../components/common/MathRenderer'
+import SplitQuestionEditor from '../components/SplitQuestionEditor'
 import LatexFormulaEditor from '../components/common/LatexFormulaEditor'
 import GeometryBoard from '../components/common/GeometryBoard'
 import { useAuth } from '../context/AuthContext'
-import { fileToBase64 } from '../lib/fileBase64'
+import { prepareExamFileForDecompose } from '../lib/examUploadPrepare'
 import {
   batchImportQuestions,
   batchUpdateTags,
@@ -17,7 +18,9 @@ import {
   submitDecomposeTask,
   updateQuestion,
 } from '../lib/teacherApi'
-import { Link } from 'react-router-dom'
+import QuestionMetadataFields from '../components/QuestionMetadataFields'
+import { sanitizeAnalysisText } from '../lib/analysisText'
+import { knowledgeIdsToLegacyString } from '../lib/knowledgePointTree'
 import type { BankQuestion } from '../types/teacher'
 import {
   DIFFICULTIES,
@@ -345,6 +348,7 @@ const emptyQuestion = (): BankQuestion => ({
   subject: '物理',
   grade: '八年级',
   knowledge_point: '',
+  knowledge_point_ids: [],
   question_type: '选择题',
   difficulty: '中等',
   content: '',
@@ -352,6 +356,9 @@ const emptyQuestion = (): BankQuestion => ({
   answer: '',
   analysis: '',
   source: '手动录入',
+  ability_dimension: '',
+  suitable_stage: '',
+  estimated_time: undefined,
   tags: [],
   visibility: 'personal',
 })
@@ -956,24 +963,12 @@ function EditQuestionModal(props: {
             </select>
           </div>
 
-          {/* Source */}
-          <div className="grid grid-cols-2 gap-3">
-            <select
-              className={inputClass}
-              value={editing.source}
-              onChange={(e) => setEditing({ ...editing, source: e.target.value })}
-              disabled={readonly}
-            >
-              {QUESTION_SOURCES.map((s) => <option key={s} value={s}>{s}</option>)}
-            </select>
-            <input
-              className={inputClass}
-              placeholder="知识点"
-              value={editing.knowledge_point}
-              onChange={(e) => setEditing({ ...editing, knowledge_point: e.target.value })}
-              disabled={readonly}
-            />
-          </div>
+          {/* 元数据 + 知识点树 */}
+          <QuestionMetadataFields
+            draft={editing}
+            disabled={readonly}
+            onChange={(patch) => setEditing({ ...editing, ...patch })}
+          />
 
           {/* Content with LaTeX Editor */}
           <div>
@@ -1030,12 +1025,10 @@ function EditQuestionModal(props: {
                 ))}
               </div>
             ) : (
-              <textarea
-                className={inputClass}
-                rows={4}
-                placeholder="A. 选项A&#10;B. 选项B&#10;C. 选项C&#10;D. 选项D"
+              <LatexFormulaEditor
                 value={editing.options.join('\n')}
-                onChange={(e) => setEditing({ ...editing, options: e.target.value.split('\n') })}
+                onChange={(text) => setEditing({ ...editing, options: text.split('\n') })}
+                placeholder="A. 选项A（每行一个，支持 LaTeX）"
               />
             )}
           </div>
@@ -1056,19 +1049,27 @@ function EditQuestionModal(props: {
             )}
           </div>
 
-          {/* Analysis */}
+          {/* Analysis — Markdown/LaTeX 纯文本 */}
           <div>
-            <label className="mb-1 block text-xs text-[#8A94A9]">解析（支持 LaTeX）</label>
+            <label className="mb-1 block text-xs text-[#8A94A9]">解析（Markdown/LaTeX，块级公式用 $$...$$）</label>
             {readonly ? (
               <div className="rounded-[8px] border border-white/[0.06] bg-[#1C2332] p-3">
-                <span className="text-[#5C9DFF] text-sm whitespace-pre-wrap"><MathRenderer text={editing.analysis} /></span>
+                <MathRenderer text={editing.analysis} className="text-sm text-[#5C9DFF]" />
               </div>
             ) : (
-              <LatexFormulaEditor
-                value={editing.analysis}
-                onChange={(value: string) => setEditing({ ...editing, analysis: value })}
-                placeholder="解析（支持 LaTeX）"
-              />
+              <>
+                <LatexFormulaEditor
+                  value={editing.analysis}
+                  onChange={(value: string) => setEditing({ ...editing, analysis: sanitizeAnalysisText(value) })}
+                  placeholder="解析：支持 $行内$ 与 $$块级$$ 公式"
+                />
+                {editing.analysis && (
+                  <div className="mt-2 rounded-[8px] border border-white/[0.06] bg-[#0f1419] p-3">
+                    <p className="mb-1 text-[10px] text-[#6B7394]">KaTeX 预览</p>
+                    <MathRenderer text={editing.analysis} className="text-sm text-[#5C9DFF]" />
+                  </div>
+                )}
+              </>
             )}
           </div>
 
@@ -1364,8 +1365,15 @@ export default function TeacherQuestionBankPage() {
   const handleSave = async () => {
     if (!editing || !teacherId) return
     try {
-      if (editing.id) await updateQuestion(teacherId, editing.id, editing)
-      else await createQuestion(teacherId, editing)
+      const payload: BankQuestion = {
+        ...editing,
+        analysis: sanitizeAnalysisText(editing.analysis),
+        knowledge_point: editing.knowledge_point
+          || knowledgeIdsToLegacyString(editing.knowledge_point_ids ?? []),
+        knowledge_point_ids: editing.knowledge_point_ids ?? [],
+      }
+      if (payload.id) await updateQuestion(teacherId, payload.id, payload)
+      else await createQuestion(teacherId, payload)
       setEditing(null)
       setMessage('保存成功')
       load()
@@ -1428,11 +1436,14 @@ export default function TeacherQuestionBankPage() {
     setImporting(true)
     setMessage(null)
     try {
-      const base64 = await fileToBase64(file)
+      const prepared = await prepareExamFileForDecompose(file)
+      if (prepared.convertedFromPdf) {
+        setMessage('检测到扫描版 PDF，已自动转为图片进行 OCR 拆题…')
+      }
       const result = await submitDecomposeTask(
         teacherId,
-        base64,
-        file.name,
+        prepared.base64,
+        prepared.fileName,
         filters.subject || '物理',
         filters.grade || '八年级',
       )
@@ -1596,7 +1607,7 @@ export default function TeacherQuestionBankPage() {
                   {importing ? '提交中…' : '上传拆题'}
                   <input type="file" accept=".docx,.pdf" className="hidden" onChange={(e) => e.target.files?.[0] && handleImportFile(e.target.files[0])} />
                 </label>
-                <Link to="/teacher/task-center" className={btnSecondary} style={{ fontSize: 12, padding: '6px 12px' }}>批量拆题</Link>
+                <Link to="/teacher/batch-upload" className={btnSecondary} style={{ fontSize: 12, padding: '6px 12px' }}>批量拆题</Link>
               </div>
             )}
           </div>
@@ -1678,7 +1689,7 @@ export default function TeacherQuestionBankPage() {
                   {hasFilters ? '筛选条件下暂无题目' : (isPublicTab ? '公域题库暂无题目' : '暂无试题数据')}
                 </p>
                 {!isPublicTab && !hasFilters && (
-                  <Link to="/teacher/task-center" className={btnPrimary}>去批量拆题</Link>
+                  <Link to="/teacher/batch-upload" className={btnPrimary}>去批量拆题</Link>
                 )}
                 {hasFilters && (
                   <button type="button" className={btnSecondary} onClick={handleClearAll}>
@@ -1763,16 +1774,17 @@ export default function TeacherQuestionBankPage() {
                   <p className="text-xs text-[#8A94A9] mb-2">
                     {q.question_type} · {q.difficulty} · {q.knowledge_point || '未分类'}
                   </p>
-                  <textarea
-                    className={inputClass}
-                    rows={3}
-                    value={q.content || ''}
-                    onChange={(e) => {
-                      const next = [...splitPreview]
-                      next[i] = { ...q, content: e.target.value }
-                      setSplitPreview(next)
-                    }}
-                  />
+                  {teacherId && (
+                    <SplitQuestionEditor
+                      question={q}
+                      teacherId={teacherId}
+                      onChange={(updated) => {
+                        const next = [...splitPreview]
+                        next[i] = updated
+                        setSplitPreview(next)
+                      }}
+                    />
+                  )}
                 </div>
               ))}
             </div>

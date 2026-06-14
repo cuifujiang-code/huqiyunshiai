@@ -1,4 +1,5 @@
 import { getSupabaseAdmin, isSupabaseAdminConfigured } from '../supabaseAdmin.js'
+import { normalizeQuestionPayload } from '../knowledge/knowledgePointIds.js'
 
 const TABLE = 'teacher_question_bank'
 
@@ -53,20 +54,25 @@ export async function getQuestion(teacherId, id) {
 
 export async function createQuestion(teacherId, payload) {
   const admin = getSupabaseAdmin()
+  const normalized = normalizeQuestionPayload(payload)
   const row = {
     teacher_id: teacherId,
-    subject: payload.subject,
-    grade: payload.grade,
-    knowledge_point: payload.knowledge_point || '',
-    question_type: payload.question_type,
-    difficulty: payload.difficulty || '中等',
-    content: payload.content,
-    options: payload.options ?? [],
-    answer: payload.answer || '',
-    analysis: payload.analysis || '',
-    source: payload.source || '手动录入',
-    tags: payload.tags ?? [],
-    visibility: payload.visibility || 'personal',
+    subject: normalized.subject,
+    grade: normalized.grade,
+    knowledge_point: normalized.knowledge_point || '',
+    knowledge_point_ids: normalized.knowledge_point_ids ?? [],
+    question_type: normalized.question_type,
+    difficulty: normalized.difficulty || '中等',
+    content: normalized.content,
+    options: normalized.options ?? [],
+    answer: normalized.answer || '',
+    analysis: normalized.analysis || '',
+    source: normalized.source || '手动录入',
+    ability_dimension: normalized.ability_dimension || '',
+    suitable_stage: normalized.suitable_stage || '',
+    estimated_time: normalized.estimated_time,
+    tags: normalized.tags ?? [],
+    visibility: normalized.visibility || 'personal',
     updated_at: nowIso(),
   }
   const { data, error } = await admin.from(TABLE).insert(row).select('*').single()
@@ -75,22 +81,31 @@ export async function createQuestion(teacherId, payload) {
 }
 
 export async function createQuestionsBatch(teacherId, questions) {
-  const rows = questions.map((q) => ({
-    teacher_id: teacherId,
-    subject: q.subject,
-    grade: q.grade,
-    knowledge_point: q.knowledge_point || '',
-    question_type: q.question_type,
-    difficulty: q.difficulty || '中等',
-    content: q.content,
-    options: q.options ?? [],
-    answer: q.answer || '',
-    analysis: q.analysis || '',
-    source: q.source || '试卷导入',
-    tags: q.tags ?? [],
-    visibility: q.visibility || 'personal',
-    updated_at: nowIso(),
-  }))
+  const { sanitizeQuestionsForStorage } = await import('../batch/questionContentSanitizer.js')
+  const cleaned = await sanitizeQuestionsForStorage(questions)
+  const rows = cleaned.map((q) => {
+    const normalized = normalizeQuestionPayload(q)
+    return {
+      teacher_id: teacherId,
+      subject: normalized.subject,
+      grade: normalized.grade,
+      knowledge_point: normalized.knowledge_point || '',
+      knowledge_point_ids: normalized.knowledge_point_ids ?? [],
+      question_type: normalized.question_type,
+      difficulty: normalized.difficulty || '中等',
+      content: normalized.content,
+      options: normalized.options ?? [],
+      answer: normalized.answer || '',
+      analysis: normalized.analysis || '',
+      source: normalized.source || '试卷导入',
+      ability_dimension: normalized.ability_dimension || '',
+      suitable_stage: normalized.suitable_stage || '',
+      estimated_time: normalized.estimated_time,
+      tags: normalized.tags ?? [],
+      visibility: normalized.visibility || 'personal',
+      updated_at: nowIso(),
+    }
+  })
   const admin = getSupabaseAdmin()
   const { data, error } = await admin.from(TABLE).insert(rows).select('*')
   if (error) throw new Error(error.message)
@@ -99,9 +114,10 @@ export async function createQuestionsBatch(teacherId, questions) {
 
 export async function updateQuestion(teacherId, id, payload) {
   const admin = getSupabaseAdmin()
+  const normalized = normalizeQuestionPayload(payload)
   const { data, error } = await admin
     .from(TABLE)
-    .update({ ...payload, updated_at: nowIso() })
+    .update({ ...normalized, updated_at: nowIso() })
     .eq('id', id)
     .eq('teacher_id', teacherId)
     .select('*')

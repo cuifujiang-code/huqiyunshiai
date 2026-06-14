@@ -1,7 +1,30 @@
 export const TEACHER_SUBJECTS = ['语文', '数学', '英语', '物理', '化学', '生物', '历史', '地理'] as const
 export const TEACHER_GRADES = ['七年级', '八年级', '九年级', '高一', '高二', '高三'] as const
-export const DIFFICULTIES = ['基础', '中等', '拔高'] as const
+export const DIFFICULTIES = ['基础', '中等', '拔高', '压轴'] as const
 export const QUESTION_SOURCES = ['手动录入', '试卷导入', 'AI生成'] as const
+export const QUESTION_SOURCE_EXAMPLES = [
+  '手动录入',
+  '试卷导入',
+  'AI生成',
+  '2024年高考数学全国卷I',
+  '2025年高考数学全国卷II',
+  '2026年高考全国2卷数学',
+] as const
+export const ABILITY_DIMENSIONS = [
+  '逻辑推理',
+  '运算求解',
+  '直观想象',
+  '数学建模',
+  '数据分析',
+] as const
+export const SUITABLE_STAGES = [
+  '高一同步',
+  '高二同步',
+  '高三一轮复习',
+  '高三二轮复习',
+  '高考冲刺',
+  '竞赛培优',
+] as const
 
 /** 每科专属题型 */
 export const SUBJECT_QUESTION_TYPES: Record<string, readonly string[]> = {
@@ -39,13 +62,19 @@ export interface BankQuestion {
   subject: string
   grade: string
   knowledge_point: string
+  /** 关联 knowledge_points 表 UUID 数组 */
+  knowledge_point_ids?: string[]
   question_type: QuestionType | string
   difficulty: QuestionDifficulty | string
   content: string
   options: string[]
   answer: string
+  /** Markdown/LaTeX 纯文本解析，支持 $...$ 与 $$...$$ */
   analysis: string
   source: QuestionSource | string
+  ability_dimension?: string
+  suitable_stage?: string
+  estimated_time?: number
   tags: string[]
   visibility?: 'personal' | 'public'
   created_at?: string
@@ -91,6 +120,14 @@ export interface HandoutModuleStyle {
   fontSize?: number
   color?: string
   fontFamily?: string
+  /** 对应 OCR 原图页码（0-based），用于原件对比联动 */
+  sourcePageIndex?: number
+  /** 块宽度 */
+  width?: 'full' | 'half'
+  /** 水平对齐 */
+  align?: 'left' | 'center' | 'right'
+  /** 块上间距 px */
+  marginTop?: number
 }
 
 export interface HandoutModule {

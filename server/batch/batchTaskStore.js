@@ -1,5 +1,5 @@
-import { createClient } from '@supabase/supabase-js'
 import { getSupabaseAdmin, isSupabaseAdminConfigured } from '../supabaseAdmin.js'
+import { sanitizeAnalysisText } from './questionContentSanitizer.js'
 
 const TASKS = 'batch_decompose_tasks'
 const ITEMS = 'batch_decompose_items'
@@ -23,22 +23,16 @@ function formatSupabaseError(error) {
   return parts.join('; ')
 }
 
-/** 入库专用：强制使用后端 service_role 环境变量（不用 VITE_ / anon key） */
+/** 入库专用：service_role + 与 supabaseAdmin 一致的 URL 解析（含 VITE_SUPABASE_URL） */
 function getBatchInsertSupabaseAdmin() {
-  const url = process.env.SUPABASE_URL || ''
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || ''
-  if (!url || !key) {
-    throw new Error('Supabase 未配置：请设置 SUPABASE_URL 与 SUPABASE_SERVICE_ROLE_KEY')
-  }
-  return createClient(url, key, {
-    auth: { autoRefreshToken: false, persistSession: false },
-  })
+  return getSupabaseAdmin()
 }
 
 function normalizeBankInsertRow(q, batchId, teacherId, itemId, fallbackIndex) {
   const sortOrder = Number.isFinite(Number(q.sort_order)) ? Number(q.sort_order) : fallbackIndex + 1
   const rawContent = String(q.content ?? '').trim()
   const questionNumber = String(q.question_number ?? q.questionNumber ?? '').trim() || String(sortOrder)
+  const knowledge_point_ids = Array.isArray(q.knowledge_point_ids) ? q.knowledge_point_ids : []
   return {
     batch_id: batchId,
     teacher_id: teacherId,
@@ -46,15 +40,19 @@ function normalizeBankInsertRow(q, batchId, teacherId, itemId, fallbackIndex) {
     subject: String(q.subject ?? '').trim() || '数学',
     grade: String(q.grade ?? '').trim() || '八年级',
     knowledge_point: String(q.knowledge_point ?? '').trim() || '未分类',
+    knowledge_point_ids,
     question_type: String(q.question_type ?? '').trim() || '应用题',
     difficulty: String(q.difficulty ?? '').trim() || '中等',
     content: rawContent || `题目 ${sortOrder}`,
     options: Array.isArray(q.options) ? q.options : [],
     answer: String(q.answer ?? '').trim() || '暂无',
-    analysis: String(q.analysis ?? '').trim() || '暂无',
+    analysis: sanitizeAnalysisText(String(q.analysis ?? '').trim() || '暂无'),
     geometry_desc: String(q.geometry_desc ?? '').trim() || '',
     latex_blocks: Array.isArray(q.latex_blocks) ? q.latex_blocks : [],
     source: String(q.source ?? '').trim() || '批量拆题',
+    ability_dimension: String(q.ability_dimension ?? '').trim() || '',
+    suitable_stage: String(q.suitable_stage ?? '').trim() || '',
+    estimated_time: q.estimated_time != null && q.estimated_time !== '' ? Number(q.estimated_time) : null,
     tags: Array.isArray(q.tags) ? q.tags : [],
     sort_order: sortOrder,
     question_number: questionNumber,
@@ -172,7 +170,55 @@ export async function listBatchTasksByTeacher(teacherId, limit = 30) {
 
 export async function markBatchRunning(batchId) {
   const admin = getSupabaseAdmin()
-  const { error } = await admin.from(TASKS).update({ status: 'running', updated_at: nowIso() }).eq('batch_id', batchId)
+  const { error } = await admin.from(TASKS).update({
+    status: 'running',
+    error_message: null,
+    updated_at: nowIso(),
+  }).eq('batch_id', batchId)
+  if (error) throw new Error(error.message)
+}
+
+/** 启动 worker 前将 failed/partial 任务重置为 pending，并清除错误信息 */
+export async function resetBatchTaskToPending(batchId) {
+  const admin = getSupabaseAdmin()
+  const { error } = await admin.from(TASKS).update({
+    status: 'pending',
+    error_message: null,
+    updated_at: nowIso(),
+  }).eq('batch_id', batchId)
+  if (error) throw new Error(error.message)
+}
+
+/** 将 failed 分块重置为 pending，便于重跑 */
+export async function resetFailedItemsToPending(batchId) {
+  const admin = getSupabaseAdmin()
+  const { data, error } = await admin
+    .from(ITEMS)
+    .update({ status: 'pending', error_message: null, updated_at: nowIso() })
+    .eq('batch_id', batchId)
+    .eq('status', 'failed')
+    .select('id')
+  if (error) throw new Error(error.message)
+  return data?.length ?? 0
+}
+
+/** 将全部非 pending 分块重置为 pending（重新拆题） */
+export async function resetAllItemsToPending(batchId) {
+  const admin = getSupabaseAdmin()
+  const { data, error } = await admin
+    .from(ITEMS)
+    .update({ status: 'pending', error_message: null, updated_at: nowIso() })
+    .eq('batch_id', batchId)
+    .neq('status', 'pending')
+    .select('id')
+  if (error) throw new Error(error.message)
+  return data?.length ?? 0
+}
+
+/** 清空批次题库记录（重新拆题前） */
+export async function clearBatchQuestionBank(batchId) {
+  const admin = getBatchInsertSupabaseAdmin()
+  const { error } = await admin.from(BANK).delete().eq('batch_id', batchId)
   if (error) throw new Error(error.message)
 }
 
@@ -413,6 +459,74 @@ export async function listBatchQuestions(batchId, teacherId) {
     count: items.length,
   })
   return items
+}
+
+function getBatchQuestionBankClient() {
+  return getBatchInsertSupabaseAdmin()
+}
+
+export async function countBatchQuestionsInBank(batchId) {
+  const admin = getBatchQuestionBankClient()
+  const { count, error } = await admin
+    .from(BANK)
+    .select('id', { count: 'exact', head: true })
+    .eq('batch_id', batchId)
+  if (error) throw new Error(error.message)
+  return count ?? 0
+}
+
+/** 列表/进度查询前：按 batch_question_bank 真实数量修正任务状态与计数 */
+export async function reconcileBatchTaskFromBank(batchId) {
+  const task = await getBatchTask(batchId)
+  if (!task) return null
+
+  let realCount = 0
+  try {
+    realCount = await countBatchQuestionsInBank(batchId)
+  } catch {
+    return task
+  }
+
+  const counts = await countItemsByStatus(batchId)
+  const hasWorkRemaining = (counts.pending ?? 0) > 0 || (counts.processing ?? 0) > 0
+  if (hasWorkRemaining) return task
+
+  let nextStatus = task.status
+  if (realCount > 0) {
+    nextStatus = (counts.failed ?? 0) > 0 ? 'partial' : 'completed'
+  } else if (['running', 'pending'].includes(task.status)) {
+    nextStatus = 'failed'
+  }
+
+  const needsUpdate =
+    task.imported_questions !== realCount
+    || task.total_questions !== realCount
+    || (realCount > 0 && (task.status === 'failed' || task.status === 'running'))
+    || (realCount > 0 && nextStatus !== task.status)
+
+  if (!needsUpdate) return task
+
+  const admin = getSupabaseAdmin()
+  const patch = {
+    imported_questions: realCount,
+    total_questions: realCount,
+    updated_at: nowIso(),
+  }
+  if (!hasWorkRemaining) {
+    patch.status = nextStatus
+    patch.error_message = realCount > 0 ? null : task.error_message
+  }
+
+  const { error } = await admin.from(TASKS).update(patch).eq('batch_id', batchId)
+  if (error) throw new Error(error.message)
+
+  console.log('[batchTaskStore] reconcileBatchTaskFromBank', {
+    batchId,
+    realCount,
+    previousStatus: task.status,
+    nextStatus: patch.status ?? task.status,
+  })
+  return getBatchTask(batchId)
 }
 
 export function formatBatchProgress(task, itemCounts) {

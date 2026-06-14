@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import GeoGebraBoardModal from './GeoGebraBoardModal'
 import LatexPanel from './LatexPanel'
-import MathRenderer from './MathRenderer'
+import MathRenderer from './common/MathRenderer'
+import FormulaEditButton from './common/FormulaEditButton'
 import QuestionRichTextEditor, {
   type QuestionRichTextEditorHandle,
 } from './QuestionRichTextEditor'
@@ -16,6 +17,9 @@ import {
   btnSecondary,
   inputClass,
 } from '../types/teacher'
+import { sanitizeAnalysisText } from '../lib/analysisText'
+import { knowledgeIdsToLegacyString } from '../lib/knowledgePointTree'
+import QuestionMetadataFields from './QuestionMetadataFields'
 import { compressForScene } from '../utils/imageCompress'
 
 const OPTION_LABELS = ['A', 'B', 'C', 'D', 'E', 'F']
@@ -171,7 +175,14 @@ export default function QuestionEditModal({
     setSaving(true)
     setError(null)
     try {
-      await onSave(draft)
+      const payload: BankQuestion = {
+        ...draft,
+        analysis: sanitizeAnalysisText(draft.analysis),
+        knowledge_point: draft.knowledge_point
+          || knowledgeIdsToLegacyString(draft.knowledge_point_ids ?? []),
+        knowledge_point_ids: draft.knowledge_point_ids ?? [],
+      }
+      await onSave(payload)
     } catch (e) {
       setError(e instanceof Error ? e.message : '保存失败')
       setSaving(false)
@@ -250,16 +261,12 @@ export default function QuestionEditModal({
                       ))}
                     </select>
                   </div>
-                  <div>
-                    <label className={fieldLabel()}>知识点</label>
-                    <input
-                      className={`${inputClass} text-sm py-2`}
-                      value={draft.knowledge_point}
-                      onChange={(e) => setDraft({ ...draft, knowledge_point: e.target.value })}
-                      placeholder="如：一元二次方程"
-                    />
-                  </div>
                 </div>
+
+                <QuestionMetadataFields
+                  draft={draft}
+                  onChange={(patch) => setDraft((d) => ({ ...d, ...patch }))}
+                />
 
                 {/* 工具栏 */}
                 <div className="flex flex-wrap items-center gap-2">
@@ -268,8 +275,13 @@ export default function QuestionEditModal({
                     className={`${btnSecondary} text-xs py-1.5`}
                     onClick={() => setLatexOpen((v) => !v)}
                   >
-                    {latexOpen ? '▲ 收起 LaTeX 面板' : '▼ LaTeX 符号面板'}
+                    {latexOpen ? '▲ 收起符号面板' : '▼ 快捷符号'}
                   </button>
+                  <FormulaEditButton
+                    onInsert={(wrapped) => getEditorRef(activeField).current?.insertText(wrapped)}
+                    className={`${btnSecondary} text-xs py-1.5 !border-emerald-500/30 !text-emerald-300`}
+                    label="∑ 公式编辑器"
+                  />
                   <label className={`${btnSecondary} cursor-pointer text-xs py-1.5 ${uploading ? 'opacity-50' : ''}`}>
                     {uploading ? '上传中…' : '📷 插入图片'}
                     <input
@@ -367,16 +379,15 @@ export default function QuestionEditModal({
                   />
                 </div>
 
-                {/* 解析 */}
+                {/* 解析 — Markdown/LaTeX 纯文本，不支持图片 */}
                 <div>
-                  <label className={fieldLabel()}>解析</label>
+                  <label className={fieldLabel()}>解析（Markdown/LaTeX，块级 $$...$$）</label>
                   <QuestionRichTextEditor
                     ref={analysisEditorRef}
                     value={draft.analysis}
-                    onChange={(v) => updateField('analysis', v)}
+                    onChange={(v) => updateField('analysis', sanitizeAnalysisText(v))}
                     onFocus={() => setActiveField('analysis')}
-                    onPasteImage={handlePasteImage}
-                    placeholder="题目解析"
+                    placeholder="题目解析（仅文本与 LaTeX）"
                     minRows={4}
                   />
                 </div>

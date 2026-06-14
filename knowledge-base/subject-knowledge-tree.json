@@ -1,0 +1,223 @@
+{
+  "version": 1,
+  "subject": "数学",
+  "description": "高中学科知识树：年级 → 章节 → 知识点 → 考点",
+  "grades": [
+    {
+      "id": "math-grade-senior3",
+      "name": "高三",
+      "sortOrder": 1,
+      "chapters": [
+        {
+          "id": "math-s3-ch01",
+          "name": "第一章 集合与常用逻辑用语",
+          "sortOrder": 1,
+          "knowledgePoints": [
+            {
+              "id": "math-s3-ch01-kp01",
+              "name": "集合的概念与表示",
+              "sortOrder": 1,
+              "examPoints": [
+                { "id": "math-s3-ch01-kp01-ep01", "name": "集合的列举法与描述法", "sortOrder": 1 },
+                { "id": "math-s3-ch01-kp01-ep02", "name": "子集与真子集", "sortOrder": 2 },
+                { "id": "math-s3-ch01-kp01-ep03", "name": "集合相等判定", "sortOrder": 3 }
+              ]
+            },
+            {
+              "id": "math-s3-ch01-kp02",
+              "name": "集合的基本运算",
+              "sortOrder": 2,
+              "examPoints": [
+                { "id": "math-s3-ch01-kp02-ep01", "name": "交集与并集", "sortOrder": 1 },
+                { "id": "math-s3-ch01-kp02-ep02", "name": "补集与容斥原理", "sortOrder": 2 }
+              ]
+            },
+            {
+              "id": "math-s3-ch01-kp03",
+              "name": "充分条件与必要条件",
+              "sortOrder": 3,
+              "examPoints": [
+                { "id": "math-s3-ch01-kp03-ep01", "name": "命题真假判定", "sortOrder": 1 },
+                { "id": "math-s3-ch01-kp03-ep02", "name": "充要条件证明", "sortOrder": 2 }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "math-s3-ch02",
+          "name": "第二章 函数与导数",
+          "sortOrder": 2,
+          "knowledgePoints": [
+            {
+              "id": "math-s3-ch02-kp01",
+              "name": "函数的概念与性质",
+              "sortOrder": 1,
+              "examPoints": [
+                { "id": "math-s3-ch02-kp01-ep01", "name": "定义域与值域", "sortOrder": 1 },
+                { "id": "math-s3-ch02-kp01-ep02", "name": "单调性与奇偶性", "sortOrder": 2 },
+                { "id": "math-s3-ch02-kp01-ep03", "name": "复合函数", "sortOrder": 3 }
+              ]
+            },
+            {
+              "id": "math-s3-ch02-kp02",
+              "name": "导数的概念与运算",
+              "sortOrder": 2,
+              "examPoints": [
+                { "id": "math-s3-ch02-kp02-ep01", "name": "导数定义与几何意义", "sortOrder": 1 },
+                { "id": "math-s3-ch02-kp02-ep02", "name": "基本求导法则", "sortOrder": 2 },
+                { "id": "math-s3-ch02-kp02-ep03", "name": "隐函数与参数方程求导", "sortOrder": 3 }
+              ]
+            },
+            {
+              "id": "math-s3-ch02-kp03",
+              "name": "导数的应用",
+              "sortOrder": 3,
+              "examPoints": [
+                { "id": "math-s3-ch02-kp03-ep01", "name": "单调区间与极值", "sortOrder": 1 },
+                { "id": "math-s3-ch02-kp03-ep02", "name": "最值问题", "sortOrder": 2 },
+                { "id": "math-s3-ch02-kp03-ep03", "name": "恒成立与存在性问题", "sortOrder": 3 }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "math-s3-ch03",
+          "name": "第三章 三角函数与解三角形",
+          "sortOrder": 3,
+          "knowledgePoints": [
+            {
+              "id": "math-s3-ch03-kp01",
+              "name": "三角函数图像与性质",
+              "sortOrder": 1,
+              "examPoints": [
+                { "id": "math-s3-ch03-kp01-ep01", "name": "周期与对称性", "sortOrder": 1 },
+                { "id": "math-s3-ch03-kp01-ep02", "name": "图像变换", "sortOrder": 2 }
+              ]
+            },
+            {
+              "id": "math-s3-ch03-kp02",
+              "name": "三角恒等变换",
+              "sortOrder": 2,
+              "examPoints": [
+                { "id": "math-s3-ch03-kp02-ep01", "name": "和差角公式", "sortOrder": 1 },
+                { "id": "math-s3-ch03-kp02-ep02", "name": "二倍角与半角公式", "sortOrder": 2 }
+              ]
+            },
+            {
+              "id": "math-s3-ch03-kp03",
+              "name": "解三角形",
+              "sortOrder": 3,
+              "examPoints": [
+                { "id": "math-s3-ch03-kp03-ep01", "name": "正弦定理与余弦定理", "sortOrder": 1 },
+                { "id": "math-s3-ch03-kp03-ep02", "name": "面积与最值", "sortOrder": 2 }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "math-s3-ch04",
+          "name": "第四章 数列",
+          "sortOrder": 4,
+          "knowledgePoints": [
+            {
+              "id": "math-s3-ch04-kp01",
+              "name": "等差数列与等比数列",
+              "sortOrder": 1,
+              "examPoints": [
+                { "id": "math-s3-ch04-kp01-ep01", "name": "通项公式", "sortOrder": 1 },
+                { "id": "math-s3-ch04-kp01-ep02", "name": "前 n 项和", "sortOrder": 2 }
+              ]
+            },
+            {
+              "id": "math-s3-ch04-kp02",
+              "name": "数列求和与放缩",
+              "sortOrder": 2,
+              "examPoints": [
+                { "id": "math-s3-ch04-kp02-ep01", "name": "裂项相消", "sortOrder": 1 },
+                { "id": "math-s3-ch04-kp02-ep02", "name": "错位相减", "sortOrder": 2 },
+                { "id": "math-s3-ch04-kp02-ep03", "name": "放缩证明不等式", "sortOrder": 3 }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "math-s3-ch05",
+          "name": "第五章 立体几何",
+          "sortOrder": 5,
+          "knowledgePoints": [
+            {
+              "id": "math-s3-ch05-kp01",
+              "name": "空间几何体",
+              "sortOrder": 1,
+              "examPoints": [
+                { "id": "math-s3-ch05-kp01-ep01", "name": "表面积与体积", "sortOrder": 1 },
+                { "id": "math-s3-ch05-kp01-ep02", "name": "截面问题", "sortOrder": 2 }
+              ]
+            },
+            {
+              "id": "math-s3-ch05-kp02",
+              "name": "线面位置关系",
+              "sortOrder": 2,
+              "examPoints": [
+                { "id": "math-s3-ch05-kp02-ep01", "name": "平行与垂直判定", "sortOrder": 1 },
+                { "id": "math-s3-ch05-kp02-ep02", "name": "空间角与距离", "sortOrder": 2 }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "math-s3-ch06",
+          "name": "第六章 解析几何",
+          "sortOrder": 6,
+          "knowledgePoints": [
+            {
+              "id": "math-s3-ch06-kp01",
+              "name": "直线与圆",
+              "sortOrder": 1,
+              "examPoints": [
+                { "id": "math-s3-ch06-kp01-ep01", "name": "直线方程", "sortOrder": 1 },
+                { "id": "math-s3-ch06-kp01-ep02", "name": "圆与直线位置关系", "sortOrder": 2 }
+              ]
+            },
+            {
+              "id": "math-s3-ch06-kp02",
+              "name": "圆锥曲线",
+              "sortOrder": 2,
+              "examPoints": [
+                { "id": "math-s3-ch06-kp02-ep01", "name": "椭圆定义与性质", "sortOrder": 1 },
+                { "id": "math-s3-ch06-kp02-ep02", "name": "双曲线与抛物线", "sortOrder": 2 },
+                { "id": "math-s3-ch06-kp02-ep03", "name": "弦长与面积", "sortOrder": 3 }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "math-s3-ch07",
+          "name": "第七章 概率统计",
+          "sortOrder": 7,
+          "knowledgePoints": [
+            {
+              "id": "math-s3-ch07-kp01",
+              "name": "计数原理",
+              "sortOrder": 1,
+              "examPoints": [
+                { "id": "math-s3-ch07-kp01-ep01", "name": "排列组合", "sortOrder": 1 },
+                { "id": "math-s3-ch07-kp01-ep02", "name": "二项式定理", "sortOrder": 2 }
+              ]
+            },
+            {
+              "id": "math-s3-ch07-kp02",
+              "name": "概率与统计",
+              "sortOrder": 2,
+              "examPoints": [
+                { "id": "math-s3-ch07-kp02-ep01", "name": "古典概型与条件概率", "sortOrder": 1 },
+                { "id": "math-s3-ch07-kp02-ep02", "name": "期望与方差", "sortOrder": 2 },
+                { "id": "math-s3-ch07-kp02-ep03", "name": "回归分析", "sortOrder": 3 }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
