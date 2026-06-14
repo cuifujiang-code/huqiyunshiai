@@ -11,6 +11,13 @@ import { formatBookLayoutWithAi } from '../server/teacher/bookFormatAi.js'
 import { callDeepSeekAI } from '../server/deepseekClient.js'
 import { repairJSON } from '../server/batch/jsonRepairEngine.js'
 import { normalizeTeacherPath } from '../server/urlUtil.js'
+import { getStatsForQuestion, getAnalyticsDashboard } from '../server/teacher/questionStatsStore.js'
+import {
+  generateVariantQuestionForId,
+  recommendSimilarQuestionsForId,
+  generateWrongAnswerExplanationForId,
+  batchGenerateAnalysis,
+} from '../server/teacher/questionAiService.js'
 
 function requireTeacher(body, query) {
   const teacherId = body?.teacherId?.trim() || query?.teacherId?.trim()
@@ -53,6 +60,19 @@ export async function handleTeacherApi(req, res, pathSegments = []) {
       return res.status(200).json({ success: true, ...result })
     }
 
+    if (path === 'analytics/dashboard' && method === 'GET') {
+      const teacherId = query.teacherId
+      if (!teacherId) return res.status(400).json({ success: false, message: '缺少 teacherId' })
+      const data = await getAnalyticsDashboard(teacherId, query)
+      return res.status(200).json({ success: true, ...data })
+    }
+
+    if (path === 'questions/ai/batch-analysis' && method === 'POST') {
+      const teacherId = requireTeacher(body, query)
+      const result = await batchGenerateAnalysis(teacherId, body.ids ?? [])
+      return res.status(200).json({ success: true, ...result })
+    }
+
     if (path === 'questions' && method === 'POST') {
       const teacherId = requireTeacher(body, query)
       const data = await questionBank.createQuestion(teacherId, body)
@@ -77,6 +97,33 @@ export async function handleTeacherApi(req, res, pathSegments = []) {
         if (!versionId) return res.status(400).json({ success: false, message: '缺少 versionId' })
         const question = await questionBank.restoreQuestionToVersion(teacherId, qid, versionId)
         return res.status(200).json({ success: true, question })
+      }
+
+      if (subPath === 'stats' && method === 'GET') {
+        const teacherId = query.teacherId
+        if (!teacherId) return res.status(400).json({ success: false, message: '缺少 teacherId' })
+        const stats = await getStatsForQuestion(qid)
+        return res.status(200).json({ success: true, stats })
+      }
+
+      if (subPath === 'ai/variant' && method === 'POST') {
+        const teacherId = requireTeacher(body, query)
+        const variant = await generateVariantQuestionForId(teacherId, qid)
+        return res.status(200).json({ success: true, variant })
+      }
+
+      if (subPath === 'ai/similar' && method === 'GET') {
+        const teacherId = query.teacherId
+        if (!teacherId) return res.status(400).json({ success: false, message: '缺少 teacherId' })
+        const limit = query.limit ? Number(query.limit) : 8
+        const similar = await recommendSimilarQuestionsForId(teacherId, qid, limit)
+        return res.status(200).json({ success: true, similar })
+      }
+
+      if (subPath === 'ai/explanation' && method === 'POST') {
+        const teacherId = requireTeacher(body, query)
+        const explanation = await generateWrongAnswerExplanationForId(teacherId, qid)
+        return res.status(200).json({ success: true, explanation })
       }
     }
 

@@ -1,6 +1,9 @@
 import { getSupabaseAdmin, isSupabaseAdminConfigured } from '../supabaseAdmin.js'
 import { normalizeQuestionPayload } from '../knowledge/knowledgePointIds.js'
 import { archiveQuestionVersion, listQuestionVersions, restoreQuestionVersion } from './questionVersionStore.js'
+import { getStatsForQuestions } from './questionStatsStore.js'
+import { filterQuestionIdsByStats } from './questionStatsStore.js'
+import { buildQuestionSearchText, escapeIlikePattern } from './questionSearch.js'
 
 const TABLE = 'teacher_question_bank'
 
@@ -19,30 +22,64 @@ export async function listQuestions(teacherId, filters = {}) {
 
   const visibility = filters.visibility || 'personal'
 
+  const hasStatsFilter = ['min_error_rate', 'max_error_rate', 'min_avg_score_rate', 'max_avg_score_rate', 'min_attempts']
+    .some((k) => filters[k] != null && filters[k] !== '')
+  let statsQuestionIds = null
+  if (hasStatsFilter) {
+    statsQuestionIds = await filterQuestionIdsByStats(filters)
+    if (!statsQuestionIds.length) {
+      return { items: [], total: 0, page, pageSize, visibility, highlight: filters.keyword || '' }
+    }
+  }
+
   let query = admin
     .from(TABLE)
     .select('*', { count: 'exact' })
     .order('updated_at', { ascending: false })
     .range(from, to)
 
-  // 可见性过滤
   if (visibility === 'public') {
     query = query.eq('visibility', 'public')
   } else {
     query = query.eq('teacher_id', teacherId)
   }
 
+  if (statsQuestionIds) query = query.in('id', statsQuestionIds)
+
   if (filters.subject) query = query.eq('subject', filters.subject)
   if (filters.grade) query = query.eq('grade', filters.grade)
   if (filters.question_type) query = query.eq('question_type', filters.question_type)
   if (filters.difficulty) query = query.eq('difficulty', filters.difficulty)
   if (filters.source) query = query.eq('source', filters.source)
+  if (filters.textbook_version) query = query.eq('textbook_version', filters.textbook_version)
+  if (filters.ability_dimension) query = query.eq('ability_dimension', filters.ability_dimension)
+  if (filters.suitable_stage) query = query.eq('suitable_stage', filters.suitable_stage)
   if (filters.knowledge_point) query = query.ilike('knowledge_point', `%${filters.knowledge_point}%`)
-  if (filters.keyword) query = query.ilike('content', `%${filters.keyword}%`)
+  if (filters.knowledge_point_id) {
+    query = query.contains('knowledge_point_ids', [filters.knowledge_point_id])
+  }
+  if (filters.min_estimated_time != null && filters.min_estimated_time !== '') {
+    query = query.gte('estimated_time', Number(filters.min_estimated_time))
+  }
+  if (filters.max_estimated_time != null && filters.max_estimated_time !== '') {
+    query = query.lte('estimated_time', Number(filters.max_estimated_time))
+  }
+  if (filters.keyword) {
+    const kw = escapeIlikePattern(filters.keyword)
+    query = query.ilike('search_text', `%${kw}%`)
+  }
 
   const { data, error, count } = await query
   if (error) throw new Error(error.message)
-  return { items: data ?? [], total: count ?? 0, page, pageSize, visibility }
+
+  const ids = (data ?? []).map((q) => q.id).filter(Boolean)
+  const statsMap = await getStatsForQuestions(ids)
+  const items = (data ?? []).map((q) => ({
+    ...q,
+    stats: statsMap[q.id] ?? null,
+  }))
+
+  return { items, total: count ?? 0, page, pageSize, visibility, highlight: filters.keyword || '' }
 }
 
 export async function getQuestion(teacherId, id) {
@@ -53,10 +90,8 @@ export async function getQuestion(teacherId, id) {
   return data
 }
 
-export async function createQuestion(teacherId, payload) {
-  const admin = getSupabaseAdmin()
-  const normalized = normalizeQuestionPayload(payload)
-  const row = {
+function rowFromNormalized(teacherId, normalized, defaults = {}) {
+  return {
     teacher_id: teacherId,
     subject: normalized.subject,
     grade: normalized.grade,
@@ -68,14 +103,22 @@ export async function createQuestion(teacherId, payload) {
     options: normalized.options ?? [],
     answer: normalized.answer || '',
     analysis: normalized.analysis || '',
-    source: normalized.source || '手动录入',
+    source: normalized.source || defaults.source || '手动录入',
+    textbook_version: normalized.textbook_version || '',
     ability_dimension: normalized.ability_dimension || '',
     suitable_stage: normalized.suitable_stage || '',
     estimated_time: normalized.estimated_time,
+    search_text: buildQuestionSearchText(normalized),
     tags: normalized.tags ?? [],
     visibility: normalized.visibility || 'personal',
     updated_at: nowIso(),
   }
+}
+
+export async function createQuestion(teacherId, payload) {
+  const admin = getSupabaseAdmin()
+  const normalized = normalizeQuestionPayload(payload)
+  const row = rowFromNormalized(teacherId, normalized)
   const { data, error } = await admin.from(TABLE).insert(row).select('*').single()
   if (error) throw new Error(error.message)
   return data
@@ -86,26 +129,7 @@ export async function createQuestionsBatch(teacherId, questions) {
   const cleaned = await sanitizeQuestionsForStorage(questions)
   const rows = cleaned.map((q) => {
     const normalized = normalizeQuestionPayload(q)
-    return {
-      teacher_id: teacherId,
-      subject: normalized.subject,
-      grade: normalized.grade,
-      knowledge_point: normalized.knowledge_point || '',
-      knowledge_point_ids: normalized.knowledge_point_ids ?? [],
-      question_type: normalized.question_type,
-      difficulty: normalized.difficulty || '中等',
-      content: normalized.content,
-      options: normalized.options ?? [],
-      answer: normalized.answer || '',
-      analysis: normalized.analysis || '',
-      source: normalized.source || '试卷导入',
-      ability_dimension: normalized.ability_dimension || '',
-      suitable_stage: normalized.suitable_stage || '',
-      estimated_time: normalized.estimated_time,
-      tags: normalized.tags ?? [],
-      visibility: normalized.visibility || 'personal',
-      updated_at: nowIso(),
-    }
+    return rowFromNormalized(teacherId, normalized, { source: '试卷导入' })
   })
   const admin = getSupabaseAdmin()
   const { data, error } = await admin.from(TABLE).insert(rows).select('*')
@@ -139,9 +163,11 @@ export async function updateQuestion(teacherId, id, payload) {
     answer: normalized.answer || '',
     analysis: normalized.analysis || '',
     source: normalized.source || '手动录入',
+    textbook_version: normalized.textbook_version || '',
     ability_dimension: normalized.ability_dimension || '',
     suitable_stage: normalized.suitable_stage || '',
     estimated_time: normalized.estimated_time,
+    search_text: buildQuestionSearchText(normalized),
     tags: normalized.tags ?? [],
     visibility: normalized.visibility,
     updated_at: nowIso(),

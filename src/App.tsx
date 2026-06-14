@@ -2,6 +2,7 @@ import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import ProtectedRoute from './components/ProtectedRoute'
 import ProtectedRouteAuth from './components/ProtectedRouteAuth'
 import { AuthProvider } from './context/AuthContext'
+import { FormulaEditorProvider } from './context/FormulaEditorContext'
 import { MembershipProvider } from './context/MembershipContext'
 import { QuestionBasketProvider } from './context/QuestionBasketContext'
 import LoginPage from './pages/LoginPage'
@@ -21,6 +22,7 @@ import TeacherLessonPrepPage from './pages/TeacherLessonPrepPage'
 import TeacherPlanningPage from './pages/TeacherPlanningPage'
 import TeacherStudentProgressPage from './pages/TeacherStudentProgressPage'
 import TeacherQuestionBankPage from './pages/TeacherQuestionBankPage'
+import TeacherAnalyticsPage from './pages/TeacherAnalyticsPage'
 import TeacherTaskCenterPage from './pages/TeacherTaskCenterPage'
 import TeacherBatchDecomposePage from './pages/TeacherBatchDecomposePage'
 import BatchUploadPage from './pages/teacher/BatchUploadPage'
@@ -36,6 +38,7 @@ export default function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
+        <FormulaEditorProvider>
         <MembershipProvider>
           <QuestionBasketProvider>
           <Routes>
@@ -70,6 +73,14 @@ export default function App() {
               element={
                 <ProtectedRoute requiredRole="teacher">
                   <TeacherQuestionBankPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/teacher/analytics"
+              element={
+                <ProtectedRoute requiredRole="teacher">
+                  <TeacherAnalyticsPage />
                 </ProtectedRoute>
               }
             />
@@ -230,6 +241,7 @@ export default function App() {
           <FloatingActionButton />
           </QuestionBasketProvider>
         </MembershipProvider>
+        </FormulaEditorProvider>
       </AuthProvider>
     </BrowserRouter>
   )

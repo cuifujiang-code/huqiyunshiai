@@ -333,6 +333,110 @@ export async function fetchQuestionStats(teacherId: string) {
   throw new Error(r.kind === 'fallback' ? r.reason : '加载统计失败')
 }
 
+export async function fetchQuestionLearningStats(teacherId: string, questionId: string) {
+  const params = new URLSearchParams({ teacherId })
+  const r = await postApiJson<{ success: boolean; stats: import('../types/teacher').QuestionStats | null }>(
+    `${teacherApiUrl(`questions/${questionId}/stats`)}?${params}`,
+    null,
+    '题目学情',
+    { method: 'GET', timeoutMs: 15000 },
+  )
+  if (r.kind === 'success' && r.data.success) return r.data.stats
+  throw new Error(r.kind === 'fallback' ? r.reason : '加载学情失败')
+}
+
+export interface AnalyticsDashboard {
+  subject: string
+  total_questions: number
+  knowledge_heatmap: {
+    knowledge_point: string
+    question_count: number
+    total_attempts: number
+    avg_error_rate: number | null
+  }[]
+  high_error_questions: {
+    id: string
+    subject: string
+    grade: string
+    knowledge_point: string
+    question_type: string
+    difficulty: string
+    content_preview: string
+    total_attempts: number
+    error_rate: number
+    avg_score_rate: number | null
+  }[]
+}
+
+export async function fetchAnalyticsDashboard(teacherId: string, subject?: string) {
+  const params = new URLSearchParams({ teacherId })
+  if (subject) params.set('subject', subject)
+  const r = await postApiJson<{ success: boolean } & AnalyticsDashboard>(
+    `${teacherApiUrl('analytics/dashboard')}?${params}`,
+    null,
+    '学情看板',
+    { method: 'GET', timeoutMs: 30000 },
+  )
+  if (r.kind === 'success' && r.data.success) {
+    const { success: _, ...data } = r.data
+    return data as AnalyticsDashboard
+  }
+  throw new Error(r.kind === 'fallback' ? r.reason : '加载学情看板失败')
+}
+
+export async function generateAiVariantQuestion(teacherId: string, questionId: string) {
+  const r = await postApiJson<{ success: boolean; variant: Partial<BankQuestion> }>(
+    teacherApiUrl(`questions/${questionId}/ai/variant`),
+    { teacherId },
+    'AI变式题',
+    { timeoutMs: 120000 },
+  )
+  if (r.kind === 'success' && r.data.success) return r.data.variant
+  throw new Error(r.kind === 'fallback' ? r.reason : 'AI变式题生成失败')
+}
+
+export async function fetchAiSimilarQuestions(teacherId: string, questionId: string, limit = 8) {
+  const params = new URLSearchParams({ teacherId, limit: String(limit) })
+  const r = await postApiJson<{ success: boolean; similar: BankQuestion[] }>(
+    `${teacherApiUrl(`questions/${questionId}/ai/similar`)}?${params}`,
+    null,
+    'AI同类题',
+    { method: 'GET', timeoutMs: 30000 },
+  )
+  if (r.kind === 'success' && r.data.success) return r.data.similar ?? []
+  throw new Error(r.kind === 'fallback' ? r.reason : 'AI同类题推荐失败')
+}
+
+export async function generateAiWrongAnswerExplanation(teacherId: string, questionId: string) {
+  const r = await postApiJson<{ success: boolean; explanation: string }>(
+    teacherApiUrl(`questions/${questionId}/ai/explanation`),
+    { teacherId },
+    'AI错题讲解',
+    { timeoutMs: 120000 },
+  )
+  if (r.kind === 'success' && r.data.success) return r.data.explanation
+  throw new Error(r.kind === 'fallback' ? r.reason : 'AI错题讲解失败')
+}
+
+export interface BatchAnalysisResult {
+  results: { id: string; success: boolean; message?: string; question?: BankQuestion }[]
+  updated: number
+  skipped: number
+}
+
+export async function batchGenerateQuestionAnalysis(teacherId: string, ids: string[]) {
+  const r = await postApiJson<{ success: boolean } & BatchAnalysisResult>(
+    teacherApiUrl('questions/ai/batch-analysis'),
+    { teacherId, ids },
+    'AI批量解析',
+    { timeoutMs: 300000 },
+  )
+  if (r.kind === 'success' && r.data.success) {
+    return { results: r.data.results, updated: r.data.updated, skipped: r.data.skipped }
+  }
+  throw new Error(r.kind === 'fallback' ? r.reason : 'AI批量解析失败')
+}
+
 export async function generateQuestion(params: {
   subject: string
   grade: string

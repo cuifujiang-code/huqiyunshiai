@@ -25,6 +25,15 @@ export const SUITABLE_STAGES = [
   '高考冲刺',
   '竞赛培优',
 ] as const
+export const TEXTBOOK_VERSIONS = [
+  '人教版',
+  '北师大版',
+  '苏教版',
+  '沪教版',
+  '浙教版',
+  '湘教版',
+  '鲁教版',
+] as const
 
 /** 每科专属题型 */
 export const SUBJECT_QUESTION_TYPES: Record<string, readonly string[]> = {
@@ -67,6 +76,15 @@ export interface QuestionVersion {
   created_at: string
 }
 
+export interface QuestionStats {
+  question_id: string
+  total_attempts: number
+  error_rate: number | null
+  avg_score_rate: number | null
+  common_errors: { option?: string; answer?: string; count: number }[]
+  updated_at?: string
+}
+
 export interface BankQuestion {
   id?: string
   teacher_id?: string
@@ -85,9 +103,11 @@ export interface BankQuestion {
   source: QuestionSource | string
   ability_dimension?: string
   suitable_stage?: string
+  textbook_version?: string
   estimated_time?: number
   tags: string[]
   visibility?: 'personal' | 'public'
+  stats?: QuestionStats | null
   created_at?: string
   updated_at?: string
 }

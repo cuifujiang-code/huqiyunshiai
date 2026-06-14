@@ -49,6 +49,20 @@ export default function QuestionMetadataFields({ draft, onChange, disabled }: Pr
           </select>
         </label>
         <label className="block">
+          <span className="mb-1 block text-xs text-[#8A94A9]">教材版本</span>
+          <select
+            className={inputClass}
+            value={draft.textbook_version ?? ''}
+            onChange={(e) => onChange({ textbook_version: e.target.value })}
+            disabled={disabled}
+          >
+            <option value="">请选择</option>
+            {TEXTBOOK_VERSIONS.map((v) => (
+              <option key={v} value={v}>{v}</option>
+            ))}
+          </select>
+        </label>
+        <label className="block">
           <span className="mb-1 block text-xs text-[#8A94A9]">适用阶段</span>
           <select
             className={inputClass}

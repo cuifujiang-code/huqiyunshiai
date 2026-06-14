@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Link } from 'react-router-dom'
 import DashboardHeader from '../components/layout/DashboardHeader'
 import MathRenderer from '../components/common/MathRenderer'
 import SplitQuestionEditor from '../components/SplitQuestionEditor'
@@ -7,8 +8,12 @@ import GeometryBoard from '../components/common/GeometryBoard'
 import { useAuth } from '../context/AuthContext'
 import { prepareExamFileForDecompose } from '../lib/examUploadPrepare'
 import QuestionImportModal from '../components/QuestionImportModal'
+import SearchHighlight from '../components/common/SearchHighlight'
+import QuestionAiPanel from '../components/QuestionAiPanel'
+import KnowledgePointTreeSelector from '../components/knowledge/KnowledgePointTreeSelector'
 import {
   batchImportQuestions,
+  batchGenerateQuestionAnalysis,
   batchUpdateTags,
   batchUpdateVisibility,
   createQuestion,
@@ -25,9 +30,12 @@ import { sanitizeAnalysisText } from '../lib/analysisText'
 import { knowledgeIdsToLegacyString } from '../lib/knowledgePointTree'
 import type { BankQuestion } from '../types/teacher'
 import {
+  ABILITY_DIMENSIONS,
   DIFFICULTIES,
   QUESTION_SOURCES,
   SUBJECT_QUESTION_TYPES,
+  SUITABLE_STAGES,
+  TEXTBOOK_VERSIONS,
   TEACHER_GRADES,
   TEACHER_SUBJECTS,
   ALL_QUESTION_TYPES,
@@ -284,70 +292,61 @@ const KNOWLEDGE_POINTS: Record<string, Record<string, Record<string, string[]>>>
    Build Tree
    =================================================================== */
 
-function buildSubjectTree(): TreeNode[] {
-  return TEACHER_SUBJECTS.map((subject) => {
-    const subjectKp = KNOWLEDGE_POINTS[subject] || {}
-    const grades: TreeNode[] = TEACHER_GRADES.map((grade) => {
-      const gradeKp = subjectKp[grade] || {}
-      const semesters: TreeNode[] = [
-        {
-          id: `${subject}-${grade}-上册`,
-          label: '上册',
-          level: 'semester' as const,
-          children: (gradeKp['上册'] || []).map((kp: string) => ({
-            id: `${subject}-${grade}-上册-${kp}`,
-            label: kp,
-            level: 'knowledge_point' as const,
-          })),
-        },
-        {
-          id: `${subject}-${grade}-下册`,
-          label: '下册',
-          level: 'semester' as const,
-          children: (gradeKp['下册'] || []).map((kp: string) => ({
-            id: `${subject}-${grade}-下册-${kp}`,
-            label: kp,
-            level: 'knowledge_point' as const,
-          })),
-        },
-      ]
-      return {
-        id: `${subject}-${grade}`,
-        label: grade,
-        level: 'grade' as const,
-        children: semesters,
-      }
-    })
+function buildSubjectKnowledgeTree(subject: string): TreeNode[] {
+  const subjectKp = KNOWLEDGE_POINTS[subject] || {}
+  return TEACHER_GRADES.map((grade) => {
+    const gradeKp = subjectKp[grade] || {}
+    const semesters: TreeNode[] = [
+      {
+        id: `${grade}::上册`,
+        label: '上册',
+        level: 'semester' as const,
+        children: (gradeKp['上册'] || []).map((kp: string) => ({
+          id: `${grade}::上册::${kp}`,
+          label: kp,
+          level: 'knowledge_point' as const,
+        })),
+      },
+      {
+        id: `${grade}::下册`,
+        label: '下册',
+        level: 'semester' as const,
+        children: (gradeKp['下册'] || []).map((kp: string) => ({
+          id: `${grade}::下册::${kp}`,
+          label: kp,
+          level: 'knowledge_point' as const,
+        })),
+      },
+    ]
     return {
-      id: subject,
-      label: subject,
-      level: 'subject' as const,
-      children: grades,
+      id: grade,
+      label: grade,
+      level: 'grade' as const,
+      children: semesters,
     }
   })
 }
 
-const SUBJECT_TREE = buildSubjectTree()
-
-/* ===================================================================
-   Helper: parse filter path from node ID
-   =================================================================== */
-
-function parseNodeId(nodeId: string): FilterPath {
-  const parts = nodeId.split('-')
-  const subject = parts[0] || ''
-  const grade = parts[1] || ''
-  const semester = parts[2] || ''
-  const knowledge_point = parts.slice(3).join('-') || ''
-  return { subject, grade, semester, knowledge_point }
+/** 学科内知识点树节点解析（节点 ID 不含学科，学科由当前选定学科决定） */
+function parseSubjectNodeId(nodeId: string, subject: string): FilterPath {
+  if (!nodeId.includes('::')) {
+    return { subject, grade: nodeId, semester: '', knowledge_point: '' }
+  }
+  const parts = nodeId.split('::')
+  return {
+    subject,
+    grade: parts[0] || '',
+    semester: parts[1] || '',
+    knowledge_point: parts.slice(2).join('::') || '',
+  }
 }
 
 /* ===================================================================
    Empty Question Factory
    =================================================================== */
 
-const emptyQuestion = (): BankQuestion => ({
-  subject: '物理',
+const emptyQuestion = (subject: string): BankQuestion => ({
+  subject,
   grade: '八年级',
   knowledge_point: '',
   knowledge_point_ids: [],
@@ -389,14 +388,33 @@ const LEVEL_COLORS: Record<TreeNodeLevel, string> = {
 
 function SidebarTreeView(props: {
   tree: TreeNode[]
+  subjectLabel: string
   expanded: Set<string>
   selected: string | null
   onToggle: (id: string) => void
   onSelect: (id: string) => void
   collapsed: boolean
   onToggleCollapse: () => void
+  kpSearch: string
+  onKpSearchChange: (v: string) => void
 }) {
-  const { tree, expanded, selected, onToggle, onSelect, collapsed, onToggleCollapse } = props
+  const { tree, subjectLabel, expanded, selected, onToggle, onSelect, collapsed, onToggleCollapse, kpSearch, onKpSearchChange } = props
+
+  const filteredTree = useMemo(() => {
+    const q = kpSearch.trim().toLowerCase()
+    if (!q) return tree
+    const filterNodes = (nodes: TreeNode[]): TreeNode[] => nodes.flatMap((node) => {
+      if (node.level === 'knowledge_point') {
+        return node.label.toLowerCase().includes(q) ? [node] : []
+      }
+      const children = node.children ? filterNodes(node.children) : []
+      if (children.length > 0 || node.label.toLowerCase().includes(q)) {
+        return [{ ...node, children }]
+      }
+      return []
+    })
+    return filterNodes(tree)
+  }, [tree, kpSearch])
 
   if (collapsed) {
     return (
@@ -434,7 +452,7 @@ function SidebarTreeView(props: {
     <div className="flex flex-col h-full" style={{ backgroundColor: '#1C2332' }}>
       {/* Header */}
       <div className="flex items-center justify-between px-3 py-3 border-b border-white/[0.06] shrink-0">
-        <span className="text-sm font-semibold text-[#E8ECF3]">学科导航</span>
+        <span className="text-sm font-semibold text-[#E8ECF3] truncate">{subjectLabel} · 知识点</span>
         <button
           type="button"
           className="rounded-[6px] p-1 text-[#8A94A9] hover:text-[#E8ECF3] hover:bg-white/[0.06] transition"
@@ -446,12 +464,20 @@ function SidebarTreeView(props: {
           </svg>
         </button>
       </div>
+      <div className="shrink-0 px-2 py-2 border-b border-white/[0.06]">
+        <input
+          className="w-full rounded-[6px] border border-white/[0.08] bg-[#121722] px-2 py-1.5 text-xs text-[#E8ECF3] placeholder-[#6B7394] outline-none focus:border-[#2584FF]"
+          placeholder="搜索知识点…"
+          value={kpSearch}
+          onChange={(e) => onKpSearchChange(e.target.value)}
+        />
+      </div>
       {/* Tree */}
       <div className="flex-1 overflow-y-auto py-2 px-1">
-        {tree.map((subjectNode) => (
+        {filteredTree.map((gradeNode) => (
           <TreeNodeItem
-            key={subjectNode.id}
-            node={subjectNode}
+            key={gradeNode.id}
+            node={gradeNode}
             expanded={expanded}
             selected={selected}
             depth={0}
@@ -476,8 +502,8 @@ function TreeNodeItem(props: {
   const hasChildren = node.children && node.children.length > 0
   const isExpanded = expanded.has(node.id)
   const isSelected = selected === node.id
-  const isInPath = selected?.startsWith(node.id + '-') ?? false
-  const isSubject = node.level === 'subject'
+  const isInPath = selected === node.id || (selected?.startsWith(`${node.id}::`) ?? false)
+  const isTopLevel = node.level === 'grade'
 
   return (
     <div>
@@ -488,7 +514,7 @@ function TreeNodeItem(props: {
             ? 'bg-[#2584FF]/10 text-[#5C9DFF]'
             : 'text-[#C8CFDF] hover:bg-white/[0.04] hover:text-[#E8ECF3]'
           }
-          ${isSubject ? 'font-semibold' : 'font-normal'}
+          ${isTopLevel ? 'font-semibold' : 'font-normal'}
         `}
         style={{ paddingLeft: `${depth * 16 + 8}px`, color: isSelected || isInPath ? LEVEL_COLORS[node.level] : undefined }}
         onClick={() => {
@@ -539,107 +565,114 @@ function TreeNodeItem(props: {
 }
 
 /* ===================================================================
-   Sub-component: SubjectTopicBar (学科标签 + 专题筛选 + 统计)
+   Sub-component: TopicFilterBar / FilterTagRow / SubjectSelector
    =================================================================== */
 
-function SubjectTopicBar(props: {
-  stats: { subjectCounts: Record<string, number>; topicCounts: Record<string, Record<string, number>> } | null
-  topics: Record<string, { topic: string; count: number }[]> | null
-  selectedSubject: string
+function TopicFilterBar(props: {
+  topics: { topic: string; count: number }[]
   selectedTopic: string
-  onSubjectChange: (subject: string) => void
   onTopicChange: (topic: string) => void
 }) {
-  const { stats, topics, selectedSubject, selectedTopic, onSubjectChange, onTopicChange } = props
-
-  const allSubjects = ['数学', '语文', '英语', '物理', '化学', '生物', '历史', '地理', '政治']
-
-  if (!stats) {
-    return (
-      <div className="flex items-center gap-2 mb-3">
-        <span className="text-xs text-[#6B7394]">加载统计中...</span>
-      </div>
-    )
-  }
-
-  const currentTopics = topics?.[selectedSubject] || []
-  const hasData = Object.keys(stats.subjectCounts).length > 0
+  const { topics, selectedTopic, onTopicChange } = props
+  if (!topics.length) return null
 
   return (
-    <div className="mb-3 space-y-2">
-      {/* 学科标签栏 */}
-      <div className="flex items-center gap-1.5 flex-wrap">
-        <span className="text-[11px] text-[#6B7394] mr-1 shrink-0">学科：</span>
-        <button
-          type="button"
-          className={`rounded-[8px] px-3 py-1 text-xs font-medium transition border ${
-            !selectedSubject
-              ? 'bg-[#2584FF] text-white border-[#2584FF]'
-              : 'bg-white/[0.03] text-[#C8CFDF] border-white/[0.06] hover:bg-white/[0.06]'
-          }`}
-          onClick={() => onSubjectChange('')}
-        >
-          全部
-          {hasData && <span className="ml-1 opacity-60">{Object.values(stats.subjectCounts).reduce((a, b) => a + b, 0)}</span>}
-        </button>
-        {allSubjects.map((subj) => {
-          const count = stats.subjectCounts[subj] || 0
-          const isActive = selectedSubject === subj
-          return (
-            <button
-              key={subj}
-              type="button"
-              className={`rounded-[8px] px-3 py-1 text-xs font-medium transition border ${
-                isActive
-                  ? 'bg-[#2584FF]/15 text-[#5C9DFF] border-[#2584FF]/30'
-                  : count > 0
-                    ? 'bg-white/[0.03] text-[#C8CFDF] border-white/[0.06] hover:bg-white/[0.06]'
-                    : 'bg-white/[0.01] text-[#6B7394] border-white/[0.03] opacity-50'
-              }`}
-              onClick={() => onSubjectChange(isActive ? '' : subj)}
-            >
-              {subj}
-              {count > 0 && <span className={`ml-1 text-[10px] ${isActive ? 'text-[#5C9DFF]' : 'text-[#8A94A9]'}`}>{count}</span>}
-            </button>
-          )
-        })}
-      </div>
-
-      {/* 专题筛选栏（仅当选中学科时显示） */}
-      {selectedSubject && currentTopics.length > 0 && (
-        <div className="flex items-center gap-1 flex-wrap">
-          <span className="text-[11px] text-[#6B7394] mr-1 shrink-0">专题：</span>
+    <div className="flex items-center gap-1 flex-wrap mb-2">
+      <span className="text-[11px] text-[#6B7394] mr-1 shrink-0">专题：</span>
+      <button
+        type="button"
+        className={`rounded-[6px] px-2.5 py-0.5 text-[11px] transition border ${
+          !selectedTopic
+            ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/25'
+            : 'bg-white/[0.02] text-[#8A94A9] border-white/[0.04] hover:bg-white/[0.04] hover:text-[#C8CFDF]'
+        }`}
+        onClick={() => onTopicChange('')}
+      >
+        全部专题
+      </button>
+      {topics.map(({ topic, count }) => {
+        const isActive = selectedTopic === topic
+        return (
           <button
+            key={topic}
             type="button"
             className={`rounded-[6px] px-2.5 py-0.5 text-[11px] transition border ${
-              !selectedTopic
-                ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/25'
+              isActive
+                ? 'bg-[#2584FF]/15 text-[#5C9DFF] border-[#2584FF]/30'
                 : 'bg-white/[0.02] text-[#8A94A9] border-white/[0.04] hover:bg-white/[0.04] hover:text-[#C8CFDF]'
             }`}
-            onClick={() => onTopicChange('')}
+            onClick={() => onTopicChange(isActive ? '' : topic)}
           >
-            全部专题
+            {topic}
+            <span className={`ml-1 opacity-70 ${isActive ? 'text-[#5C9DFF]' : ''}`}>{count}</span>
           </button>
-          {currentTopics.map(({ topic, count }) => {
-            const isActive = selectedTopic === topic
-            return (
-              <button
-                key={topic}
-                type="button"
-                className={`rounded-[6px] px-2.5 py-0.5 text-[11px] transition border ${
-                  isActive
-                    ? 'bg-[#2584FF]/15 text-[#5C9DFF] border-[#2584FF]/30'
-                    : 'bg-white/[0.02] text-[#8A94A9] border-white/[0.04] hover:bg-white/[0.04] hover:text-[#C8CFDF]'
-                }`}
-                onClick={() => onTopicChange(isActive ? '' : topic)}
-              >
-                {topic}
-                <span className={`ml-1 opacity-70 ${isActive ? 'text-[#5C9DFF]' : ''}`}>{count}</span>
-              </button>
-            )
-          })}
-        </div>
-      )}
+        )
+      })}
+    </div>
+  )
+}
+
+function FilterTagRow(props: {
+  label: string
+  value: string
+  options: readonly string[]
+  onChange: (value: string) => void
+}) {
+  const { label, value, options, onChange } = props
+  return (
+    <div className="flex items-start gap-2 py-1.5 flex-wrap">
+      <span className="shrink-0 pt-0.5 text-xs font-medium text-[#8A94A9] w-10">{label}</span>
+      <div className="flex flex-wrap gap-1.5">
+        <button
+          type="button"
+          className={`rounded-full px-3 py-0.5 text-xs transition border ${
+            !value
+              ? 'bg-[#2584FF] text-white border-[#2584FF]'
+              : 'bg-white/[0.03] text-[#C8CFDF] border-white/[0.08] hover:border-[#2584FF]/40'
+          }`}
+          onClick={() => onChange('')}
+        >
+          全部
+        </button>
+        {options.map((opt) => (
+          <button
+            key={opt}
+            type="button"
+            className={`rounded-full px-3 py-0.5 text-xs transition border ${
+              value === opt
+                ? 'bg-[#2584FF] text-white border-[#2584FF]'
+                : 'bg-white/[0.03] text-[#C8CFDF] border-white/[0.08] hover:border-[#2584FF]/40'
+            }`}
+            onClick={() => onChange(value === opt ? '' : opt)}
+          >
+            {opt}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function SubjectSelector(props: {
+  value: string
+  onChange: (subject: string) => void
+  counts?: Record<string, number>
+}) {
+  const { value, onChange, counts } = props
+  return (
+    <div className="relative">
+      <select
+        className="appearance-none rounded-[8px] border border-[#2584FF]/40 bg-[#2584FF] pl-3 pr-8 py-2 text-sm font-semibold text-white shadow-sm outline-none cursor-pointer hover:bg-[#1a6fe0] transition min-w-[140px]"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+      >
+        {TEACHER_SUBJECTS.map((s) => (
+          <option key={s} value={s} className="bg-[#1C2332] text-[#E8ECF3]">
+            高中{s}{counts?.[s] != null ? ` (${counts[s]})` : ''}
+          </option>
+        ))}
+      </select>
+      <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-white/80 text-xs">▼</span>
     </div>
   )
 }
@@ -648,11 +681,11 @@ function SubjectTopicBar(props: {
    Sub-component: ActivePathBar
    =================================================================== */
 
-function ActivePathBar(props: { selected: string | null }) {
-  const { selected } = props
+function ActivePathBar(props: { selected: string | null; subject: string }) {
+  const { selected, subject } = props
   if (!selected) return null
 
-  const { subject, grade, semester, knowledge_point } = parseNodeId(selected)
+  const { grade, semester, knowledge_point } = parseSubjectNodeId(selected, subject)
   const parts = [subject, grade, semester, knowledge_point].filter(Boolean)
 
   return (
@@ -728,6 +761,7 @@ function QuestionCard(props: {
   index: number
   isPublicTab: boolean
   selected: boolean
+  highlightKeyword?: string
   onToggleSelect: () => void
   onEdit: () => void
   onDelete: () => void
@@ -735,7 +769,7 @@ function QuestionCard(props: {
   inBasket: boolean
   onTagClick: (tag: string) => void
 }) {
-  const { question: q, index, isPublicTab, selected, onToggleSelect, onEdit, onDelete, onAddToBasket, inBasket, onTagClick } = props
+  const { question: q, index, isPublicTab, selected, highlightKeyword, onToggleSelect, onEdit, onDelete, onAddToBasket, inBasket, onTagClick } = props
 
   const difficultyColors: Record<string, string> = {
     '基础': 'bg-emerald-500/15 text-emerald-400 border-emerald-500/25',
@@ -745,37 +779,76 @@ function QuestionCard(props: {
 
   return (
     <div
-      className="rounded-[12px] border border-white/[0.06] p-4 transition-all hover:border-[#2584FF]/20 hover:bg-[#1E273B]"
-      style={{ backgroundColor: selected ? 'rgba(37,132,255,0.06)' : '#1C2332' }}
+      className="rounded-[10px] border border-white/[0.08] bg-[#1a2030] p-4 transition-all hover:border-[#2584FF]/30 hover:shadow-md"
+      style={{ backgroundColor: selected ? 'rgba(37,132,255,0.05)' : '#1a2030' }}
     >
-      {/* Header: number, type, difficulty, source */}
-      <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-        <div className="flex items-center gap-3">
-          <label className="flex items-center gap-2 cursor-pointer select-none">
+      {/* 题源 / 元信息（组卷网风格） */}
+      <div className="mb-2 flex items-start justify-between gap-2 flex-wrap">
+        <div className="flex items-center gap-2 flex-wrap min-w-0">
+          <label className="flex items-center gap-2 cursor-pointer select-none shrink-0">
             <input
               type="checkbox"
               checked={selected}
               onChange={onToggleSelect}
               className="rounded border-white/20 bg-transparent accent-[#2584FF]"
             />
-            <span className="text-[#5C9DFF] font-semibold text-sm">题号 {String(index).padStart(2, '0')}</span>
           </label>
-          <span className="rounded-[6px] bg-white/[0.04] px-2 py-0.5 text-xs text-[#8A94A9] border border-white/[0.06]">
-            {q.question_type}
+          <span className="text-xs text-[#5C9DFF] hover:underline truncate">
+            {[q.grade, q.source].filter(Boolean).join(' · ') || '未标注题源'}
           </span>
-          <span className={`rounded-[6px] px-2 py-0.5 text-xs border ${difficultyColors[q.difficulty] || 'bg-white/[0.04] text-[#8A94A9] border-white/[0.06]'}`}>
-            {q.difficulty}
-          </span>
-          <span className="text-xs text-[#C8CFDF] ml-1">{q.source}</span>
         </div>
-        <span className="text-[10px] text-[#6B7394]">
-          {q.created_at ? new Date(q.created_at).toLocaleDateString('zh-CN') : ''}
+        <span className="text-[10px] text-[#6B7394] shrink-0">
+          {q.updated_at ? new Date(q.updated_at).toLocaleDateString('zh-CN') : ''}
         </span>
       </div>
 
-      {/* Question Content */}
+      {/* 标签行：题型 / 难度 / 知识点 / 能力维度 */}
+      <div className="mb-3 flex flex-wrap gap-1.5">
+        <span className="rounded-full bg-[#2584FF]/12 px-2.5 py-0.5 text-[11px] text-[#5C9DFF] border border-[#2584FF]/20">
+          {q.question_type}
+        </span>
+        <span className={`rounded-full px-2.5 py-0.5 text-[11px] border ${difficultyColors[q.difficulty] || 'bg-white/[0.04] text-[#8A94A9] border-white/[0.06]'}`}>
+          {q.difficulty}
+        </span>
+        {q.knowledge_point && (
+          <span className="rounded-full bg-white/[0.04] px-2.5 py-0.5 text-[11px] text-[#8A94A9] border border-white/[0.06] max-w-[200px] truncate">
+            {q.knowledge_point}
+          </span>
+        )}
+        {q.ability_dimension && (
+          <span className="rounded-full bg-violet-500/10 px-2.5 py-0.5 text-[11px] text-violet-300 border border-violet-500/20">
+            {q.ability_dimension}
+          </span>
+        )}
+        {q.suitable_stage && (
+          <span className="rounded-full bg-amber-500/10 px-2.5 py-0.5 text-[11px] text-amber-300 border border-amber-500/20">
+            {q.suitable_stage}
+          </span>
+        )}
+        {q.textbook_version && (
+          <span className="rounded-full bg-cyan-500/10 px-2.5 py-0.5 text-[11px] text-cyan-300 border border-cyan-500/20">
+            {q.textbook_version}
+          </span>
+        )}
+        {q.stats && q.stats.total_attempts > 0 && (
+          <>
+            {q.stats.error_rate != null && (
+              <span className="rounded-full bg-red-500/10 px-2.5 py-0.5 text-[11px] text-red-300 border border-red-500/20" title="错误率">
+                错 {(q.stats.error_rate * 100).toFixed(0)}%
+              </span>
+            )}
+            {q.stats.avg_score_rate != null && (
+              <span className="rounded-full bg-emerald-500/10 px-2.5 py-0.5 text-[11px] text-emerald-300 border border-emerald-500/20" title="平均得分率">
+                得分 {(q.stats.avg_score_rate * 100).toFixed(0)}%
+              </span>
+            )}
+          </>
+        )}
+      </div>
+
+      {/* 题干 */}
       <div className="mb-3 text-sm leading-relaxed text-[#E8ECF3]">
-        <MathRenderer text={q.content} className="text-sm leading-relaxed" />
+        <SearchHighlight text={q.content} keyword={highlightKeyword} className="text-sm leading-relaxed" />
       </div>
 
       {/* Options - 2x2 grid for choice questions */}
@@ -789,38 +862,14 @@ function QuestionCard(props: {
                 className="rounded-[8px] bg-white/[0.03] border border-white/[0.04] px-3 py-2"
               >
                 <span className="font-semibold text-[#5C9DFF] mr-1">{letters[oi] || `${oi + 1}. `}</span>
-                <MathRenderer text={opt} className="inline" />
+                <SearchHighlight text={opt} keyword={highlightKeyword} className="inline text-sm" />
               </div>
             )
           })}
         </div>
       )}
 
-      {/* Answer & Analysis */}
-      <div className="mb-3 space-y-2 rounded-[8px] bg-white/[0.02] p-3 text-xs">
-        <div className="flex items-start gap-2">
-          <span className="font-semibold text-emerald-400 shrink-0 mt-0.5">答案：</span>
-          <span className="text-[#C8CFDF]">
-            <MathRenderer text={q.answer} className="inline" />
-          </span>
-        </div>
-        {q.analysis && q.analysis !== '暂无' && (
-          <div className="flex items-start gap-2">
-            <span className="font-semibold text-[#5C9DFF] shrink-0 mt-0.5">解析：</span>
-            <span className="text-[#8A94A9]">
-              <MathRenderer text={q.analysis} className="inline" />
-            </span>
-          </div>
-        )}
-        {q.knowledge_point && (
-          <div className="flex items-start gap-2">
-            <span className="font-semibold text-[#6B7394] shrink-0 mt-0.5">知识点：</span>
-            <span className="text-[#6B7394]">{q.knowledge_point}</span>
-          </div>
-        )}
-      </div>
-
-      {/* Tags */}
+      {/* 列表页不展开答案解析，编辑/查看可见 */}
       {q.tags && q.tags.length > 0 && (
         <div className="mb-3 flex flex-wrap gap-1.5">
           {q.tags.map((tag: string, i: number) => (
@@ -878,10 +927,10 @@ function QuestionCard(props: {
         <div className="flex-1" />
         <button
           type="button"
-          className={`inline-flex items-center gap-1 rounded-[6px] px-3 py-1.5 text-xs border transition ${
+          className={`inline-flex items-center gap-1 rounded-[6px] px-4 py-1.5 text-xs font-medium border transition ${
             inBasket
-              ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/25'
-              : 'bg-white/[0.04] text-[#C8CFDF] border-white/[0.06] hover:bg-white/[0.08] hover:text-[#E8ECF3]'
+              ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
+              : 'bg-[#2584FF] text-white border-[#2584FF] hover:bg-[#1a6fe0]'
           }`}
           onClick={onAddToBasket}
         >
@@ -907,8 +956,10 @@ function EditQuestionModal(props: {
   onClose: () => void
   isPublicTab: boolean
   editingMode: 'edit' | 'view'
+  teacherId: string
+  onReload?: () => void
 }) {
-  const { editing, setEditing, onSave, onClose, isPublicTab, editingMode } = props
+  const { editing, setEditing, onSave, onClose, isPublicTab, editingMode, teacherId, onReload } = props
   const readonly = editingMode === 'view'
   const [showGeoboard, setShowGeoboard] = useState(false)
 
@@ -927,6 +978,30 @@ function EditQuestionModal(props: {
             : '添加题目'}
           {editing.id && <span className="text-xs text-[#8A94A9] font-normal">ID: {editing.id.slice(0, 8)}</span>}
         </h3>
+
+        {editing.stats && editing.stats.total_attempts > 0 && (
+          <div className="mb-4 flex flex-wrap gap-2 text-xs">
+            <span className="rounded-[6px] bg-white/[0.04] px-2 py-1 text-[#8A94A9]">
+              作答 {editing.stats.total_attempts} 次
+            </span>
+            {editing.stats.error_rate != null && (
+              <span className="rounded-[6px] bg-red-500/10 px-2 py-1 text-red-300">
+                错误率 {(editing.stats.error_rate * 100).toFixed(1)}%
+              </span>
+            )}
+            {editing.stats.avg_score_rate != null && (
+              <span className="rounded-[6px] bg-emerald-500/10 px-2 py-1 text-emerald-300">
+                平均得分率 {(editing.stats.avg_score_rate * 100).toFixed(1)}%
+              </span>
+            )}
+          </div>
+        )}
+
+        {editing.id && teacherId && (
+          <div className="mb-4">
+            <QuestionAiPanel teacherId={teacherId} question={editing} onSavedVariant={onReload} />
+          </div>
+        )}
 
         <div className="space-y-3">
           {/* Subject + Grade + Type + Difficulty */}
@@ -1148,7 +1223,7 @@ export default function TeacherQuestionBankPage() {
 
   // Filters
   const [filters, setFilters] = useState({
-    subject: '',
+    subject: '数学',
     grade: '',
     question_type: '',
     difficulty: '',
@@ -1156,7 +1231,21 @@ export default function TeacherQuestionBankPage() {
     keyword: '',
     visibility: 'personal' as 'personal' | 'public',
     knowledge_point: '',
+    textbook_version: '',
+    ability_dimension: '',
+    suitable_stage: '',
+    knowledge_point_id: '',
+    min_error_rate: '',
+    max_error_rate: '',
+    min_estimated_time: '',
+    max_estimated_time: '',
   })
+  const [showAdvanced, setShowAdvanced] = useState(false)
+  const [batchAiLoading, setBatchAiLoading] = useState(false)
+
+  const activeSubject = filters.subject || '数学'
+  const subjectTree = useMemo(() => buildSubjectKnowledgeTree(activeSubject), [activeSubject])
+  const [kpSearch, setKpSearch] = useState('')
 
   // Tree state
   const [expandedNodes, setExpandedNodes] = useState<Set<string>>(new Set())
@@ -1187,9 +1276,8 @@ export default function TeacherQuestionBankPage() {
   const mainRef = useRef<HTMLDivElement>(null)
 
   // Question types based on current filter subject
-  const questionTypes = filters.subject
-    ? (SUBJECT_QUESTION_TYPES[filters.subject] || ALL_QUESTION_TYPES)
-    : ALL_QUESTION_TYPES
+  const questionTypes = SUBJECT_QUESTION_TYPES[activeSubject] || ALL_QUESTION_TYPES
+  const currentTopics = subjectTopics?.[activeSubject] || []
 
   /* ---- Load data ---- */
   const load = useCallback(async () => {
@@ -1208,6 +1296,14 @@ export default function TeacherQuestionBankPage() {
       if (filters.source) apiFilters.source = filters.source
       if (filters.keyword) apiFilters.keyword = filters.keyword
       if (filters.knowledge_point) apiFilters.knowledge_point = filters.knowledge_point
+      if (filters.textbook_version) apiFilters.textbook_version = filters.textbook_version
+      if (filters.ability_dimension) apiFilters.ability_dimension = filters.ability_dimension
+      if (filters.suitable_stage) apiFilters.suitable_stage = filters.suitable_stage
+      if (filters.knowledge_point_id) apiFilters.knowledge_point_id = filters.knowledge_point_id
+      if (filters.min_error_rate) apiFilters.min_error_rate = filters.min_error_rate
+      if (filters.max_error_rate) apiFilters.max_error_rate = filters.max_error_rate
+      if (filters.min_estimated_time) apiFilters.min_estimated_time = filters.min_estimated_time
+      if (filters.max_estimated_time) apiFilters.max_estimated_time = filters.max_estimated_time
 
       const data = await fetchQuestions(teacherId, apiFilters)
       setItems(data.items)
@@ -1228,7 +1324,7 @@ export default function TeacherQuestionBankPage() {
     if (!teacherId) return
     let cancelled = false
     Promise.all([
-      fetchTopics(teacherId).catch(() => null),
+      fetchTopics(teacherId, activeSubject).catch(() => null),
       fetchQuestionStats(teacherId).catch(() => null),
     ]).then(([topics, stats]) => {
       if (cancelled) return
@@ -1236,13 +1332,21 @@ export default function TeacherQuestionBankPage() {
       setQuestionStats(stats)
     })
     return () => { cancelled = true }
-  }, [teacherId])
+  }, [teacherId, activeSubject])
 
-  /* ---- Quick subject/topic handlers ---- */
-  const handleQuickSubject = useCallback((subject: string) => {
-    setFilters((f) => ({ ...f, subject, knowledge_point: '', grade: '' }))
+  /* ---- Subject / topic handlers ---- */
+  const handleSubjectChange = useCallback((subject: string) => {
+    setFilters((f) => ({
+      ...f,
+      subject,
+      grade: '',
+      knowledge_point: '',
+      question_type: '',
+    }))
     setQuickTopicTag('')
     setSelectedTreeNode(null)
+    setExpandedNodes(new Set())
+    setKpSearch('')
     setPage(1)
   }, [])
 
@@ -1255,14 +1359,6 @@ export default function TeacherQuestionBankPage() {
   /* ---- Build active tags from filters ---- */
   const activeTagChips = useMemo((): ActiveTag[] => {
     const chips: ActiveTag[] = []
-    if (filters.subject) {
-      chips.push({
-        id: 'tag-subject',
-        label: filters.subject,
-        type: 'subject',
-        onRemove: () => { setFilters((f) => ({ ...f, subject: '', knowledge_point: '' })); setSelectedTreeNode(null); setPage(1) },
-      })
-    }
     if (filters.grade) {
       chips.push({
         id: 'tag-grade',
@@ -1303,6 +1399,30 @@ export default function TeacherQuestionBankPage() {
         onRemove: () => { setFilters((f) => ({ ...f, source: '' })); setPage(1) },
       })
     }
+    if (filters.textbook_version) {
+      chips.push({
+        id: 'tag-tbv',
+        label: filters.textbook_version,
+        type: 'custom',
+        onRemove: () => { setFilters((f) => ({ ...f, textbook_version: '' })); setPage(1) },
+      })
+    }
+    if (filters.ability_dimension) {
+      chips.push({
+        id: 'tag-ability',
+        label: filters.ability_dimension,
+        type: 'custom',
+        onRemove: () => { setFilters((f) => ({ ...f, ability_dimension: '' })); setPage(1) },
+      })
+    }
+    if (filters.suitable_stage) {
+      chips.push({
+        id: 'tag-stage',
+        label: filters.suitable_stage,
+        type: 'custom',
+        onRemove: () => { setFilters((f) => ({ ...f, suitable_stage: '' })); setPage(1) },
+      })
+    }
     // Additional tag-based chips
     activeFilterTags.forEach((tag) => {
       chips.push({
@@ -1327,16 +1447,16 @@ export default function TeacherQuestionBankPage() {
 
   const handleTreeSelect = useCallback((nodeId: string) => {
     setSelectedTreeNode(nodeId)
-    const path = parseNodeId(nodeId)
+    const path = parseSubjectNodeId(nodeId, activeSubject)
     setFilters((f) => ({
       ...f,
-      subject: path.subject || f.subject,
+      subject: activeSubject,
       grade: path.grade || f.grade,
       knowledge_point: path.knowledge_point || '',
     }))
     setQuickTopicTag('')
     setPage(1)
-  }, [])
+  }, [activeSubject])
 
   /* ---- Tag click from question card ---- */
   const handleTagClick = useCallback((tag: string) => {
@@ -1350,7 +1470,7 @@ export default function TeacherQuestionBankPage() {
   /* ---- Clear all filters ---- */
   const handleClearAll = useCallback(() => {
     setFilters({
-      subject: '',
+      subject: activeSubject,
       grade: '',
       question_type: '',
       difficulty: '',
@@ -1358,12 +1478,21 @@ export default function TeacherQuestionBankPage() {
       keyword: '',
       visibility: filters.visibility,
       knowledge_point: '',
+      textbook_version: '',
+      ability_dimension: '',
+      suitable_stage: '',
+      knowledge_point_id: '',
+      min_error_rate: '',
+      max_error_rate: '',
+      min_estimated_time: '',
+      max_estimated_time: '',
     })
+    setShowAdvanced(false)
     setActiveFilterTags([])
     setSelectedTreeNode(null)
     setQuickTopicTag('')
     setPage(1)
-  }, [filters.visibility])
+  }, [filters.visibility, activeSubject])
 
   /* ---- CRUD handlers ---- */
   const handleSave = async () => {
@@ -1420,6 +1549,21 @@ export default function TeacherQuestionBankPage() {
       load()
     } catch (e) {
       setMessage(e instanceof Error ? e.message : '更新失败')
+    }
+  }
+
+  const handleBatchAiAnalysis = async () => {
+    if (!teacherId || selected.length === 0) return
+    setBatchAiLoading(true)
+    try {
+      const { updated, skipped } = await batchGenerateQuestionAnalysis(teacherId, selected)
+      setMessage(`AI解析完成：成功 ${updated} 道，跳过 ${skipped} 道`)
+      setSelected([])
+      load()
+    } catch (e) {
+      setMessage(e instanceof Error ? e.message : '批量解析失败')
+    } finally {
+      setBatchAiLoading(false)
     }
   }
 
@@ -1506,7 +1650,12 @@ export default function TeacherQuestionBankPage() {
   /* ---- Derived values ---- */
   const pageCount = Math.max(1, Math.ceil(total / 10))
   const isPublicTab = filters.visibility === 'public'
-  const hasFilters = !!(filters.subject || filters.grade || filters.question_type || filters.difficulty || filters.source || filters.keyword || filters.knowledge_point || activeFilterTags.length > 0)
+  const hasFilters = !!(
+    filters.grade || filters.question_type || filters.difficulty || filters.source || filters.keyword
+    || filters.knowledge_point || filters.textbook_version || filters.ability_dimension || filters.suitable_stage
+    || filters.knowledge_point_id || filters.min_error_rate || filters.max_error_rate
+    || filters.min_estimated_time || filters.max_estimated_time || activeFilterTags.length > 0
+  )
 
   return (
     <div className="min-h-screen text-[#E8ECF3]" style={{ backgroundColor: '#121722' }}>
@@ -1520,42 +1669,58 @@ export default function TeacherQuestionBankPage() {
           style={{ width: sidebarCollapsed ? 48 : 260 }}
         >
           <SidebarTreeView
-            tree={SUBJECT_TREE}
+            tree={subjectTree}
+            subjectLabel={`高中${activeSubject}`}
             expanded={expandedNodes}
             selected={selectedTreeNode}
             onToggle={handleTreeToggle}
             onSelect={handleTreeSelect}
             collapsed={sidebarCollapsed}
             onToggleCollapse={() => setSidebarCollapsed((v) => !v)}
+            kpSearch={kpSearch}
+            onKpSearchChange={setKpSearch}
           />
         </div>
 
         {/* ---- RIGHT CONTENT ---- */}
         <div className="flex-1 flex flex-col overflow-hidden">
-          {/* Top bar: tabs + actions */}
-          <div className="shrink-0 px-5 pt-4 pb-2 flex items-center justify-between gap-3 border-b border-white/[0.04] flex-wrap"
+          {/* Top bar: 学科选择 + tabs */}
+          <div className="shrink-0 px-5 pt-4 pb-3 flex items-center justify-between gap-3 border-b border-white/[0.04] flex-wrap"
             style={{ backgroundColor: '#121722' }}
           >
-            {/* Tabs */}
-            <div className="flex items-center gap-1 rounded-[10px] p-1" style={{ backgroundColor: '#1C2332' }}>
-              <button
-                type="button"
-                className={`rounded-[8px] px-4 py-2 text-sm font-medium transition ${
-                  !isPublicTab ? 'bg-[#2584FF] text-white shadow' : 'text-[#8A94A9] hover:text-[#E8ECF3]'
-                }`}
-                onClick={() => { setFilters({ ...filters, visibility: 'personal', subject: '', grade: '', knowledge_point: '' }); setPage(1); setSelected([]); setSelectedTreeNode(null); setActiveFilterTags([]); setQuickTopicTag('') }}
-              >
-                我的题库
-              </button>
-              <button
-                type="button"
-                className={`rounded-[8px] px-4 py-2 text-sm font-medium transition ${
-                  isPublicTab ? 'bg-emerald-600 text-white shadow' : 'text-[#8A94A9] hover:text-[#E8ECF3]'
-                }`}
-                onClick={() => { setFilters({ ...filters, visibility: 'public', subject: '', grade: '', knowledge_point: '' }); setPage(1); setSelected([]); setSelectedTreeNode(null); setActiveFilterTags([]); setQuickTopicTag('') }}
-              >
-                公域题库
-              </button>
+            <div className="flex items-center gap-4 flex-wrap">
+              <SubjectSelector
+                value={activeSubject}
+                onChange={handleSubjectChange}
+                counts={questionStats?.subjectCounts}
+              />
+              <span className="text-sm text-[#8A94A9]">知识点选题</span>
+              <div className="flex items-center gap-1 rounded-[10px] p-1" style={{ backgroundColor: '#1C2332' }}>
+                <button
+                  type="button"
+                  className={`rounded-[8px] px-4 py-2 text-sm font-medium transition ${
+                    !isPublicTab ? 'bg-[#2584FF] text-white shadow' : 'text-[#8A94A9] hover:text-[#E8ECF3]'
+                  }`}
+                  onClick={() => {
+                    setFilters((f) => ({ ...f, visibility: 'personal', grade: '', knowledge_point: '' }))
+                    setPage(1); setSelected([]); setSelectedTreeNode(null); setActiveFilterTags([]); setQuickTopicTag('')
+                  }}
+                >
+                  我的题库
+                </button>
+                <button
+                  type="button"
+                  className={`rounded-[8px] px-4 py-2 text-sm font-medium transition ${
+                    isPublicTab ? 'bg-emerald-600 text-white shadow' : 'text-[#8A94A9] hover:text-[#E8ECF3]'
+                  }`}
+                  onClick={() => {
+                    setFilters((f) => ({ ...f, visibility: 'public', grade: '', knowledge_point: '' }))
+                    setPage(1); setSelected([]); setSelectedTreeNode(null); setActiveFilterTags([]); setQuickTopicTag('')
+                  }}
+                >
+                  公域题库
+                </button>
+              </div>
             </div>
 
             {/* Exam basket indicator */}
@@ -1573,78 +1738,158 @@ export default function TeacherQuestionBankPage() {
             )}
           </div>
 
-          {/* Sub-header: filters + actions */}
-          <div className="shrink-0 px-5 py-2 flex items-center gap-2 flex-wrap border-b border-white/[0.04]"
-            style={{ backgroundColor: '#121722' }}
-          >
-            {/* Dropdown filters */}
-            <select
-              className={`${selectClass} w-[100px]`}
-              value={filters.question_type}
-              onChange={(e) => { setFilters((f) => ({ ...f, question_type: e.target.value })); setPage(1) }}
-              style={{ backgroundColor: '#1C2332', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 8, padding: '6px 28px 6px 10px', color: '#E8ECF3', fontSize: 12, outline: 'none' }}
-            >
-              <option value="">题型</option>
-              {questionTypes.map((t) => <option key={t} value={t}>{t}</option>)}
-            </select>
-            <select
-              className={`${selectClass} w-[100px]`}
-              value={filters.difficulty}
-              onChange={(e) => { setFilters((f) => ({ ...f, difficulty: e.target.value })); setPage(1) }}
-              style={{ backgroundColor: '#1C2332', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 8, padding: '6px 28px 6px 10px', color: '#E8ECF3', fontSize: 12, outline: 'none' }}
-            >
-              <option value="">难度</option>
-              {DIFFICULTIES.map((d) => <option key={d} value={d}>{d}</option>)}
-            </select>
-            <select
-              className={`${selectClass} w-[100px]`}
+          {/* 组卷网风格多维筛选 */}
+          <div className="shrink-0 px-5 py-3 border-b border-white/[0.04] space-y-1" style={{ backgroundColor: '#161c28' }}>
+            <FilterTagRow
+              label="来源"
               value={filters.source}
-              onChange={(e) => { setFilters((f) => ({ ...f, source: e.target.value })); setPage(1) }}
-              style={{ backgroundColor: '#1C2332', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 8, padding: '6px 28px 6px 10px', color: '#E8ECF3', fontSize: 12, outline: 'none' }}
-            >
-              <option value="">来源</option>
-              {QUESTION_SOURCES.map((s) => <option key={s} value={s}>{s}</option>)}
-            </select>
-            <input
-              className="rounded-[8px] border border-white/[0.08] bg-[#1C2332] px-3 py-1.5 text-xs text-[#E8ECF3] placeholder-[#8A94A9] outline-none transition focus:border-[#2584FF]"
-              style={{ width: 160 }}
-              placeholder="搜索题目关键词…"
-              value={filters.keyword}
-              onChange={(e) => { setFilters((f) => ({ ...f, keyword: e.target.value })); setPage(1) }}
+              options={QUESTION_SOURCES}
+              onChange={(source) => { setFilters((f) => ({ ...f, source })); setPage(1) }}
             />
-
-            {/* Spacer */}
-            <div className="flex-1" />
-
-            {/* Action buttons */}
-            {!isPublicTab && (
-              <div className="flex items-center gap-2">
-                <button type="button" className={btnPrimary} style={{ fontSize: 12, padding: '6px 12px' }} onClick={() => setEditing(emptyQuestion())}>
-                  单题录入
-                </button>
-                <button type="button" className={btnSecondary} style={{ fontSize: 12, padding: '6px 12px' }} onClick={() => setExcelImportOpen(true)}>
-                  批量导入
-                </button>
-                <label className={`${btnSecondary} cursor-pointer ${importing ? 'opacity-50 pointer-events-none' : ''}`} style={{ fontSize: 12, padding: '6px 12px' }}>
-                  {importing ? '提交中…' : '上传拆题'}
-                  <input type="file" accept=".docx,.pdf" className="hidden" onChange={(e) => e.target.files?.[0] && handleImportFile(e.target.files[0])} />
-                </label>
-                <Link to="/teacher/batch-upload" className={btnSecondary} style={{ fontSize: 12, padding: '6px 12px' }}>批量拆题</Link>
+            <FilterTagRow
+              label="题型"
+              value={filters.question_type}
+              options={questionTypes}
+              onChange={(question_type) => { setFilters((f) => ({ ...f, question_type })); setPage(1) }}
+            />
+            <FilterTagRow
+              label="难度"
+              value={filters.difficulty}
+              options={DIFFICULTIES}
+              onChange={(difficulty) => { setFilters((f) => ({ ...f, difficulty })); setPage(1) }}
+            />
+            <FilterTagRow
+              label="版本"
+              value={filters.textbook_version}
+              options={TEXTBOOK_VERSIONS}
+              onChange={(textbook_version) => { setFilters((f) => ({ ...f, textbook_version })); setPage(1) }}
+            />
+            <FilterTagRow
+              label="能力"
+              value={filters.ability_dimension}
+              options={ABILITY_DIMENSIONS}
+              onChange={(ability_dimension) => { setFilters((f) => ({ ...f, ability_dimension })); setPage(1) }}
+            />
+            <FilterTagRow
+              label="阶段"
+              value={filters.suitable_stage}
+              options={SUITABLE_STAGES}
+              onChange={(suitable_stage) => { setFilters((f) => ({ ...f, suitable_stage })); setPage(1) }}
+            />
+            <div className="flex items-center gap-3 pt-2 flex-wrap">
+              <input
+                className="rounded-[8px] border border-white/[0.08] bg-[#1C2332] px-3 py-1.5 text-xs text-[#E8ECF3] placeholder-[#8A94A9] outline-none transition focus:border-[#2584FF] flex-1 min-w-[160px] max-w-xs"
+                placeholder="全文搜索：题干/选项/答案/解析…"
+                value={filters.keyword}
+                onChange={(e) => { setFilters((f) => ({ ...f, keyword: e.target.value })); setPage(1) }}
+              />
+              <button
+                type="button"
+                className={`rounded-[8px] border px-3 py-1.5 text-xs transition ${
+                  showAdvanced
+                    ? 'border-[#2584FF]/40 bg-[#2584FF]/10 text-[#5C9DFF]'
+                    : 'border-white/[0.08] text-[#8A94A9] hover:text-[#E8ECF3]'
+                }`}
+                onClick={() => setShowAdvanced((v) => !v)}
+              >
+                高级搜索
+              </button>
+              <span className="text-xs text-[#6B7394] shrink-0">
+                共计 <strong className="text-[#E8ECF3]">{total}</strong> 道试题
+                <span className="ml-2 text-[#5C9DFF]">· 高中{activeSubject}</span>
+              </span>
+              <div className="flex-1" />
+              {!isPublicTab && (
+                <div className="flex items-center gap-2 flex-wrap">
+                  <button type="button" className={btnPrimary} style={{ fontSize: 12, padding: '6px 12px' }} onClick={() => setEditing(emptyQuestion(activeSubject))}>
+                    单题录入
+                  </button>
+                  <button type="button" className={btnSecondary} style={{ fontSize: 12, padding: '6px 12px' }} onClick={() => setExcelImportOpen(true)}>
+                    批量导入
+                  </button>
+                  <label className={`${btnSecondary} cursor-pointer ${importing ? 'opacity-50 pointer-events-none' : ''}`} style={{ fontSize: 12, padding: '6px 12px' }}>
+                    {importing ? '提交中…' : '上传拆题'}
+                    <input type="file" accept=".docx,.pdf" className="hidden" onChange={(e) => e.target.files?.[0] && handleImportFile(e.target.files[0])} />
+                  </label>
+                  <Link to="/teacher/batch-upload" className={btnSecondary} style={{ fontSize: 12, padding: '6px 12px' }}>批量拆题</Link>
+                  <Link to="/teacher/analytics" className={btnSecondary} style={{ fontSize: 12, padding: '6px 12px' }}>学情看板</Link>
+                </div>
+              )}
+            </div>
+            {showAdvanced && (
+              <div className="mt-2 rounded-[8px] border border-white/[0.06] bg-[#121722] p-3 space-y-3">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  <label className="block text-xs">
+                    <span className="text-[#8A94A9]">最低错误率 (0-1)</span>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min={0}
+                      max={1}
+                      className={`${inputClass} mt-1`}
+                      placeholder="如 0.4"
+                      value={filters.min_error_rate}
+                      onChange={(e) => { setFilters((f) => ({ ...f, min_error_rate: e.target.value })); setPage(1) }}
+                    />
+                  </label>
+                  <label className="block text-xs">
+                    <span className="text-[#8A94A9]">最高错误率</span>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min={0}
+                      max={1}
+                      className={`${inputClass} mt-1`}
+                      placeholder="如 0.8"
+                      value={filters.max_error_rate}
+                      onChange={(e) => { setFilters((f) => ({ ...f, max_error_rate: e.target.value })); setPage(1) }}
+                    />
+                  </label>
+                  <label className="block text-xs">
+                    <span className="text-[#8A94A9]">最短答题时间(秒)</span>
+                    <input
+                      type="number"
+                      min={0}
+                      className={`${inputClass} mt-1`}
+                      value={filters.min_estimated_time}
+                      onChange={(e) => { setFilters((f) => ({ ...f, min_estimated_time: e.target.value })); setPage(1) }}
+                    />
+                  </label>
+                  <label className="block text-xs">
+                    <span className="text-[#8A94A9]">最长答题时间(秒)</span>
+                    <input
+                      type="number"
+                      min={0}
+                      className={`${inputClass} mt-1`}
+                      value={filters.max_estimated_time}
+                      onChange={(e) => { setFilters((f) => ({ ...f, max_estimated_time: e.target.value })); setPage(1) }}
+                    />
+                  </label>
+                </div>
+                <div>
+                  <span className="mb-1 block text-xs text-[#8A94A9]">知识点（树形选择，需先选左侧年级）</span>
+                  <KnowledgePointTreeSelector
+                    subject={activeSubject}
+                    grade={filters.grade || '高一'}
+                    value={filters.knowledge_point_id ? [filters.knowledge_point_id] : []}
+                    onChange={(ids) => {
+                      setFilters((f) => ({ ...f, knowledge_point_id: ids[0] ?? '' }))
+                      setPage(1)
+                    }}
+                  />
+                </div>
               </div>
             )}
           </div>
 
-          {/* Active path + filter chips */}
+          {/* 专题 + 路径 + 筛选标签 */}
           <div className="shrink-0 px-5 pt-3">
-            <SubjectTopicBar
-              stats={questionStats}
-              topics={subjectTopics}
-              selectedSubject={filters.subject}
+            <TopicFilterBar
+              topics={currentTopics}
               selectedTopic={quickTopicTag}
-              onSubjectChange={handleQuickSubject}
               onTopicChange={handleQuickTopic}
             />
-            <ActivePathBar selected={selectedTreeNode} />
+            <ActivePathBar selected={selectedTreeNode} subject={activeSubject} />
             <FilterChips chips={activeTagChips} onClearAll={hasFilters ? handleClearAll : undefined} />
           </div>
 
@@ -1665,6 +1910,14 @@ export default function TeacherQuestionBankPage() {
                   </button>
                   <button type="button" className={btnSecondary} style={{ fontSize: 12 }} onClick={handleBatchTagUpdate}>
                     批量改标签
+                  </button>
+                  <button
+                    type="button"
+                    className="inline-flex items-center gap-1 rounded-[8px] border border-violet-600/30 bg-transparent px-3 py-1.5 text-xs font-medium text-violet-300 transition hover:bg-violet-500/10 disabled:opacity-50"
+                    disabled={batchAiLoading}
+                    onClick={handleBatchAiAnalysis}
+                  >
+                    {batchAiLoading ? 'AI解析中…' : `AI批量生成解析 (${selected.length})`}
                   </button>
                   <button
                     type="button"
@@ -1727,6 +1980,7 @@ export default function TeacherQuestionBankPage() {
                   index={i + 1 + (page - 1) * 10}
                   isPublicTab={isPublicTab}
                   selected={selected.includes(q.id!)}
+                  highlightKeyword={filters.keyword}
                   onToggleSelect={() => toggleSelect(q.id!)}
                   onEdit={() => setEditing(q)}
                   onDelete={() => handleDeleteOne(q.id!)}
@@ -1776,6 +2030,8 @@ export default function TeacherQuestionBankPage() {
           onClose={() => setEditing(null)}
           isPublicTab={isPublicTab}
           editingMode={isPublicTab ? 'view' : 'edit'}
+          teacherId={teacherId}
+          onReload={load}
         />
       )}
 

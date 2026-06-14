@@ -30,6 +30,7 @@ export function normalizeQuestionPayload(payload = {}) {
     analysis: sanitizeAnalysisText(payload.analysis),
     ability_dimension: payload.ability_dimension || '',
     suitable_stage: payload.suitable_stage || '',
+    textbook_version: payload.textbook_version || '',
     estimated_time: payload.estimated_time != null && payload.estimated_time !== ''
       ? Number(payload.estimated_time)
       : null,
