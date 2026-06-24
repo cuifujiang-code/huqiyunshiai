@@ -9,6 +9,7 @@ import dotenv from 'dotenv'
 import { createServer } from 'http'
 import { fileURLToPath } from 'url'
 import { dirname, join } from 'path'
+import { registerPaperRoutes } from './server/paperRoute.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const rootEnvLocal = join(__dirname, '..', '.env.local')
@@ -76,7 +77,10 @@ const volunteerApi = await safeImport('./server/batch/volunteerApi.js', 'volunte
 const handwritingHandout = await safeImport('./api/ocr/handwriting-to-handout.js', 'ocr/handwriting-to-handout')
 const handwritingBook = await safeImport('./api/ocr/handwriting-to-book.js', 'ocr/handwriting-to-book')
 const handoutOcrProcess = await safeImport('./api/handouts/ocr-process.js', 'handouts/ocr-process')
-const catalogRouter = await safeImport('./api/catalog/[...path].js', 'catalog catch-all')
+// book-specific routes (Vercel file-system routing → Express explicit routes)
+const bookDocxImport = await safeImport('./api/teacher/book/docx-import.js', 'book/docx-import')
+const bookDocxClean = await safeImport('./api/teacher/book/docx-clean-chapters.js', 'book/docx-clean-chapters')
+const bookSmartGenerate = await safeImport('./api/teacher/book/smart-generate.js', 'book/smart-generate')
 
 // ─── 注册路由 ───
 
@@ -102,16 +106,21 @@ app.all('/api/batch/worker', batchRouter)
 app.all('/api/batch/auto-retry', batchRouter)
 app.all('/api/batch/debug', batchRouter)
 
-// teacher（显式 questions，其余走 catch-all handler，不用 Express 通配符）
+// teacher（显式 questions → 独立 book 路由 → catch-all 兜底）
 app.all('/api/teacher/questions/import', teacherQuestionsImport)
 app.all('/api/teacher/questions/:id/versions/restore', teacherQuestionVersionRestore)
 app.all('/api/teacher/questions/:id/versions', teacherQuestionVersions)
 app.all('/api/teacher/questions/:id', teacherQuestionsById)
 app.all('/api/teacher/questions', teacherQuestionsList)
+// book 独立路由（必须放在 catch-all middleware 之前）
+app.all('/api/teacher/book/docx-import', bookDocxImport)
+app.all('/api/teacher/book/docx-clean-chapters', bookDocxClean)
+app.all('/api/teacher/book/smart-generate', bookSmartGenerate)
 app.use((req, res, next) => {
   const p = req.path || ''
   if (!p.startsWith('/api/teacher/')) return next()
   if (p === '/api/teacher/questions' || p.startsWith('/api/teacher/questions/')) return next()
+  if (p.startsWith('/api/teacher/book/')) return next()  // book 路由已显式处理
   return teacherCatchAll(req, res)
 })
 
@@ -141,6 +150,9 @@ app.all('/api/ocr/handwriting-to-handout', handwritingHandout)
 app.all('/api/ocr/handwriting-to-book', handwritingBook)
 
 app.all('/api/handouts/ocr-process', handoutOcrProcess)
+
+// 试题试卷
+registerPaperRoutes(app)
 
 // ─── 404 兜底 ───
 app.use('/api', (req, res) => {
