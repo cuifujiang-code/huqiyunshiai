@@ -5,6 +5,7 @@ import {
   isPhotoSearchStoreConfigured,
   listPhotoSearchHistory,
 } from './student/photoSearchStore.js'
+import { generateExamReviewReport, listExamReviewHistory } from './student/examReviewService.js'
 
 export function registerStudentRoutes(app) {
   app.post('/api/student/photo-search', async (req, res) => {
@@ -80,6 +81,63 @@ export function registerStudentRoutes(app) {
       return res.status(500).json({
         success: false,
         message: error instanceof Error ? error.message : '加载记录失败',
+      })
+    }
+  })
+
+  app.post('/api/student/exam-review/generate', async (req, res) => {
+    setNoCacheHeaders(res)
+    const {
+      userId,
+      examName,
+      examDate,
+      scoresJson,
+      lossReasons,
+      selectedSubjects,
+    } = req.body ?? {}
+
+    if (!userId?.trim()) {
+      return res.status(400).json({ success: false, message: '缺少 userId' })
+    }
+    if (!examDate?.trim()) {
+      return res.status(400).json({ success: false, message: '请填写考试日期' })
+    }
+    if (!scoresJson || typeof scoresJson !== 'object') {
+      return res.status(400).json({ success: false, message: '请填写各科成绩' })
+    }
+
+    try {
+      const report = await generateExamReviewReport({
+        studentUserId: userId.trim(),
+        examName: examName?.trim() || '期中考试',
+        examDate: examDate.trim(),
+        scoresJson,
+        lossReasons: Array.isArray(lossReasons) ? lossReasons : [],
+        selectedSubjects,
+      })
+      return res.json({ success: true, message: '复盘报告已生成', report })
+    } catch (error) {
+      console.error('[student/exam-review/generate]', error)
+      return res.status(500).json({
+        success: false,
+        message: error instanceof Error ? error.message : '生成复盘报告失败',
+      })
+    }
+  })
+
+  app.get('/api/student/exam-review/history', async (req, res) => {
+    setNoCacheHeaders(res)
+    const userId = String(req.query.userId || '').trim()
+    if (!userId) {
+      return res.status(400).json({ success: false, message: '缺少 userId' })
+    }
+    try {
+      const history = await listExamReviewHistory(userId, 20)
+      return res.json({ success: true, history })
+    } catch (error) {
+      return res.status(500).json({
+        success: false,
+        message: error instanceof Error ? error.message : '加载历史失败',
       })
     }
   })

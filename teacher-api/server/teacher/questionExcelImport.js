@@ -1,5 +1,6 @@
 import * as XLSX from 'xlsx'
 import * as questionBank from './questionBankStore.js'
+import { stripImagePlaceholders } from './questionContentSanitize.js'
 
 const SUBJECTS = ['语文', '数学', '英语', '物理', '化学', '生物', '历史', '地理']
 const GRADES = ['七年级', '八年级', '九年级', '高一', '高二', '高三']
@@ -100,9 +101,9 @@ function buildQuestionPayload(raw) {
   }
 
   return {
-    content: cellStr(raw.content),
-    answer: cellStr(raw.answer),
-    analysis: cellStr(raw.analysis),
+    content: stripImagePlaceholders(cellStr(raw.content)),
+    answer: stripImagePlaceholders(cellStr(raw.answer)),
+    analysis: stripImagePlaceholders(cellStr(raw.analysis)),
     question_type: cellStr(raw.question_type),
     difficulty: cellStr(raw.difficulty) || '中等',
     subject: cellStr(raw.subject),
@@ -165,7 +166,8 @@ export async function importQuestionsFromExcel(teacherId, buffer) {
   let inserted = []
   if (validQuestions.length) {
     try {
-      inserted = await questionBank.createQuestionsBatch(teacherId, validQuestions)
+      const result = await questionBank.createQuestionsBatch(teacherId, validQuestions)
+      inserted = Array.isArray(result) ? result : (result.items ?? [])
     } catch (err) {
       errors.push({ row: 0, message: `批量写入失败：${err.message}` })
       return {

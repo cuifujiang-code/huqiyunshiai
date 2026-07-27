@@ -306,7 +306,7 @@ export default function StudentPhotoSearchPage() {
           <div className="space-y-6">
             {/* 功能说明 */}
             <p className="text-sm text-slate-400">
-              拍摄或上传题目照片，系统将使用阿里云 OCR 识别文字，并结合题库与 DeepSeek 给出答案与解析。
+              拍摄或上传题目照片，系统将使用豆包视觉 OCR 识别文字，并结合题库与 AI 给出答案与解析。
             </p>
 
             {/* 相机 / 相册按钮 */}

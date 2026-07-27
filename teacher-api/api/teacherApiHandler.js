@@ -155,8 +155,10 @@ export async function handleTeacherApi(req, res, pathSegments = []) {
 
     if (path === 'questions/batch' && method === 'POST') {
       const teacherId = requireTeacher(body, query)
-      const data = await questionBank.createQuestionsBatch(teacherId, body.questions ?? [])
-      return res.status(200).json({ success: true, questions: data })
+      const result = await questionBank.createQuestionsBatch(teacherId, body.questions ?? [])
+      const questions = Array.isArray(result) ? result : result.items
+      const topicTagging = Array.isArray(result) ? undefined : result.topicTagging
+      return res.status(200).json({ success: true, questions, topicTagging })
     }
 
     if (path === 'questions/import' && method === 'POST') {
@@ -211,9 +213,10 @@ export async function handleTeacherApi(req, res, pathSegments = []) {
     if (path === 'questions/topics' && method === 'GET') {
       const teacherId = query.teacherId
       if (!teacherId) return res.status(400).json({ success: false, message: '缺少 teacherId' })
-      const subject = query.subject || ''
-      const topics = await questionBank.listTopics(teacherId, subject || undefined)
-      return res.status(200).json({ success: true, topics })
+      const subject = query.subject || undefined
+      const grade = query.grade || undefined
+      const result = await questionBank.listTopics(teacherId, subject, grade)
+      return res.status(200).json({ success: true, ...result })
     }
 
     if (path === 'questions/stats' && method === 'GET') {
@@ -342,6 +345,46 @@ export async function handleTeacherApi(req, res, pathSegments = []) {
         level: body.level,
       })
       return res.status(200).json({ success: true, chapters })
+    }
+
+    if (path === 'books/export-pdf' && method === 'POST') {
+      const { html, title, coverStyle, outline, studentHtml, teacherHtml } = body || {}
+      if (!html && !studentHtml && !teacherHtml) {
+        return res.status(400).json({ error: '缺少 html 参数' })
+      }
+
+      const options = { title: title || '教辅书', coverStyle: coverStyle || 'academic', outline: outline || [] }
+
+      try {
+        const { generateBookPdf, generateBookDualPdf } = await import('../server/teacher/bookPdfExporter.js')
+
+        // 双版本导出
+        if (studentHtml && teacherHtml) {
+          const { studentBuffer, teacherBuffer } = await generateBookDualPdf({
+            htmlStudent: studentHtml,
+            htmlTeacher: teacherHtml,
+            options,
+          })
+          return res.status(200).json({
+            success: true,
+            studentBase64: studentBuffer.toString('base64'),
+            teacherBase64: teacherBuffer.toString('base64'),
+          })
+        }
+
+        // 单版本导出
+        const pdfBuffer = await generateBookPdf({ html, options })
+        res.setHeader('Content-Type', 'application/pdf')
+        res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(options.title)}.pdf"`)
+        res.setHeader('Content-Length', pdfBuffer.length)
+        return res.status(200).send(pdfBuffer)
+      } catch (err) {
+        console.error('[books/export-pdf] 导出失败:', err.message)
+        return res.status(503).json({
+          success: false,
+          message: `PDF 导出服务不可用: ${err.message}`,
+        })
+      }
     }
 
     if (path === 'books' && method === 'POST') {

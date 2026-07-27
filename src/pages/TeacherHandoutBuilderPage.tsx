@@ -1,12 +1,13 @@
-import { useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import DashboardHeader from '../components/layout/DashboardHeader'
-import HandoutEditorPanel from '../components/handout/HandoutEditorPanel'
+import HandoutCanvasEditor from '../components/handout/HandoutCanvasEditor'
+import HandoutEditorSidebar from '../components/handout/HandoutEditorSidebar'
 import HandoutOcrImportModal from '../components/handout/HandoutOcrImportModal'
 import { createCustomHandout, createModule } from '../components/handout/handoutConstants'
 import { useAuth } from '../context/AuthContext'
 import { incrementFeatureUsage } from '../lib/featureUsage'
 import { exportHtmlAsWord } from '../lib/exportDoc'
-import { handoutPreviewHtml, handoutToExportHtml, handoutBookmarkOutline } from '../lib/handoutExport'
+import { handoutToExportHtml, handoutBookmarkOutline } from '../lib/handoutExport'
 import { parseWorkbuddyJson, pdfFileToPageImages } from '../lib/handoutImportUtils'
 import { exportToPdf } from '../lib/exportPdf'
 import {
@@ -17,7 +18,6 @@ import {
   saveHandout,
 } from '../lib/teacherApi'
 import type { ExportMode, HandoutContent, HandoutMode } from '../types/teacher'
-import { btnPrimary, btnSecondary, inputClass } from '../types/teacher'
 
 const MODES: { mode: HandoutMode; emoji: string; title: string; desc: string }[] = [
   { mode: 'school', emoji: '🏫', title: '校内45分钟大班课', desc: '知识梳理 + 典型例题 + 课堂练习 + 课后作业' },
@@ -48,8 +48,7 @@ function enrichDraft(draft: HandoutContent, teacherName?: string): HandoutConten
 
 export default function TeacherHandoutBuilderPage() {
   const { profile } = useAuth()
-  const teacherId = profile?.id ?? ''
-  const previewRef = useRef<HTMLDivElement>(null)
+  const teacherId = profile?.id ?? profile?.phone ?? ''
 
   const [step, setStep] = useState<'pick' | 'edit'>('pick')
   const [mode, setMode] = useState<HandoutMode>('school')
@@ -67,14 +66,24 @@ export default function TeacherHandoutBuilderPage() {
   const [knowledgePoint, setKnowledgePoint] = useState('')
   const [exportMode, setExportMode] = useState<ExportMode>('print')
   const [message, setMessage] = useState<string | null>(null)
+  const [activeModuleIndex, setActiveModuleIndex] = useState<number | null>(null)
+
+  useEffect(() => {
+    if (activeModuleIndex == null) return
+    document.getElementById(`handout-mod-${activeModuleIndex}`)?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+  }, [activeModuleIndex])
 
   const loadHistory = async () => {
-    if (!teacherId) return
+    if (!teacherId) {
+      setMessage('请先登录后再加载历史讲义')
+      return
+    }
     try {
       const list = await fetchHandouts(teacherId)
       setHistory(list.map((h) => ({ id: h.id!, title: h.title, mode: h.mode })))
-    } catch {
-      /* ignore */
+      setMessage(list.length ? `已加载 ${list.length} 条历史讲义` : '暂无历史讲义')
+    } catch (e) {
+      setMessage(e instanceof Error ? e.message : '加载失败')
     }
   }
 
@@ -110,7 +119,11 @@ export default function TeacherHandoutBuilderPage() {
   }
 
   const handleSave = async () => {
-    if (!teacherId || !content) return
+    if (!teacherId) {
+      setMessage('请先登录后再保存讲义')
+      return
+    }
+    if (!content) return
     try {
       const saved = await saveHandout(teacherId, {
         id: handoutId ?? undefined,
@@ -140,9 +153,10 @@ export default function TeacherHandoutBuilderPage() {
       return
     }
     setOcrLoading(true)
-    setMessage(null)
+    setMessage('正在转换 PDF 页面…')
     try {
       const pageImages = await pdfFileToPageImages(file)
+      setMessage(`PDF 已拆分为 ${pageImages.length} 页，豆包视觉识别中（约 1–3 分钟/页）…`)
       const result = await handwritingToHandout({
         teacherId,
         pageImages,
@@ -195,11 +209,20 @@ export default function TeacherHandoutBuilderPage() {
   }
 
   const handleExportPdf = async () => {
-    if (!previewRef.current || !content) return
-    await exportToPdf(previewRef.current, `${content.title}.pdf`, {
-      mode: exportMode,
-      bookmarks: handoutBookmarkOutline({ ...content, exportMode }),
-    })
+    if (!content) return
+    const el = document.createElement('div')
+    el.className = 'handout-pdf-export bg-white text-black'
+    el.style.cssText = 'position:fixed;left:-9999px;top:0;width:794px;padding:32px;background:#fff'
+    el.innerHTML = handoutToExportHtml({ ...content, exportMode }, { mode: exportMode })
+    document.body.appendChild(el)
+    try {
+      await exportToPdf(el, `${content.title}.pdf`, {
+        mode: exportMode,
+        bookmarks: handoutBookmarkOutline({ ...content, exportMode }),
+      })
+    } finally {
+      document.body.removeChild(el)
+    }
   }
 
   if (step === 'pick') {
@@ -250,51 +273,42 @@ export default function TeacherHandoutBuilderPage() {
         onImportPdf={handleImportPdf}
         loading={ocrLoading}
       />
-      <main className="mx-auto grid max-w-7xl gap-4 px-5 py-6 lg:grid-cols-2">
-        <section className="max-h-[calc(100vh-8rem)] overflow-y-auto pr-1">
+      <main className="mx-auto grid max-w-[1400px] gap-5 px-5 py-6 lg:grid-cols-[minmax(260px,300px)_1fr]">
+        <aside className="max-h-[calc(100vh-8rem)] overflow-y-auto lg:sticky lg:top-4 lg:self-start">
           {message && <p className="mb-3 text-sm text-blue-300">{message}</p>}
-          <div className="mb-3 flex gap-2 text-xs">
-            <span className="text-[#8A94A9] self-center">导出模式</span>
-            <button
-              type="button"
-              className={`rounded px-3 py-1 ${exportMode === 'print' ? 'bg-[#2584FF] text-white' : 'bg-slate-700 text-slate-300'}`}
-              onClick={() => setExportMode('print')}
-            >
-              可打印版
-            </button>
-            <button
-              type="button"
-              className={`rounded px-3 py-1 ${exportMode === 'digital' ? 'bg-[#2584FF] text-white' : 'bg-slate-700 text-slate-300'}`}
-              onClick={() => setExportMode('digital')}
-            >
-              电子阅读版
-            </button>
-          </div>
           {content && (
-            <HandoutEditorPanel
+            <HandoutEditorSidebar
               content={{ ...content, exportMode }}
               onChange={setContent}
+              exportMode={exportMode}
+              onExportModeChange={setExportMode}
+              activeModuleIndex={activeModuleIndex}
+              onSelectModule={setActiveModuleIndex}
               onImportOcr={() => setOcrModalOpen(true)}
               onGenerateSummary={handleGenerateSummary}
               summaryLoading={summaryLoading}
               knowledgePoint={knowledgePoint}
               onKnowledgePointChange={setKnowledgePoint}
+              onSave={() => void handleSave()}
+              onExportWord={handleExportWord}
+              onExportPdf={() => void handleExportPdf()}
             />
           )}
-          <div className="mt-4 flex flex-wrap gap-2">
-            <button type="button" className="btn-brand flex-1 min-w-[100px]" onClick={() => void handleSave()}>保存讲义</button>
-            <button type="button" className="btn-secondary flex-1 min-w-[100px]" onClick={handleExportWord}>导出 Word</button>
-            <button type="button" className="btn-secondary flex-1 min-w-[100px]" onClick={() => void handleExportPdf()}>导出 PDF</button>
-          </div>
-          <p className="mt-2 text-xs text-[#8A94A9]">PDF 含章节书签 · Word 保留字体颜色 · 缺答案自动标注</p>
-        </section>
-        <section className="sticky top-4 max-h-[calc(100vh-6rem)] overflow-y-auto">
-          <p className="mb-2 text-xs text-[#8A94A9]">导出预览（{exportMode === 'print' ? '可打印版' : '电子阅读版'}）</p>
-          <div
-            ref={previewRef}
-            className="rounded-[12px] border border-white/[0.06] bg-white p-2 text-black shadow-xl"
-            dangerouslySetInnerHTML={{ __html: content ? handoutPreviewHtml({ ...content, exportMode }) : '' }}
-          />
+          <p className="mt-3 text-xs text-[#8A94A9]">PDF 含章节书签 · Word 保留字体颜色 · 缺答案自动标注</p>
+        </aside>
+        <section className="min-w-0">
+          <p className="mb-2 text-xs text-[#8A94A9]">
+            讲义编辑区 · 点击模块直接编辑 · {exportMode === 'print' ? '可打印版' : '电子阅读版'}
+          </p>
+          {content && (
+            <HandoutCanvasEditor
+              content={{ ...content, exportMode }}
+              onChange={setContent}
+              activeModuleIndex={activeModuleIndex}
+              onActiveModuleIndexChange={setActiveModuleIndex}
+              exportMode={exportMode}
+            />
+          )}
         </section>
       </main>
     </div>

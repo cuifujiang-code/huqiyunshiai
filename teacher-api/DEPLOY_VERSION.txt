@@ -1,0 +1,4 @@
+deploy-version=20260624-fix2
+docx-import=lazy-omml+createRequire
+examParser=server/examParser.js
+install=bash install-production.sh

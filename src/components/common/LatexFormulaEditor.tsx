@@ -1,6 +1,7 @@
 import { useState, useRef, useCallback, useMemo } from 'react'
-import katex from 'katex'
 import 'katex/dist/katex.min.css'
+import { renderLatexText } from './MathRenderer'
+import FormulaEditButton from './FormulaEditButton'
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -126,72 +127,9 @@ const TOOLBAR_GROUPS: ToolbarGroup[] = [
 /*  渲染函数                                                            */
 /* ------------------------------------------------------------------ */
 
-/** 将含 $...$ / $$...$$ 的文本拆分渲染为 HTML */
 function renderPreview(text: string): string {
   if (!text.trim()) return ''
-
-  const parts: string[] = []
-  let remaining = text
-  // 先匹配块级 $$...$$
-  const blockRe = /\$\$([\s\S]*?)\$\$/g
-  let lastIndex = 0
-  let match: RegExpExecArray | null
-
-  while ((match = blockRe.exec(remaining)) !== null) {
-    // 块级之前的文本 → 处理行内
-    const before = remaining.slice(lastIndex, match.index)
-    if (before) parts.push(renderInlineSegments(before))
-    // 渲染块级公式
-    const latex = match[1].trim()
-    if (latex) {
-      try {
-        parts.push(
-          `<div class="my-3 flex justify-center overflow-x-auto">${katex.renderToString(latex, {
-            displayMode: true,
-            throwOnError: false,
-            trust: true,
-          })}</div>`,
-        )
-      } catch {
-        parts.push(`<pre class="my-2 p-2 rounded bg-red-900/30 text-red-300 text-xs font-mono">[渲染失败] ${escapeHtml(latex)}</pre>`)
-      }
-    }
-    lastIndex = match.index + match[0].length
-  }
-
-  const after = remaining.slice(lastIndex)
-  if (after) parts.push(renderInlineSegments(after))
-
-  return parts.join('')
-}
-
-function renderInlineSegments(text: string): string {
-  if (!text) return ''
-  const parts: string[] = []
-  const re = /\$([^$\n]+?)\$/g
-  let lastIndex = 0
-  let match: RegExpExecArray | null
-
-  while ((match = re.exec(text)) !== null) {
-    const before = text.slice(lastIndex, match.index)
-    if (before) parts.push(escapeHtml(before).replace(/\n/g, '<br/>'))
-    const latex = match[1].trim()
-    try {
-      parts.push(katex.renderToString(latex, { displayMode: false, throwOnError: false, trust: true }))
-    } catch {
-      parts.push(`<span class="text-red-400">$${escapeHtml(latex)}$</span>`)
-    }
-    lastIndex = match.index + match[0].length
-  }
-
-  const rest = text.slice(lastIndex)
-  if (rest) parts.push(escapeHtml(rest).replace(/\n/g, '<br/>'))
-
-  return parts.join('')
-}
-
-function escapeHtml(s: string): string {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+  return renderLatexText(text)
 }
 
 /* ------------------------------------------------------------------ */
@@ -288,7 +226,7 @@ export default function LatexFormulaEditor({
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
             <path d="M2 14L6 2l3 9 3-7 2 10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
-          插入公式
+          快捷符号
           <svg
             width="12"
             height="12"
@@ -300,6 +238,17 @@ export default function LatexFormulaEditor({
             <path d="M3 4.5l3 3 3-3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
         </button>
+
+        <FormulaEditButton
+          getInsertContext={() => {
+            const ta = textareaRef.current
+            if (!ta) return { text: value, start: value.length, end: value.length }
+            return { text: value, start: ta.selectionStart, end: ta.selectionEnd }
+          }}
+          onInsert={(wrapped) => insertAtCursor(wrapped)}
+          className="inline-flex items-center gap-1 rounded-md border border-emerald-500/40 bg-emerald-500/10 px-2.5 py-1.5 text-xs font-medium text-emerald-300 hover:bg-emerald-500/20"
+          label="∑ 公式编辑器"
+        />
 
         {!value.trim() && (
           <span className="text-xs text-slate-500">支持 $行内$ 和 $$块级$$ 公式 · Ctrl+B 快速包裹</span>

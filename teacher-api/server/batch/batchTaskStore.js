@@ -5,6 +5,7 @@ import {
   getSupabaseAdmin,
   isSupabaseAdminConfigured,
 } from '../supabaseAdmin.js'
+import { createQuestionsBatch } from '../teacher/questionBankStore.js'
 
 const TASKS = 'batch_decompose_tasks'
 const ITEMS = 'batch_decompose_items'
@@ -592,27 +593,14 @@ export async function syncTeacherQuestionBankFromBatch(batchId, teacherId) {
   if (error) throw new Error(error.message)
   if (!data?.length) return 0
 
-  const tqbRows = data.map((q) => ({
-    teacher_id: teacherId,
-    subject: q.subject,
-    grade: q.grade,
-    knowledge_point: q.knowledge_point,
-    question_type: q.question_type,
-    difficulty: q.difficulty,
-    content: q.content,
-    options: q.options ?? [],
-    answer: q.answer,
-    analysis: q.analysis,
+  const result = await createQuestionsBatch(teacherId, data.map((q) => ({
+    ...q,
     source: '批量拆题',
-    tags: q.tags ?? [],
-    updated_at: nowIso(),
-  }))
-
-  const { error: tqbErr } = await getSupabaseAdmin().from('teacher_question_bank').insert(tqbRows)
-  if (tqbErr) throw new Error(tqbErr.message)
-
-  console.log('[batchTaskStore] teacher_question_bank 批量同步完成', { batchId, count: tqbRows.length })
-  return tqbRows.length
+  })))
+  const count = Array.isArray(result) ? result.length : (result.items?.length ?? 0)
+  const tagging = Array.isArray(result) ? null : result.topicTagging
+  console.log('[batchTaskStore] teacher_question_bank 批量同步完成', { batchId, count, topicTagging: tagging })
+  return count
 }
 
 /** 以 batch_question_bank 实际数量同步 batch_decompose_tasks.imported_questions */

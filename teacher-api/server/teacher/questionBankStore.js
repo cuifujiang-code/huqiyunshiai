@@ -4,6 +4,15 @@ import { archiveQuestionVersion, listQuestionVersions, restoreQuestionVersion } 
 import { getStatsForQuestions } from './questionStatsStore.js'
 import { filterQuestionIdsByStats } from './questionStatsStore.js'
 import { buildQuestionSearchText, escapeIlikePattern } from './questionSearch.js'
+import {
+  enrichTopicFields,
+  buildGroupedTopicStats,
+  questionMatchesTopicFilter,
+  hasTopicTaxonomy,
+  batchEnrichQuestions,
+} from './topicTaxonomy/index.js'
+
+const enrichQuestionTopic = enrichTopicFields
 
 const TABLE = 'teacher_question_bank'
 
@@ -11,6 +20,48 @@ export { isSupabaseAdminConfigured, listQuestionVersions, restoreQuestionVersion
 
 function nowIso() {
   return new Date().toISOString()
+}
+
+/** 专题筛选：与侧栏统计相同的解析逻辑 */
+async function filterQuestionIdsByTopic(teacherId, filters, visibility) {
+  const admin = getSupabaseAdmin()
+  const useResolved = Boolean(filters.subject && hasTopicTaxonomy(filters.grade, filters.subject))
+  const selectCols = useResolved
+    ? 'id, topic_group, topic_tag, grade, knowledge_point, tags, content, analysis, subject'
+    : 'id, topic_group, topic_tag'
+
+  let query = admin.from(TABLE).select(selectCols)
+  if (visibility === 'public') {
+    query = query.eq('visibility', 'public')
+  } else {
+    query = query.eq('teacher_id', teacherId)
+  }
+  if (filters.subject) query = query.eq('subject', filters.subject)
+  if (filters.grade) query = query.eq('grade', filters.grade)
+
+  let { data, error } = await query
+  if (error && useResolved && /topic_group|topic_tag|column/.test(error.message)) {
+    let fallbackQuery = admin.from(TABLE).select('id, grade, knowledge_point, tags, content, analysis, subject')
+    if (visibility === 'public') {
+      fallbackQuery = fallbackQuery.eq('visibility', 'public')
+    } else {
+      fallbackQuery = fallbackQuery.eq('teacher_id', teacherId)
+    }
+    if (filters.subject) fallbackQuery = fallbackQuery.eq('subject', filters.subject)
+    if (filters.grade) fallbackQuery = fallbackQuery.eq('grade', filters.grade)
+    const fallback = await fallbackQuery
+    if (fallback.error) throw new Error(fallback.error.message)
+    data = fallback.data
+  } else if (error) {
+    throw new Error(error.message)
+  }
+
+  return (data ?? []).filter((row) => {
+    if (useResolved) return questionMatchesTopicFilter(row, filters)
+    if (filters.topic_tag && row.topic_tag !== filters.topic_tag) return false
+    if (filters.topic_group && row.topic_group !== filters.topic_group) return false
+    return true
+  }).map((r) => r.id)
 }
 
 export async function listQuestions(teacherId, filters = {}) {
@@ -32,6 +83,14 @@ export async function listQuestions(teacherId, filters = {}) {
     }
   }
 
+  let topicQuestionIds = null
+  if (filters.topic_tag || filters.topic_group) {
+    topicQuestionIds = await filterQuestionIdsByTopic(teacherId, filters, visibility)
+    if (!topicQuestionIds.length) {
+      return { items: [], total: 0, page, pageSize, visibility, highlight: filters.keyword || '' }
+    }
+  }
+
   let query = admin
     .from(TABLE)
     .select('*', { count: 'exact' })
@@ -45,6 +104,7 @@ export async function listQuestions(teacherId, filters = {}) {
   }
 
   if (statsQuestionIds) query = query.in('id', statsQuestionIds)
+  if (topicQuestionIds) query = query.in('id', topicQuestionIds)
 
   if (filters.subject) query = query.eq('subject', filters.subject)
   if (filters.grade) query = query.eq('grade', filters.grade)
@@ -55,6 +115,10 @@ export async function listQuestions(teacherId, filters = {}) {
   if (filters.ability_dimension) query = query.eq('ability_dimension', filters.ability_dimension)
   if (filters.suitable_stage) query = query.eq('suitable_stage', filters.suitable_stage)
   if (filters.knowledge_point) query = query.ilike('knowledge_point', `%${filters.knowledge_point}%`)
+  if (!topicQuestionIds) {
+    if (filters.topic_tag) query = query.eq('topic_tag', filters.topic_tag)
+    if (filters.topic_group) query = query.eq('topic_group', filters.topic_group)
+  }
   if (filters.knowledge_point_id) {
     query = query.contains('knowledge_point_ids', [filters.knowledge_point_id])
   }
@@ -91,26 +155,30 @@ export async function getQuestion(teacherId, id) {
 }
 
 function rowFromNormalized(teacherId, normalized, defaults = {}) {
+  const enriched = enrichQuestionTopic(normalized)
   return {
     teacher_id: teacherId,
-    subject: normalized.subject,
-    grade: normalized.grade,
-    knowledge_point: normalized.knowledge_point || '',
-    knowledge_point_ids: normalized.knowledge_point_ids ?? [],
-    question_type: normalized.question_type,
-    difficulty: normalized.difficulty || '中等',
-    content: normalized.content,
-    options: normalized.options ?? [],
-    answer: normalized.answer || '',
-    analysis: normalized.analysis || '',
-    source: normalized.source || defaults.source || '手动录入',
-    textbook_version: normalized.textbook_version || '',
-    ability_dimension: normalized.ability_dimension || '',
-    suitable_stage: normalized.suitable_stage || '',
-    estimated_time: normalized.estimated_time,
-    search_text: buildQuestionSearchText(normalized),
-    tags: normalized.tags ?? [],
-    visibility: normalized.visibility || 'personal',
+    subject: enriched.subject,
+    grade: enriched.grade,
+    knowledge_point: enriched.knowledge_point || '',
+    knowledge_point_ids: enriched.knowledge_point_ids ?? [],
+    question_type: enriched.question_type,
+    difficulty: enriched.difficulty || '中等',
+    content: enriched.content,
+    options: enriched.options ?? [],
+    answer: enriched.answer || '',
+    analysis: enriched.analysis || '',
+    source: enriched.source || defaults.source || '手动录入',
+    textbook_version: enriched.textbook_version || '',
+    ability_dimension: enriched.ability_dimension || '',
+    suitable_stage: enriched.suitable_stage || '',
+    estimated_time: enriched.estimated_time,
+    topic_group: enriched.topic_group || '',
+    topic_tag: enriched.topic_tag || '',
+    latex_blocks: Array.isArray(enriched.latex_blocks) ? enriched.latex_blocks : [],
+    search_text: buildQuestionSearchText(enriched),
+    tags: enriched.tags ?? [],
+    visibility: enriched.visibility || 'personal',
     updated_at: nowIso(),
   }
 }
@@ -127,14 +195,17 @@ export async function createQuestion(teacherId, payload) {
 export async function createQuestionsBatch(teacherId, questions) {
   const { sanitizeQuestionsForStorage } = await import('../batch/questionContentSanitizer.js')
   const cleaned = await sanitizeQuestionsForStorage(questions)
-  const rows = cleaned.map((q) => {
-    const normalized = normalizeQuestionPayload(q)
-    return rowFromNormalized(teacherId, normalized, { source: '试卷导入' })
-  })
+  const { items: enrichedList, matched, fallback, total } = batchEnrichQuestions(
+    cleaned.map((q) => normalizeQuestionPayload(q)),
+  )
+  const rows = enrichedList.map((q) => rowFromNormalized(teacherId, q, { source: '试卷导入' }))
   const admin = getSupabaseAdmin()
   const { data, error } = await admin.from(TABLE).insert(rows).select('*')
   if (error) throw new Error(error.message)
-  return data ?? []
+  return {
+    items: data ?? [],
+    topicTagging: { matched, fallback, total },
+  }
 }
 
 export async function updateQuestion(teacherId, id, payload) {
@@ -151,25 +222,29 @@ export async function updateQuestion(teacherId, id, payload) {
   await archiveQuestionVersion(admin, id, teacherId, existing)
 
   const normalized = normalizeQuestionPayload(payload)
+  const enriched = enrichQuestionTopic(normalized)
   const row = {
-    subject: normalized.subject,
-    grade: normalized.grade,
-    knowledge_point: normalized.knowledge_point || '',
-    knowledge_point_ids: normalized.knowledge_point_ids ?? [],
-    question_type: normalized.question_type,
-    difficulty: normalized.difficulty || '中等',
-    content: normalized.content,
-    options: normalized.options ?? [],
-    answer: normalized.answer || '',
-    analysis: normalized.analysis || '',
-    source: normalized.source || '手动录入',
-    textbook_version: normalized.textbook_version || '',
-    ability_dimension: normalized.ability_dimension || '',
-    suitable_stage: normalized.suitable_stage || '',
-    estimated_time: normalized.estimated_time,
-    search_text: buildQuestionSearchText(normalized),
-    tags: normalized.tags ?? [],
-    visibility: normalized.visibility,
+    subject: enriched.subject,
+    grade: enriched.grade,
+    knowledge_point: enriched.knowledge_point || '',
+    knowledge_point_ids: enriched.knowledge_point_ids ?? [],
+    question_type: enriched.question_type,
+    difficulty: enriched.difficulty || '中等',
+    content: enriched.content,
+    options: enriched.options ?? [],
+    answer: enriched.answer || '',
+    analysis: enriched.analysis || '',
+    source: enriched.source || '手动录入',
+    textbook_version: enriched.textbook_version || '',
+    ability_dimension: enriched.ability_dimension || '',
+    suitable_stage: enriched.suitable_stage || '',
+    estimated_time: enriched.estimated_time,
+    topic_group: enriched.topic_group || '',
+    topic_tag: enriched.topic_tag || '',
+    latex_blocks: Array.isArray(enriched.latex_blocks) ? enriched.latex_blocks : [],
+    search_text: buildQuestionSearchText(enriched),
+    tags: enriched.tags ?? [],
+    visibility: enriched.visibility,
     updated_at: nowIso(),
   }
   const { data, error } = await admin
@@ -255,7 +330,45 @@ function extractTopicFromKnowledgePoint(kp, subject) {
   return kp.trim()
 }
 
-export async function listTopics(teacherId, subject) {
+export async function listTopics(teacherId, subject, grade = '') {
+  if (subject && hasTopicTaxonomy(grade, subject)) {
+    const admin = getSupabaseAdmin()
+    let query = admin
+      .from(TABLE)
+      .select('topic_group, topic_tag, grade, knowledge_point, tags, content, analysis, subject')
+      .eq('teacher_id', teacherId)
+      .eq('subject', subject)
+    if (grade) query = query.eq('grade', grade)
+
+    let rows = []
+    const { data, error } = await query
+
+    if (error && /topic_group|topic_tag|column/.test(error.message)) {
+      let fallback = admin
+        .from(TABLE)
+        .select('grade, knowledge_point, tags, content, analysis, subject')
+        .eq('teacher_id', teacherId)
+        .eq('subject', subject)
+      if (grade) fallback = fallback.eq('grade', grade)
+      const fb = await fallback
+      if (fb.error) throw new Error(fb.error.message)
+      rows = fb.data ?? []
+    } else if (error) {
+      throw new Error(error.message)
+    } else {
+      rows = data ?? []
+    }
+
+    const groups = buildGroupedTopicStats(rows, grade, subject)
+    return {
+      grouped: true,
+      subject,
+      grade: grade || undefined,
+      groups,
+      total: rows.length,
+    }
+  }
+
   const admin = getSupabaseAdmin()
   let query = admin.from(TABLE).select('knowledge_point,subject').eq('teacher_id', teacherId)
   if (subject) query = query.eq('subject', subject)
@@ -282,7 +395,7 @@ export async function listTopics(teacherId, subject) {
   for (const key of Object.keys(result)) {
     result[key].sort((a, b) => b.count - a.count)
   }
-  return result
+  return { grouped: false, topics: result }
 }
 
 export async function getQuestionStats(teacherId) {

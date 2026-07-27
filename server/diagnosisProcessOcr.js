@@ -5,7 +5,7 @@ import {
   markDiagnosisTaskOcrDone,
 } from './diagnosisTaskStore.js'
 
-const OCR_TIMEOUT_MS = 9_000
+const OCR_TIMEOUT_MS = Number(process.env.DIAGNOSIS_OCR_TIMEOUT_MS || 180_000)
 
 function withTimeout(promise, ms, message) {
   return new Promise((resolve, reject) => {
@@ -23,7 +23,7 @@ function withTimeout(promise, ms, message) {
 }
 
 /**
- * 步骤一：解析试卷 + 阿里云手写 OCR
+ * 步骤一：解析试卷 + 豆包视觉 OCR 答题卡
  */
 export async function runDiagnosisOcrStep(taskId) {
   const task = await getDiagnosisTaskByTaskId(taskId)
@@ -75,7 +75,7 @@ export async function runDiagnosisOcrStep(taskId) {
   }
 
   try {
-    return await withTimeout(work(), OCR_TIMEOUT_MS, 'OCR 识别超时（超过10秒），请压缩图片后重试')
+    return await withTimeout(work(), OCR_TIMEOUT_MS, `OCR 识别超时（超过 ${Math.round(OCR_TIMEOUT_MS / 1000)} 秒），请压缩图片后重试`)
   } catch (error) {
     const message = error instanceof Error ? error.message : 'OCR 处理失败'
     console.error('[diagnosisProcessOcr] 失败', { taskId, message })

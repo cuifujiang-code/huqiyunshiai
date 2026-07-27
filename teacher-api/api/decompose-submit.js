@@ -1,4 +1,3 @@
-import { waitUntil } from '@vercel/functions'
 import '../server/applyUrlShim.js'
 import { randomUUID } from 'crypto'
 import {
@@ -6,6 +5,7 @@ import {
   isDecomposeTaskStoreConfigured,
 } from '../server/teacher/decomposeTaskStore.js'
 import { triggerDecomposeProcess } from '../server/teacher/decomposeTrigger.js'
+import { runInBackground } from '../server/runInBackground.js'
 import { applyApiHeaders, handleOptions } from '../server/apiResponse.js'
 
 export default async function handler(req, res) {
@@ -47,8 +47,7 @@ export default async function handler(req, res) {
       },
     })
 
-    // waitUntil 确保 trigger 请求在响应返回后仍能完成（Vercel 不取消 Promise）
-    waitUntil(triggerDecomposeProcess(taskId))
+    runInBackground(() => triggerDecomposeProcess(taskId))
 
     return res.status(200).json({
       success: true,

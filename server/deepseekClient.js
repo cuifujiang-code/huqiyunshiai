@@ -27,6 +27,17 @@ export class DeepSeekApiError extends Error {
   }
 }
 
+/** 剥离 data URL 前缀，返回纯 base64 + MIME */
+export function normalizeImageBase64(input, defaultMime = 'image/jpeg') {
+  const raw = String(input ?? '').trim()
+  if (!raw) return { base64: '', mimeType: defaultMime }
+  const match = raw.match(/^data:([^;]+);base64,(.+)$/is)
+  if (match) {
+    return { base64: match[2].replace(/\s/g, ''), mimeType: match[1] || defaultMime }
+  }
+  return { base64: raw.replace(/\s/g, ''), mimeType: defaultMime }
+}
+
 export function getDeepSeekConfig() {
   const apiKey = process.env.DEEPSEEK_API_KEY
   const apiBase = (process.env.DEEPSEEK_API_BASE_URL || 'https://api.deepseek.com').replace(/\/$/, '')

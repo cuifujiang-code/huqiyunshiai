@@ -9,6 +9,7 @@ import {
   retryDecomposeTask,
   type DecomposeTaskSummary,
 } from '../lib/teacherApi'
+import SplitQuestionEditor from '../components/SplitQuestionEditor'
 import type { BankQuestion } from '../types/teacher'
 import { btnPrimary, btnSecondary, inputClass } from '../types/teacher'
 
@@ -137,9 +138,12 @@ export default function TeacherTaskCenterPage() {
     if (!splitPreview || !teacherId) return
     setImporting(true)
     try {
-      await batchImportQuestions(teacherId, splitPreview)
+      const { questions, topicTagging } = await batchImportQuestions(teacherId, splitPreview)
       setSplitPreview(null)
-      setMessage('批量入库成功')
+      const tagMsg = topicTagging
+        ? `；专题自动归类：成功 ${topicTagging.matched}，归入综合题型 ${topicTagging.fallback}`
+        : ''
+      setMessage(`批量入库成功 ${questions.length} 题${tagMsg}`)
     } catch (e) {
       setMessage(e instanceof Error ? e.message : '入库失败')
     } finally {
@@ -151,8 +155,12 @@ export default function TeacherTaskCenterPage() {
     <div className="min-h-screen text-[#E8ECF3]" style={{ backgroundColor: '#121722' }}>
       <DashboardHeader title="拆题任务中心" backTo="/teacher/question-bank" backLabel="返回题库" featureNavRole="teacher" />
       <main className="mx-auto max-w-5xl px-5 py-6">
-        {/* 顶部居中说明 */}
-        <p className="text-center text-sm text-[#8A94A9] mb-5">上传 PDF 自动异步拆卷，解析完成自动存入个人题库</p>
+        <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+          <p className="text-sm text-[#8A94A9]">上传 PDF/Word 自动异步拆卷，解析完成自动存入个人题库</p>
+          <Link to="/teacher/batch-upload" className="btn-brand text-sm px-4 py-2">
+            上传试卷拆题
+          </Link>
+        </div>
 
         {/* 右上角刷新按钮 */}
         <div className="flex justify-end mb-4">
@@ -183,8 +191,8 @@ export default function TeacherTaskCenterPage() {
                 <tr>
                   <td colSpan={5} className="p-12 text-center">
                     <p className="text-[#8A94A9] mb-5">暂无拆题任务</p>
-                    <Link to="/teacher/question-bank" className="btn-brand text-base px-6 py-3">
-                      去上传试卷
+                    <Link to="/teacher/batch-upload" className="btn-brand text-base px-6 py-3">
+                      上传试卷拆题
                     </Link>
                   </td>
                 </tr>
@@ -199,7 +207,16 @@ export default function TeacherTaskCenterPage() {
                     <td className={`p-3 ${statusColor(task.status)}`}>
                       {statusLabel(task.status, task.batchProgress ?? undefined)}
                       {task.status === 'failed' && task.error_message && (
-                        <div className="mt-1 text-xs text-red-300/80">{task.error_message}</div>
+                        <div className="mt-1 text-xs text-red-300/80">
+                          {task.error_message}
+                          {/扫描版\s*PDF/i.test(task.error_message) && (
+                            <div className="mt-1 text-amber-200/90">
+                              请从
+                              <Link to="/teacher/question-bank" className="mx-1 underline">题库</Link>
+                              重新上传该 PDF（系统会自动转为图片 OCR）
+                            </div>
+                          )}
+                        </div>
                       )}
                     </td>
                     <td className="p-3">{task.questionCount || '—'}</td>
@@ -242,10 +259,16 @@ export default function TeacherTaskCenterPage() {
             <div className="space-y-3">
               {splitPreview.map((q, i) => (
                 <div key={i} className="rounded-[8px] border border-white/[0.06] p-3">
-                  <p className="text-xs text-[#8A94A9]">{q.question_type} · {q.difficulty} · {q.knowledge_point}</p>
-                  <textarea className="input-brand mt-2" rows={2} value={q.content} onChange={(e) => {
-                      const next = [...splitPreview]; next[i] = { ...q, content: e.target.value }; setSplitPreview(next)
-                    }} />
+                  <p className="text-xs text-[#8A94A9] mb-2">{q.question_type} · {q.difficulty} · {q.knowledge_point}</p>
+                  <SplitQuestionEditor
+                    question={q}
+                    teacherId={teacherId}
+                    onChange={(updated) => {
+                      const next = [...splitPreview]
+                      next[i] = updated
+                      setSplitPreview(next)
+                    }}
+                  />
                 </div>
               ))}
             </div>

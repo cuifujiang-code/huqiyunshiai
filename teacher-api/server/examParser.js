@@ -659,8 +659,13 @@ async function parsePdfWithMinerU(buffer, fileName) {
   }
 }
 
-/** 解析 .pdf（含扫描版 PDF 检测 + MinerU OCR 回退） */
-async function parsePdf(buffer, fileName) {
+/** 扫描版 PDF 服务端回退（当前由前端转 PNG；此处保留扩展点） */
+async function parsePdfWithVisionFallback(_buffer, _fileName, _meta = {}) {
+  return null
+}
+
+/** 解析 .pdf（含扫描版 PDF 检测 + MinerU / Vision 回退） */
+async function parsePdf(buffer, fileName, meta = {}) {
   console.log('[试卷解析] 开始 PDF', { fileName, bytes: buffer.length })
   const pdfParse = getPdfParse()
   const data = await pdfParse(buffer)
@@ -674,16 +679,25 @@ async function parsePdf(buffer, fileName) {
     pdfImages: pdfImages.length,
   })
 
-  // 文字层内容过少 → 判定为扫描版 PDF → 调用 MinerU OCR
+  // 文字层内容过少 → 判定为扫描版 PDF → MinerU / DeepSeek Vision 回退
   if (!text || text.length < 100) {
-    console.warn('[examParser] PDF 文字层内容过少，判定为扫描版 PDF，尝试 MinerU OCR')
+    console.warn('[examParser] PDF 文字层内容过少，判定为扫描版 PDF')
     const mineruUrl = process.env.MINERU_API_URL
-    if (!mineruUrl) {
-      throw new Error(
-        '检测到扫描版 PDF（无文字层），且 MinerU OCR 服务未配置。请将 PDF 导出为图片后上传，或联系管理员开启 OCR 服务。',
-      )
+    if (mineruUrl) {
+      return await parsePdfWithMinerU(buffer, fileName)
     }
-    return await parsePdfWithMinerU(buffer, fileName)
+    const visionResult = await parsePdfWithVisionFallback(buffer, fileName, meta).catch((err) => {
+      console.warn('[examParser] PDF Vision 回退失败', {
+        message: err instanceof Error ? err.message : String(err),
+      })
+      return null
+    })
+    if (visionResult?.text?.trim()) {
+      return visionResult
+    }
+    throw new Error(
+      '检测到扫描版 PDF（无文字层）。请重新上传该文件（系统会自动转为图片 OCR），或改用 Word(.docx) 格式。',
+    )
   }
 
   return { text, type: 'pdf', ...(pdfImages.length ? { images: pdfImages } : {}) }
@@ -728,7 +742,7 @@ export async function parseExamFile(buffer, fileName, meta = {}) {
 
     // .pdf → pdf-parse；结果为空则判定为扫描版 PDF
     if (lower.endsWith('.pdf')) {
-      return await parsePdf(buffer, fileName)
+      return await parsePdf(buffer, fileName, meta)
     }
 
     throw new Error('标准试卷仅支持 .docx、.pdf、.wps 格式和图片（.png/.jpg/.jpeg/.bmp/.webp/.gif）')

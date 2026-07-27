@@ -2,6 +2,12 @@
  * 高考志愿填报核心算法引擎
  * 严格遵循 knowledge-base/volunteer-filling/rules-spec.md §2、§4
  */
+import {
+  matchMajorProfile,
+  getGradientGuide,
+  buildTierStrategySummary,
+  matchesIntendedMajor,
+} from './volunteerMajorProfiles.js'
 
 const DEFAULT_WEIGHTS = [0.5, 0.3, 0.2]
 const GRADIENT_LEVELS = ['极冲', '冲', '较冲', '稳', '较保', '保']
@@ -126,9 +132,7 @@ export function filterEligibleGroups(admissionRows, input) {
     if ((row.batch_type || '本科') !== batchType) return false
     if (!satisfiesSubjectRequirement(subjects, row.subject_requirement)) return false
     if (intendedMajors?.length) {
-      const major = row.major_name.toLowerCase()
-      const match = intendedMajors.some((m) => major.includes(String(m).toLowerCase()))
-      if (!match) return false
+      if (!matchesIntendedMajor(row.major_name, intendedMajors)) return false
     }
     return true
   })
@@ -166,6 +170,22 @@ export function analyzeAdmissionGroup(rows, userRank) {
   const { gradientLevel, tierLabel } = classifyGradient(probability, rankRatio)
 
   const latest = sorted[0]
+  const profile = matchMajorProfile(latest.major_name)
+  const dbExt = latest.ext_json && typeof latest.ext_json === 'object' ? latest.ext_json : {}
+
+  const historicalAdmission = sorted.map((r) => ({
+    year: r.year,
+    minRank: r.min_rank,
+    avgRank: r.avg_rank ?? null,
+    minScore: r.min_score ?? null,
+    avgScore: r.avg_score ?? null,
+    enrollmentCount: r.enrollment_count ?? null,
+  }))
+
+  const tierExplanation =
+    `录取概率 ${(probability * 100).toFixed(1)}%，位次比 ${rankRatio}（您的位次/预测位次），` +
+    `六级梯度「${gradientLevel}」→ ${getGradientGuide(gradientLevel)}`
+
   return {
     collegeName: latest.college_name,
     majorName: latest.major_name,
@@ -182,7 +202,22 @@ export function analyzeAdmissionGroup(rows, userRank) {
     minRank: latest.min_rank,
     subjectRequirement: latest.subject_requirement,
     historicalYears: sorted.map((r) => r.year),
-    extJson: { historicalRanks: rankValues },
+    majorIntro: dbExt.majorIntro ?? profile.majorIntro,
+    employment: dbExt.employment ?? profile.employment,
+    curriculum: dbExt.curriculum ?? profile.curriculum,
+    careerPaths: dbExt.careerPaths ?? profile.careerPaths,
+    tierExplanation,
+    historicalAdmission,
+    extJson: {
+      historicalRanks: rankValues,
+      historicalAdmission,
+      majorIntro: dbExt.majorIntro ?? profile.majorIntro,
+      employment: dbExt.employment ?? profile.employment,
+      curriculum: dbExt.curriculum ?? profile.curriculum,
+      careerPaths: dbExt.careerPaths ?? profile.careerPaths,
+      tierExplanation,
+      gradientGuide: getGradientGuide(gradientLevel),
+    },
   }
 }
 
@@ -212,10 +247,18 @@ export function generateVolunteerRecommendations(admissionRows, input) {
     result.push(...byTier[tier].slice(0, limit))
   }
 
-  return result.map((item, idx) => ({
-    ...item,
-    sortOrder: idx + 1,
-  }))
+  return {
+    items: result.map((item, idx) => ({
+      ...item,
+      sortOrder: idx + 1,
+    })),
+    tierStrategy: buildTierStrategySummary(result),
+  }
+}
+
+/** 兼容旧调用：仅返回 items 数组 */
+export function generateVolunteerRecommendationsList(admissionRows, input) {
+  return generateVolunteerRecommendations(admissionRows, input).items
 }
 
 export default {

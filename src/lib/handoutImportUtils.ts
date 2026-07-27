@@ -100,34 +100,26 @@ export function countMissingAnswers(modules: HandoutModule[]): number {
   return countMissingAnswersOnClient(modules).filter((m) => m.missingAnswer).length
 }
 
-/** 浏览器端 PDF → 各页 PNG Base64 */
-export async function pdfFileToPageImages(file: File, maxPages = 15): Promise<{ name: string; base64: string }[]> {
-  const pdfjs = await import('pdfjs-dist')
-  pdfjs.GlobalWorkerOptions.workerSrc = new URL(
-    'pdfjs-dist/build/pdf.worker.min.mjs',
-    import.meta.url,
-  ).toString()
+/** 浏览器端 PDF → 各页 PNG Base64（使用 pdfTools 规避 toHex 色彩空间报错） */
+export async function pdfFileToPageImages(file: File, maxPages = 8): Promise<{ name: string; base64: string }[]> {
+  const { pdfToImages, revokeImageUrls } = await import('../utils/pdfTools')
 
-  const buffer = await file.arrayBuffer()
-  const doc = await pdfjs.getDocument({ data: buffer }).promise
-  const count = Math.min(doc.numPages, maxPages)
-  const images: { name: string; base64: string }[] = []
+  const result = await pdfToImages(file, { scale: 1.5, format: 'png', maxPages, endPage: maxPages })
 
-  for (let i = 1; i <= count; i++) {
-    const page = await doc.getPage(i)
-    const viewport = page.getViewport({ scale: 2 })
-    const canvas = document.createElement('canvas')
-    canvas.width = viewport.width
-    canvas.height = viewport.height
-    const ctx = canvas.getContext('2d')
-    if (!ctx) continue
-    await page.render({ canvasContext: ctx, viewport, canvas }).promise
-    const dataUrl = canvas.toDataURL('image/png')
-    images.push({
-      name: `${file.name.replace(/\.pdf$/i, '')}-p${i}.png`,
-      base64: dataUrl.replace(/^data:image\/png;base64,/, ''),
-    })
+  try {
+    const images: { name: string; base64: string }[] = []
+    for (const page of result.pages) {
+      const buffer = await page.blob.arrayBuffer()
+      const bytes = new Uint8Array(buffer)
+      let binary = ''
+      for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i])
+      images.push({
+        name: `${file.name.replace(/\.pdf$/i, '')}-p${page.pageNumber}.png`,
+        base64: btoa(binary),
+      })
+    }
+    return images
+  } finally {
+    revokeImageUrls(result)
   }
-
-  return images
 }

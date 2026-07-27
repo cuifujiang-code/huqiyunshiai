@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { Link } from 'react-router-dom'
 import DashboardHeader from '../../components/layout/DashboardHeader'
 import { useAuth } from '../../context/AuthContext'
 import { fileToBase64 } from '../../lib/fileBase64'
@@ -170,11 +171,11 @@ export default function BatchUploadPage() {
     }
   }
 
-  const handleStart = async (batchId: string) => {
+  const handleStart = async (batchId: string, options?: { rerun?: boolean }) => {
     if (!teacherId) return
     setStartingId(batchId)
     try {
-      const res = await startBatchTask(teacherId, batchId)
+      const res = await startBatchTask(teacherId, batchId, options)
       setMessage(res.message || '已启动批量拆题')
       await loadTasks()
     } catch (e) {
@@ -204,6 +205,10 @@ export default function BatchUploadPage() {
         <header className="mb-8 text-center">
           <h1 className="text-2xl font-bold text-blue-100 sm:text-3xl">批量录题</h1>
           <p className="mt-2 text-sm text-slate-400">上传 PDF/Word 试卷，AI 自动拆题入库</p>
+          <p className="mt-2 text-xs text-slate-500">
+            查看历史 PDF 异步拆题任务请前往
+            <Link to="/teacher/task-center" className="mx-1 text-cyan-400 hover:underline">拆题任务中心</Link>
+          </p>
         </header>
 
         {/* 上传区域 */}
@@ -347,9 +352,12 @@ export default function BatchUploadPage() {
                             type="button"
                             className={btnPrimary}
                             disabled={startingId === task.batchId}
-                            onClick={() => handleStart(task.batchId)}
+                            onClick={() => handleStart(
+                              task.batchId,
+                              task.status === 'failed' ? { rerun: true } : undefined,
+                            )}
                           >
-                            {startingId === task.batchId ? '启动中...' : '启动'}
+                            {startingId === task.batchId ? '启动中...' : task.status === 'failed' ? '重新拆题' : '启动'}
                           </button>
                         )}
                         {(task.status === 'running' || task.status === 'partial') && (

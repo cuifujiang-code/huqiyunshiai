@@ -161,12 +161,14 @@ export async function batchUpdateVisibility(teacherId: string, ids: string[], vi
 }
 
 export async function batchImportQuestions(teacherId: string, questions: Partial<BankQuestion>[]) {
-  const r = await postApiJson<{ success: boolean; questions: BankQuestion[] }>(
+  const r = await postApiJson<{ success: boolean; questions: BankQuestion[]; topicTagging?: { matched: number; fallback: number; total: number } }>(
     teacherApiUrl('questions/batch'),
     { teacherId, questions },
     '批量入库',
   )
-  if (r.kind === 'success' && r.data.success) return r.data.questions
+  if (r.kind === 'success' && r.data.success) {
+    return { questions: r.data.questions, topicTagging: r.data.topicTagging }
+  }
   throw new Error(r.kind === 'fallback' ? r.reason : '入库失败')
 }
 
@@ -311,15 +313,32 @@ export async function splitExamPaper(
   throw new Error(r.kind === 'fallback' ? r.reason : '拆题失败')
 }
 
-export async function fetchTopics(teacherId: string, subject?: string) {
+export async function fetchTopics(teacherId: string, subject?: string, grade?: string): Promise<import('../types/teacher').TopicsResponse> {
   const params = new URLSearchParams({ teacherId })
   if (subject) params.set('subject', subject)
+  if (grade) params.set('grade', grade)
   const url = `${teacherApiUrl('questions/topics')}?${params}`
-  const r = await postApiJson<{ success: boolean; topics: Record<string, { topic: string; count: number }[]> }>(
+  const r = await postApiJson<{ success: boolean; grouped?: boolean; groups?: unknown; topics?: unknown; subject?: string; total?: number }>(
     url, null, '专题列表',
     { method: 'GET', timeoutMs: 15000 },
   )
-  if (r.kind === 'success' && r.data.success) return r.data.topics
+  if (r.kind === 'success' && r.data.success) {
+    const payload = r.data
+    // 新接口：{ grouped: true, groups: [...] }
+    if (payload.grouped === true && Array.isArray(payload.groups)) {
+      return payload as import('../types/teacher').TopicsGroupedResponse
+    }
+    // 旧 handler 曾把 grouped 结果包在 topics 里
+    const nested = payload.topics as { grouped?: boolean; groups?: unknown[]; subject?: string; total?: number } | Record<string, { topic: string; count: number }[]>
+    if (nested && typeof nested === 'object' && !Array.isArray(nested) && nested.grouped === true && Array.isArray(nested.groups)) {
+      return nested as import('../types/teacher').TopicsGroupedResponse
+    }
+    // 旧平铺：{ topics: { 数学: [...] } }
+    if (nested && typeof nested === 'object' && !('grouped' in nested)) {
+      return { grouped: false, topics: nested as Record<string, { topic: string; count: number }[]> }
+    }
+    return { grouped: false, topics: {} }
+  }
   throw new Error(r.kind === 'fallback' ? r.reason : '加载专题失败')
 }
 

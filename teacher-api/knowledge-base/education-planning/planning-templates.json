@@ -5,16 +5,70 @@
   "citation_format": "数据来源：{source}（{year}年·{province}·{university}·{major}）",
 
   "empty_data_rule": {
-    "action": "reject_and_return_message",
-    "forbid_ai_hallucination": true,
+    "action": "warn_and_continue",
+    "forbid_ai_hallucination": false,
     "forbid_fabricated_scores": true,
-    "message": "知识库中暂无该目标院校/省份/专业的权威录取数据，系统已禁止 AI 自行编造分数线或位次。请从以下方式补充后再生成：① 在目标院校列表中选择知识库已收录院校；② 联系管理员更新 planning-templates.json；③ 手动填写「特殊说明」中的目标分数参考（需标注来源）。",
+    "degraded_mode": true,
+    "degraded_mode_message": "知识库中暂无该目标院校的精确录取数据，系统已切换至「层级估算模式」，基于同层级院校的录取区间生成参考规划。报告中涉及的分数线为区间估算值，非权威数据，请在正式志愿填报时以教育考试院公布数据为准。",
+    "message": "知识库中暂无该目标院校/省份/专业的精确录取数据。系统已自动切换至层级估算模式，将基于同层级院校录取区间生成参考规划。如需精确数据，请：① 在目标院校列表中选择知识库已收录院校；② 联系管理员更新 planning-templates.json；③ 手动填写「特殊说明」中的目标分数参考。",
     "user_guidance": [
       "请确认院校名称是否为标准全称或常用简称（如「清华」「清华大学」）",
       "请确认省份与高考省份一致（如浙江考生选「浙江」）",
-      "若目标专业不在库中，可尝试相近专业或选择「通用」"
+      "若目标专业不在库中，可尝试相近专业或选择「通用」",
+      "您也可以直接选择院校层次（如「211/双一流」），系统将基于该层次的录取区间生成参考规划"
     ],
-    "http_status": 422
+    "http_status": 200
+  },
+
+  "tier_estimates": {
+    "description": "按院校层次的录取分数线区间估算（以浙江省新高考满分750分为基准），用于知识库未收录具体院校时的降级生成",
+    "estimates": [
+      {
+        "tier": "985/顶尖院校",
+        "aliases": ["985", "顶尖院校", "C9", "清北"],
+        "score_range": { "min": 650, "max": 705 },
+        "rank_range": { "min": 100, "max": 5000 },
+        "typical_universities": ["清华大学", "北京大学", "浙江大学", "复旦大学", "上海交通大学", "中国科学技术大学", "南京大学"],
+        "strategy_hint": "目标为顶尖院校，需各科均衡且至少2科拔尖，建议首考即达目标线附近",
+        "elective_requirement_hint": "物理+化学（多数理工科专业）"
+      },
+      {
+        "tier": "211/双一流",
+        "aliases": ["211", "双一流", "211/双一流"],
+        "score_range": { "min": 600, "max": 660 },
+        "rank_range": { "min": 5000, "max": 30000 },
+        "typical_universities": ["杭州电子科技大学", "宁波大学", "浙江师范大学", "温州医科大学", "同济大学", "武汉大学", "中山大学"],
+        "strategy_hint": "目标为211/双一流院校，需主科稳定在120+，选考科目至少1门等级A",
+        "elective_requirement_hint": "物理（理工科）或不限（文管类）"
+      },
+      {
+        "tier": "省内重点本科",
+        "aliases": ["省重点", "省内重点", "重点本科"],
+        "score_range": { "min": 570, "max": 610 },
+        "rank_range": { "min": 30000, "max": 60000 },
+        "typical_universities": ["浙江工业大学", "浙江理工大学", "杭州师范大学", "温州大学", "浙江工商大学"],
+        "strategy_hint": "目标为省内重点本科，需基础题得分率≥90%，中档题稳定发挥",
+        "elective_requirement_hint": "物理或化学（理工科），不限（文管类）"
+      },
+      {
+        "tier": "普通本科",
+        "aliases": ["本科", "普通本科", "一段线"],
+        "score_range": { "min": 500, "max": 575 },
+        "rank_range": { "min": 60000, "max": 150000 },
+        "typical_universities": ["浙江农林大学", "绍兴文理学院", "嘉兴大学", "台州学院", "丽水学院"],
+        "strategy_hint": "目标为普通本科，重点确保基础题不失分，选考科目争取赋分优势",
+        "elective_requirement_hint": "按专业要求，多数不限"
+      },
+      {
+        "tier": "暂时没想好",
+        "aliases": ["未定", "待定", "没想好"],
+        "score_range": { "min": 500, "max": 700 },
+        "rank_range": { "min": 100, "max": 150000 },
+        "typical_universities": [],
+        "strategy_hint": "目标待定，建议先根据当前成绩定位合理层次，再逐步聚焦。规划以全面提升为主，阶段性调整目标。",
+        "elective_requirement_hint": "建议选考物理以拓宽专业覆盖面"
+      }
+    ]
   },
 
   "dynamic_calibration_rule": {

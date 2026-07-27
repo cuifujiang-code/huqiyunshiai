@@ -12,6 +12,7 @@ import ScoreAnalysisCard from './ScoreAnalysisCard'
 import ExamTimelineCard from './ExamTimelineCard'
 import OrchestrationMetaCard from './OrchestrationMetaCard'
 import FiveStagePlanningTimeline from './FiveStagePlanningTimeline'
+import PathOptionsCard from './PathOptionsCard'
 
 interface Props {
   report: PlanningReport
@@ -65,6 +66,9 @@ export default function PlanningReportView({
       <TaskListCard phaseTasks={report.phaseTasks} />
       <MilestoneRemindersCard milestones={report.milestones} />
       <RiskMitigationCard risks={report.risks} />
+      {report.pathOptions && report.pathOptions.length > 0 && (
+        <PathOptionsCard pathOptions={report.pathOptions} />
+      )}
     </div>
   )
 }

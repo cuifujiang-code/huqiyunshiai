@@ -14,6 +14,7 @@ import { registerGenerateExamRoute } from './generateExamRoute.js'
 import { registerDiagnosisRoute } from './diagnosisRoute.js'
 import { registerDiagnosisAsyncRoutes } from './diagnosisAsyncRoute.js'
 import { registerPlanningRoute } from './planningRoute.js'
+import { reloadPlanningTemplates } from '../teacher-api/server/planningEngine.js'
 import { registerPlanningReportsRoutes } from './planningReportsRoute.js'
 import { registerTeacherRoutes } from './teacherRoute.js'
 import { registerAdminRoutes } from './admin/adminRoute.js'
@@ -21,13 +22,15 @@ import { registerStudentRoutes } from './studentRoute.js'
 import { registerParentRoutes } from './parentRoute.js'
 import { registerVolunteerRoutes } from './volunteerRoute.js'
 import { registerOcrRoutes } from './ocrRoute.js'
+import { registerBatchRoutes } from './batchRoute.js'
+import { registerPaperRoutes } from './paperRoute.js'
 import { resolveChatCompletionsUrl } from './urlUtil.js'
 
 const app = express()
 const PORT = process.env.PORT || 3001
 
 app.use(cors())
-app.use(express.json({ limit: '50mb' }))
+app.use(express.json({ limit: '100mb' }))
 
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', service: '华祺云师AI API' })
@@ -44,6 +47,11 @@ app.get('/', (_req, res) => {
 registerGenerateExamRoute(app)
 registerDiagnosisRoute(app)
 registerDiagnosisAsyncRoutes(app)
+try {
+  reloadPlanningTemplates()
+} catch (err) {
+  console.warn('[planning] 模板预加载失败（首次请求时将重试）', err instanceof Error ? err.message : err)
+}
 registerPlanningRoute(app)
 registerPlanningReportsRoutes(app)
 registerTeacherRoutes(app)
@@ -52,6 +60,8 @@ registerStudentRoutes(app)
 registerParentRoutes(app)
 registerVolunteerRoutes(app)
 registerOcrRoutes(app)
+registerBatchRoutes(app)
+registerPaperRoutes(app)
 
 app.post('/api/auth/ensure-mock-user', async (req, res) => {
   const { phone, role } = req.body ?? {}
@@ -138,6 +148,17 @@ app.use('/api', (_req, res) => {
   res.status(404).json({ error: 'API 路由不存在' })
 })
 
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`华祺云师AI 后端服务运行在 http://localhost:${PORT}`)
+})
+
+server.on('error', (err) => {
+  if (err.code === 'EADDRINUSE') {
+    console.error(`\n端口 ${PORT} 已被占用，请先关闭旧的后端进程再启动：`)
+    console.error(`  netstat -ano | findstr :${PORT}`)
+    console.error(`  taskkill /PID <进程号> /F\n`)
+  } else {
+    console.error('服务启动失败:', err.message)
+  }
+  process.exit(1)
 })

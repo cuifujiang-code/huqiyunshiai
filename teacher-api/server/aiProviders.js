@@ -10,6 +10,8 @@ import {
 } from './deepseekClient.js'
 import { recognizeHandwritingHttp, isAlibabaOcrConfigured } from './alibabaOcrHttp.js'
 
+import { isDoubaoConfigured } from './doubaoClient.js'
+
 export const AI_CALL_TIMEOUT_MS = Number(process.env.AI_ORCHESTRATOR_TIMEOUT_MS || 30000)
 
 export function isDeepSeekAvailable() {
@@ -17,7 +19,11 @@ export function isDeepSeekAvailable() {
 }
 
 export function isDoubaoAvailable() {
-  return Boolean(process.env.DOUBAO_API_KEY?.trim())
+  return isDoubaoConfigured()
+}
+
+export function isDoubaoVisionOcrAvailable() {
+  return isDoubaoConfigured()
 }
 
 export function isQianwenAvailable() {

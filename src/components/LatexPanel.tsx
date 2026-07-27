@@ -47,7 +47,7 @@ export interface LatexPanelProps {
 
 // ======================= 6大符号分类 =======================
 
-const LATEX_CATEGORIES: LatexCategory[] = [
+export const LATEX_CATEGORIES: LatexCategory[] = [
   {
     name: '基本符号',
     icon: '∑',

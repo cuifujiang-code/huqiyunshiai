@@ -3,6 +3,7 @@ import type { HandoutContent, HandoutModule } from '../../types/teacher'
 import { btnSecondary, inputClass } from '../../types/teacher'
 import { MODULE_PALETTE, createModule } from './handoutConstants'
 import { FONT_FAMILIES } from './HandoutOcrImportModal'
+import LatexFormulaEditor from '../common/LatexFormulaEditor'
 
 interface Props {
   content: HandoutContent
@@ -217,11 +218,11 @@ export default function HandoutEditorPanel({
               />
             </label>
           </div>
-          <textarea
-            className={inputClass}
-            rows={4}
+          <LatexFormulaEditor
             value={mod.content}
-            onChange={(e) => updateModule(i, { content: e.target.value })}
+            onChange={(content) => updateModule(i, { content })}
+            placeholder="正文内容。行内公式用 $...$ 包裹，独立公式用 $$...$$。可点击「公式工具栏」插入符号。"
+            className="text-sm"
           />
         </div>
       ))}

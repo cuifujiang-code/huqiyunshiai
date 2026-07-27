@@ -1,10 +1,14 @@
 import { parseExamFile } from './examParser.js'
-import { recognizeHandwritingImages, AlibabaOcrError, isAlibabaOcrConfigured } from './alibabaHandwritingOcr.js'
+import {
+  recognizeHandwritingImagesDoubao,
+  DoubaoVisionOcrError,
+  isDoubaoVisionOcrConfigured,
+} from './doubaoVisionOcr.js'
 import { buildPrepareFailure } from './apiErrorUtil.js'
 import { serializeError } from './deepseekClient.js'
 
 /**
- * 解析标准试卷 + 阿里云手写 OCR，返回预览文本
+ * 解析标准试卷 + 豆包视觉 OCR 答题卡
  */
 export async function prepareDiagnosisComparison(input, onProgress) {
   const { examFileBase64, examFileName, answerImages } = input
@@ -16,10 +20,12 @@ export async function prepareDiagnosisComparison(input, onProgress) {
     return buildPrepareFailure('validate', new Error('请至少上传一张学生答题卡图片'))
   }
 
-  if (!isAlibabaOcrConfigured()) {
+  if (!isDoubaoVisionOcrConfigured()) {
     return buildPrepareFailure(
-      'alibaba-ocr-config',
-      new AlibabaOcrError('阿里云OCR未配置：请在 Vercel 设置 ALIBABA_ACCESS_KEY_ID 和 ALIBABA_ACCESS_KEY_SECRET'),
+      'doubao-vision-config',
+      new DoubaoVisionOcrError(
+        '豆包视觉 OCR 未配置：请设置 DOUBAO_API_KEY 与 DOUBAO_VISION_MODEL（ep- 推理接入点）',
+      ),
     )
   }
 
@@ -36,7 +42,7 @@ export async function prepareDiagnosisComparison(input, onProgress) {
 
   try {
     onProgress?.('正在识别答题卡（1/' + answerImages.length + '）...')
-    const ocrResult = await recognizeHandwritingImages(answerImages, (current, total, name) => {
+    const ocrResult = await recognizeHandwritingImagesDoubao(answerImages, (current, total, name) => {
       onProgress?.(`正在识别答题卡（${current}/${total}）: ${name}`)
     })
 
@@ -48,21 +54,22 @@ export async function prepareDiagnosisComparison(input, onProgress) {
       ocrIncomplete: ocrResult.incomplete,
       answerSheetPageCount: answerImages.length,
       examPaperType: parsed.type,
+      ocrProvider: 'doubao-vision',
     }
   } catch (error) {
     const errorDetail =
-      error instanceof AlibabaOcrError ? error.toJSON() : serializeError(error)
+      error instanceof DoubaoVisionOcrError ? error.toJSON() : serializeError(error)
 
-    console.error('[诊断准备] 阿里云 OCR 失败', errorDetail)
+    console.error('[诊断准备] 豆包视觉 OCR 失败', errorDetail)
 
     return {
       success: false,
       isMockFallback: true,
-      step: 'alibaba-ocr',
+      step: 'doubao-vision-ocr',
       message:
-        error instanceof AlibabaOcrError
+        error instanceof DoubaoVisionOcrError
           ? error.message
-          : '阿里云手写 OCR 识别失败，请检查密钥与 OCR 服务权限',
+          : '豆包视觉 OCR 识别失败，请检查 DOUBAO_API_KEY 与 DOUBAO_VISION_MODEL',
       errorDetail,
       examPaperText: parsed.text,
     }

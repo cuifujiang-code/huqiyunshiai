@@ -9,12 +9,12 @@ interface Props {
 export default function DiagnosisAnalyzingStep({ message, hasImage, mode = 'diagnosis' }: Props) {
   const prepareSteps = [
     '正在解析试卷...',
-    '正在识别答题卡（阿里云手写 OCR）...',
+    '正在识别答题卡（豆包视觉 OCR）...',
     '即将展示识别结果供您确认',
   ]
   const asyncSteps = [
     '正在解析试卷（Word/PDF）...',
-    '正在识别手写答题卡（阿里云 OCR）...',
+    '正在识别手写答题卡（豆包视觉 OCR）...',
     'AI 正在对比分析并生成诊断报告...',
     '预计需要 20-40 秒，请勿关闭页面',
   ]

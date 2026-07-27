@@ -8,12 +8,13 @@ interface Props {
   text: string
   keyword?: string
   className?: string
+  latexBlocks?: string[]
 }
 
 /** 关键词高亮 + LaTeX 渲染（用于全文搜索命中展示） */
-export default function SearchHighlight({ text, keyword, className }: Props) {
+export default function SearchHighlight({ text, keyword, className, latexBlocks }: Props) {
   const k = keyword?.trim()
-  if (!k) return <MathRenderer text={text} className={className} />
+  if (!k) return <MathRenderer text={text} className={className} latexBlocks={latexBlocks} />
 
   const parts = text.split(new RegExp(`(${escapeRegExp(k)})`, 'gi'))
   return (
@@ -24,7 +25,7 @@ export default function SearchHighlight({ text, keyword, className }: Props) {
             {part}
           </mark>
         ) : (
-          part ? <MathRenderer key={i} text={part} className="inline" /> : null
+          part ? <MathRenderer key={i} text={part} className="inline" latexBlocks={latexBlocks} /> : null
         ),
       )}
     </span>

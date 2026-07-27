@@ -1,8 +1,18 @@
 import { generateDataDrivenPlan, lookupTargetUniversity } from '../teacher-api/server/planningEngine.js'
+import {
+  analyzeSubjectSelection,
+  generateActionChecklist,
+} from './planning/planningToolkitService.js'
+import {
+  resolvePlanningTargetFromBody,
+  resolvePlanningProvince,
+} from './planning/planningTargetResolve.js'
 
 /**
  * POST /api/planning/generate — 数据驱动规划生成
  * POST /api/planning/university-lookup — 目标院校数据检索（生成前确认）
+ * POST /api/planning/toolkit/subject-analysis — 选科辅助决策
+ * POST /api/planning/toolkit/action-checklist — 90天行动清单
  */
 export function registerPlanningRoute(app) {
   app.post('/api/planning/university-lookup', async (req, res) => {
@@ -27,6 +37,7 @@ export function registerPlanningRoute(app) {
   })
 
   app.post('/api/planning/generate', async (req, res) => {
+    const body = req.body ?? {}
     const {
       studentName,
       grade,
@@ -40,7 +51,9 @@ export function registerPlanningRoute(app) {
       targetUniversity,
       targetMajor,
       confirmedUniversityData,
-    } = req.body ?? {}
+      studentUserId,
+      userId,
+    } = body
 
     if (!studentName?.trim() || !grade || !scoreLevel) {
       return res.status(400).json({
@@ -52,31 +65,32 @@ export function registerPlanningRoute(app) {
     const enhanced = _enhanced && typeof _enhanced === 'object' ? _enhanced : {}
     const uni =
       targetUniversity?.trim() ||
-      enhanced.targetSchools?.[0]?.trim() ||
       confirmedUniversityData?.university?.trim() ||
-      ''
-    const province = enhanced.schoolInfo?.province?.trim() || ''
+      resolvePlanningTargetFromBody(body, enhanced)
+    const province = resolvePlanningProvince(body, enhanced)
     const major =
       targetMajor?.trim() ||
       enhanced.targetMajor?.trim() ||
+      body.targetMajorIntent?.trim() ||
       confirmedUniversityData?.major?.trim() ||
       '通用'
 
     if (!uni) {
       return res.status(400).json({
         success: false,
-        message: '请在目标学校中填写至少一所目标院校',
+        message: '请选择期望院校层次或填写目标院校',
       })
     }
     if (!province) {
       return res.status(400).json({
         success: false,
-        message: '请选择省份',
+        message: '请填写所在城市（需包含省份，如：浙江金华）',
       })
     }
 
     try {
       const form = {
+        ...body,
         studentName: studentName.trim(),
         grade,
         goalDirections: Array.isArray(goalDirections) ? goalDirections : [],
@@ -88,6 +102,8 @@ export function registerPlanningRoute(app) {
         _enhanced: enhanced,
         targetUniversity: uni,
         targetMajor: major,
+        studentUserId: (studentUserId || userId || '').trim() || undefined,
+        _planningEnrichment: body._planningEnrichment,
       }
 
       const result = await generateDataDrivenPlan(uni, province, major, form)
@@ -107,16 +123,46 @@ export function registerPlanningRoute(app) {
         message: `教育规划方案生成成功（数据驱动 · ${result.meta?.templateVersion ?? 'v2'}）`,
         report: result.report,
         isMockFallback: false,
+        reportSource: result.report?.source,
         universityLookup: result.lookup,
         dataSourceCitation: result.citation,
         fiveStagePlan: result.fiveStagePlan,
         orchestrationMeta: {
           providersUsed: result.meta?.providersUsed ?? ['planningEngine'],
           engine: 'planningEngine',
+          dataSources: result.meta?.dataSources,
         },
       })
     } catch (error) {
       const message = error instanceof Error ? error.message : '教育规划生成失败'
+      return res.status(500).json({ success: false, message })
+    }
+  })
+
+  app.post('/api/planning/toolkit/subject-analysis', async (req, res) => {
+    const { scores } = req.body ?? {}
+    if (!scores || typeof scores !== 'object') {
+      return res.status(400).json({ success: false, message: '请提供各选科科目成绩' })
+    }
+    try {
+      const result = await analyzeSubjectSelection(scores)
+      return res.json(result)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '选科分析失败'
+      return res.status(500).json({ success: false, message })
+    }
+  })
+
+  app.post('/api/planning/toolkit/action-checklist', async (req, res) => {
+    const { grade, goal, weakSubject, teacherId } = req.body ?? {}
+    if (!grade || !goal || !weakSubject) {
+      return res.status(400).json({ success: false, message: '请填写年级、主目标与薄弱科目' })
+    }
+    try {
+      const result = await generateActionChecklist({ grade, goal, weakSubject, teacherId })
+      return res.json(result)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '行动清单生成失败'
       return res.status(500).json({ success: false, message })
     }
   })

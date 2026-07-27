@@ -32,6 +32,8 @@ import AdminDashboardPage from './pages/admin/AdminDashboardPage'
 import ParentDashboardPage from './pages/ParentDashboardPage'
 import StudentParentBindPage from './pages/StudentParentBindPage'
 import ProtectedRouteAdmin from './components/ProtectedRouteAdmin'
+import PaperResourcePage from './pages/PaperResourcePage'
+import ExamReviewPage from './pages/ExamReviewPage'
 import FloatingActionButton from './components/common/FloatingActionButton'
 
 export default function App() {
@@ -173,6 +175,14 @@ export default function App() {
               }
             />
             <Route
+              path="/teacher/paper-resources"
+              element={
+                <ProtectedRoute requiredRole="teacher">
+                  <PaperResourcePage mode="teacher" />
+                </ProtectedRoute>
+              }
+            />
+            <Route
               path="/teacher/student-progress"
               element={
                 <ProtectedRoute requiredRole="teacher">
@@ -217,6 +227,22 @@ export default function App() {
               element={
                 <ProtectedRoute requiredRole="student">
                   <StudentPhotoSearchPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/student/paper-resources"
+              element={
+                <ProtectedRoute requiredRole="student">
+                  <PaperResourcePage mode="student" />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/student/exam-review"
+              element={
+                <ProtectedRoute requiredRole="student">
+                  <ExamReviewPage />
                 </ProtectedRoute>
               }
             />

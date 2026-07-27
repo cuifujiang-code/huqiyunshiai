@@ -2,7 +2,10 @@
  * 教育规划系统 — 前端 API 调用封装
  *
  * 覆盖：7大路线获取、甘特数据、周报月报、家长绑定、规划CRUD
+ * 规划报告生成（含霍兰德/五维 enrichment）见 ./fetchPlanning.ts
  */
+
+export { fetchPlanningReport, PLANNING_API_PATH } from './fetchPlanning'
 
 import type {
   PlanRoute, RouteDetail, StudentPlan, GanttData,

@@ -7,7 +7,7 @@ import { exportExamToPdf, exportExamToWord } from '../lib/exportPdf'
 import { fetchGenerateExam } from '../lib/generateExam'
 import type { Difficulty, ExamPaper, Grade, Subject } from '../types/exam'
 import { DIFFICULTIES, GRADES, SUBJECTS } from '../types/exam'
-import ExamPaper from '../components/exam/ExamPaper'
+import ExamPaperView from '../components/exam/ExamPaper'
 
 export default function TeacherExamPage() {
   const navigate = useNavigate()
@@ -196,7 +196,7 @@ export default function TeacherExamPage() {
                 <p className="text-sm text-[#8A94A9] animate-pulse">AI 正在为您生成试卷…</p>
               </div>
             ) : exam ? (
-              <ExamPaper
+              <ExamPaperView
                 exam={exam}
                 paperRef={paperRef}
                 onExportPdf={handleExportPdf}

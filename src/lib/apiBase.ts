@@ -1,5 +1,14 @@
-/** 教师端 / 拆题 / 题库 独立 API 域名（勿用 www 主站） */
+/** 教师端 / 拆题 / 题库 独立 API 域名（备案通过后使用） */
 export const DEFAULT_TEACHER_API_BASE = 'https://api.huqiyunshiai.online'
+
+/** 备案期间 Vercel 主站代理腾讯云（见根目录 vercel.json beforeFiles） */
+export const ICP_PROXY_TENCENT_ORIGIN = 'http://106.54.29.9:3001'
+
+/**
+ * 备案期间：www 主站重接口走同源 /api/*，由 Vercel 转发到腾讯云 IP。
+ * 备案完成后改为 false，并恢复 vercel.json / DEFAULT_TEACHER_API_BASE。
+ */
+export const ICP_PROXY_VIA_MAIN_SITE = true
 
 /**
  * 规范化基址：去掉尾部 /api，纠正误配的主站域名
@@ -10,6 +19,10 @@ function normalizeTeacherApiBase(raw: string): string {
 
   if (/\/api$/i.test(base)) {
     base = base.replace(/\/api$/i, '')
+  }
+
+  if (ICP_PROXY_VIA_MAIN_SITE && isProductionMainSiteHost(base)) {
+    return base
   }
 
   if (/www\.huqiyunshiai\.online/i.test(base)) {
@@ -31,14 +44,16 @@ function normalizeTeacherApiBase(raw: string): string {
   return base
 }
 
-/** 主站 / 本地开发：API 走当前站点同源（Vercel /api/*），避免误打到不可达的 api 子域 */
+function isProductionMainSiteHost(hostOrUrl: string): boolean {
+  const h = hostOrUrl.replace(/^https?:\/\//i, '').split('/')[0].split(':')[0].toLowerCase()
+  return h === 'huqiyunshiai.online' || h === 'www.huqiyunshiai.online'
+}
+
+/** 本地开发或备案期主站：重 API 走当前站点同源（由 Vercel /api/* 或 dev 代理） */
 function isSameOriginTeacherApiHost(hostname: string): boolean {
-  return (
-    hostname === 'localhost' ||
-    hostname === '127.0.0.1' ||
-    hostname === 'huqiyunshiai.online' ||
-    /^www\.huqiyunshiai\.online$/i.test(hostname)
-  )
+  if (hostname === 'localhost' || hostname === '127.0.0.1') return true
+  if (ICP_PROXY_VIA_MAIN_SITE && isProductionMainSiteHost(hostname)) return true
+  return false
 }
 
 /** 解析教师/拆题 API 基址（不含 /api 后缀） */
@@ -82,16 +97,11 @@ export function buildTeacherRootApiUrl(path: string): string {
 }
 
 /**
- * 拆题任务 API：主站 Vercel 为 /api/teacher/decompose-*，独立 teacher-api 为 /api/decompose-*
+ * 拆题任务 API：备案期主站 / 腾讯云均为 /api/decompose-*（主站经 Vercel 代理到腾讯云）
  */
 export function buildTeacherDecomposeApiUrl(path: string): string {
   const normalized = path.replace(/^\//, '').replace(/^api\/(teacher\/)?/i, '')
-  if (typeof window !== 'undefined' && isSameOriginTeacherApiHost(window.location.hostname)) {
-    const url = buildTeacherApiUrl(normalized)
-    console.log('[apiBase] buildTeacherDecomposeApiUrl（主站 /api/teacher）', { path, url })
-    return url
-  }
   const url = buildTeacherRootApiUrl(normalized)
-  console.log('[apiBase] buildTeacherDecomposeApiUrl（独立 API）', { path, url })
+  console.log('[apiBase] buildTeacherDecomposeApiUrl', { path, url })
   return url
 }

@@ -9,6 +9,7 @@
     "dev:server": "node server/index.js",
     "build": "tsc --noEmit && vite build",
     "lint": "eslint .",
+    "import:zj-score-rank": "node _scripts/import-zhejiang-score-rank.mjs --execute",
     "preview": "vite preview"
   },
   "dependencies": {
@@ -26,12 +27,15 @@
     "compressorjs": "^1.3.0",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
+    "emf-converter": "^1.4.2",
     "express": "^5.2.1",
     "html2canvas": "^1.4.1",
     "jspdf": "^4.2.1",
+    "jszip": "^3.10.1",
     "katex": "^0.17.0",
     "mammoth": "^1.12.0",
     "mathml-to-latex": "^1.5.0",
+    "omml2mathml": "^1.3.0",
     "pdf-parse": "1.1.1",
     "pdfjs-dist": "^6.0.227",
     "react": "^19.2.6",
@@ -40,7 +44,8 @@
     "react-router-dom": "^7.15.1",
     "tesseract.js": "^7.0.0",
     "ws": "^8.21.0",
-    "xlsx": "^0.18.5"
+    "xlsx": "^0.18.5",
+    "xml2js": "^0.6.2"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

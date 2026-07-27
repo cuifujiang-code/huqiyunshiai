@@ -1,4 +1,4 @@
-import { handwritingToHandout } from '../server/teacher/handoutOcrService.js'
+import { handwritingToHandout } from '../../server/teacher/handoutOcrService.js'
 
 export default async function handler(req, res) {
   if (req.method === 'OPTIONS') {

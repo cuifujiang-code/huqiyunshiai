@@ -9,7 +9,7 @@ interface QuickAction {
 
 const TEACHER_ACTIONS: QuickAction[] = [
   { icon: '+', label: '新建组卷', path: '/teacher/exam-builder' },
-  { icon: '☰', label: '批量拆题', path: '/teacher/question-bank' },
+  { icon: '☰', label: '批量拆题', path: '/teacher/batch-upload' },
   { icon: '📋', label: '智能备课', path: '/teacher/lesson-prep' },
   { icon: '⬇', label: '排版导出', path: '/teacher/exam-layout' },
 ]

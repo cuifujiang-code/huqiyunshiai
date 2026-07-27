@@ -57,6 +57,11 @@ export function getPathSegmentsFromRequest(req, mountPath = '/api/teacher') {
         const rest = pathname.slice(normalizedMount.length).replace(/^\//, '')
         return rest ? rest.split('/').filter(Boolean) : []
       }
+      // Express app.use('/api/teacher') 挂载后 req.url 为 /questions/stats（不含 /api/teacher 前缀）
+      const stripped = pathname.replace(/^\//, '')
+      if (stripped) {
+        return stripped.split('/').filter(Boolean)
+      }
     } catch {
       // ignore malformed URL
     }

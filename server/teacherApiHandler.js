@@ -142,8 +142,10 @@ export async function handleTeacherApi(req, res, pathSegments = []) {
 
     if (path === 'questions/batch' && method === 'POST') {
       const teacherId = requireTeacher(body, query)
-      const data = await questionBank.createQuestionsBatch(teacherId, body.questions ?? [])
-      return res.status(200).json({ success: true, questions: data })
+      const result = await questionBank.createQuestionsBatch(teacherId, body.questions ?? [])
+      const questions = Array.isArray(result) ? result : result.items
+      const topicTagging = Array.isArray(result) ? undefined : result.topicTagging
+      return res.status(200).json({ success: true, questions, topicTagging })
     }
 
     if (path === 'questions/import' && method === 'POST') {
@@ -170,9 +172,10 @@ export async function handleTeacherApi(req, res, pathSegments = []) {
     if (path === 'questions/topics' && method === 'GET') {
       const teacherId = query.teacherId
       if (!teacherId) return res.status(400).json({ success: false, message: '缺少 teacherId' })
-      const subject = query.subject || ''
-      const topics = await questionBank.listTopics(teacherId, subject || undefined)
-      return res.status(200).json({ success: true, topics })
+      const subject = query.subject || undefined
+      const grade = query.grade || undefined
+      const result = await questionBank.listTopics(teacherId, subject, grade)
+      return res.status(200).json({ success: true, ...result })
     }
 
     if (path === 'questions/stats' && method === 'GET') {

@@ -1,6 +1,6 @@
-import '../../../../server/applyUrlShim.js'
-import { handleTeacherApi } from '../../../teacherApiHandler.js'
-import { applyApiHeaders, handleOptions } from '../../../../server/apiResponse.js'
+import '../../../../../server/applyUrlShim.js'
+import { handleTeacherApi } from '../../../../teacherApiHandler.js'
+import { applyApiHeaders, handleOptions } from '../../../../../server/apiResponse.js'
 
 export default async function handler(req, res) {
   if (handleOptions(req, res)) return

@@ -1,7 +1,7 @@
 import '../../server/applyUrlShim.js'
-import { waitUntil } from '@vercel/functions'
 import { runDecomposeTask } from '../../server/teacher/decomposeProcess.js'
 import { verifyDecomposeProcessSecret } from '../../server/teacher/decomposeTrigger.js'
+import { runInBackground } from '../../server/runInBackground.js'
 import { setNoCacheHeaders } from '../../server/apiResponse.js'
 
 export default async function handler(req, res) {
@@ -21,7 +21,7 @@ export default async function handler(req, res) {
 
   console.log('[decompose-process] 受理任务', { taskId })
 
-  waitUntil(
+  runInBackground(() =>
     runDecomposeTask(taskId).catch((error) => {
       console.error('[decompose-process] 后台拆题失败', { taskId, error })
     }),

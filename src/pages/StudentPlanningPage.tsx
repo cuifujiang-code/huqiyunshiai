@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState, useCallback, type ReactNode, useEffect } from 'react'
 import DashboardHeader from '../components/layout/DashboardHeader'
-import PlanningInputPanel from '../components/planning/PlanningInputPanel'
+import PlanningInputPanel, { defaultEnhancedForm } from '../components/planning/PlanningInputPanel'
 import PlanningPreviewPanel from '../components/planning/PlanningPreviewPanel'
 import PlanningReportView from '../components/planning/PlanningReportView'
 import GanttChart from '../components/planning/GanttChart'
@@ -12,6 +12,7 @@ import { printPlanningReport } from '../components/planning/PlanPrintView'
 import { useAuth } from '../context/AuthContext'
 import { exportPlanningReportPdf } from '../components/planning/PlanPrintView'
 import { fetchPlanningReport } from '../lib/fetchPlanning'
+import { inferProvinceFromCity, resolvePlanningTarget } from '../lib/planningTierUtils'
 import { getStudentPlanningRecords, savePlanningRecord } from '../lib/planningStorage'
 import {
   fetchPlanRoutes, fetchRouteDetail, fetchStudentPlans,
@@ -19,7 +20,7 @@ import {
   fetchWeeklyReport, fetchMonthlyReport, saveStudentPlan,
 } from '../lib/educationPlanning'
 import type {
-  PlanningFormData, PlanningReport, SavedPlanningRecord,
+  EnhancedPlanningFormData, PlanningReport, SavedPlanningRecord,
   GanttTask, PlanningTaskProgress, PlanRoute, RouteDetail,
   GanttData, WeeklyReport as WeeklyReportType, MonthlyReport as MonthlyReportType,
   PlanRouteCode,
@@ -28,24 +29,19 @@ import { getTeacherApiBase } from '../lib/apiBase'
 
 type Tab = 'create' | 'records' | 'reports' | 'binding'
 
-const defaultForm = (name: string): PlanningFormData => ({
+const defaultForm = (name: string): EnhancedPlanningFormData => ({
+  ...defaultEnhancedForm,
   studentName: name,
-  grade: '初二',
-  goalDirections: ['中考'],
-  scoreLevel: '良好',
-  interests: ['数学'],
-  parentExpectations: '',
-  specialNotes: '',
   createdByRole: 'student',
 })
 
 export default function StudentPlanningPage() {
-  const { profile } = useAuth()
+  const { profile, user } = useAuth()
   const reportRef = useRef<HTMLDivElement>(null)
   const displayName = profile?.phone?.slice(-4) ? `同学${profile.phone.slice(-4)}` : '我'
 
   const [tab, setTab] = useState<Tab>('create')
-  const [form, setForm] = useState<PlanningFormData>(() => defaultForm(displayName))
+  const [form, setForm] = useState<EnhancedPlanningFormData>(() => defaultForm(displayName))
   const [report, setReport] = useState<PlanningReport | null>(null)
   const [selectedRecord, setSelectedRecord] = useState<SavedPlanningRecord | null>(null)
   const [loading, setLoading] = useState(false)
@@ -237,13 +233,29 @@ export default function StudentPlanningPage() {
     [form.studentName, displayName, profile?.id, report, selectedRecord],
   )
 
-  const handleGenerate = async () => {
+  const handleGenerate = async (finalForm?: EnhancedPlanningFormData) => {
     setLoading(true)
     setMessage(null)
     setIsWarning(false)
     setSelectedRecord(null)
     try {
-      const payload = { ...form, studentName: form.studentName || displayName, createdByRole: 'student' as const }
+      const activeForm = finalForm ?? form
+      if (finalForm) setForm(finalForm)
+      const payload = {
+        ...activeForm,
+        studentName: activeForm.studentName || displayName,
+        createdByRole: 'student' as const,
+        studentUserId: user?.id || profile?.id,
+        userId: user?.id || profile?.id,
+        targetUniversity: resolvePlanningTarget(activeForm),
+        targetMajor: activeForm.targetMajorIntent?.trim() || '通用',
+        schoolInfo: {
+          ...activeForm.schoolInfo,
+          province:
+            activeForm.schoolInfo.province?.trim() ||
+            inferProvinceFromCity(activeForm.city || activeForm.schoolInfo.city || ''),
+        },
+      }
       const data = await fetchPlanningReport(payload)
       setReport(data.report!)
       setIsWarning(!!data.isMockFallback)

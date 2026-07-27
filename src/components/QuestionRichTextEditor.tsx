@@ -10,6 +10,7 @@ import { extractLatexFromClipboard, joinLatexParts } from '../lib/mathtypePaste'
 import { inputClass } from '../types/teacher'
 
 const MD_IMAGE_RE = /!\[([^\]]*)\]\(([^)]+)\)/g
+const HTML_IMG_RE = /<img\b[^>]*\bsrc=["']([^"']+)["'][^>]*\/?>/gi
 
 export interface QuestionRichTextEditorHandle {
   focus: () => void
@@ -36,18 +37,28 @@ function plainToDoc(text: string) {
     type: 'doc',
     content: lines.map((line) => {
       const content: { type: string; text?: string; attrs?: Record<string, string> }[] = []
-      let last = 0
+      const tokens: { index: number; len: number; src: string; alt: string }[] = []
       MD_IMAGE_RE.lastIndex = 0
+      HTML_IMG_RE.lastIndex = 0
       let m: RegExpExecArray | null
       while ((m = MD_IMAGE_RE.exec(line)) !== null) {
-        if (m.index > last) {
-          content.push({ type: 'text', text: line.slice(last, m.index) })
+        tokens.push({ index: m.index, len: m[0].length, src: m[2], alt: m[1] || '题目图片' })
+      }
+      while ((m = HTML_IMG_RE.exec(line)) !== null) {
+        const altMatch = m[0].match(/alt=["']([^"']*)["']/i)
+        tokens.push({ index: m.index, len: m[0].length, src: m[1], alt: altMatch?.[1] || '题目图片' })
+      }
+      tokens.sort((a, b) => a.index - b.index)
+      let last = 0
+      for (const tok of tokens) {
+        if (tok.index > last) {
+          content.push({ type: 'text', text: line.slice(last, tok.index) })
         }
         content.push({
           type: 'image',
-          attrs: { src: m[2], alt: m[1] || '题目图片', title: m[1] || '题目图片' },
+          attrs: { src: tok.src, alt: tok.alt, title: tok.alt },
         })
-        last = m.index + m[0].length
+        last = tok.index + tok.len
       }
       if (last < line.length) {
         content.push({ type: 'text', text: line.slice(last) })
@@ -65,10 +76,14 @@ function docToPlain(editor: Editor): string {
     node.forEach((child) => {
       if (child.isText) {
         line += child.text ?? ''
-      } else if (child.type.name === 'image') {
+      } else       if (child.type.name === 'image') {
         const alt = String(child.attrs.alt ?? '题目图片')
         const src = String(child.attrs.src ?? '')
-        if (src) line += `![${alt}](${src})`
+        if (src) {
+          line += src.startsWith('data:') || src.startsWith('http')
+            ? `<img src="${src}" alt="${alt}" style="max-width:100%;height:auto;" />`
+            : `![${alt}](${src})`
+        }
       } else if (child.type.name === 'hardBreak') {
         line += '\n'
       }

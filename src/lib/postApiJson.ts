@@ -35,26 +35,10 @@ function isTeacherApiPathname(pathname: string): boolean {
   return TEACHER_API_PATH_RE.test(p.split('?')[0].split('#')[0])
 }
 
-function isMainSiteBrowser(): boolean {
-  if (typeof window === 'undefined') return false
-  const host = window.location.hostname
-  return host === 'huqiyunshiai.online' || /^www\.huqiyunshiai\.online$/i.test(host)
-}
-
-/** 解析绝对或相对 API 地址；主站走同源 /api/*，独立 API 域仅在其他 host 使用 */
+/** 解析绝对或相对 API 地址；所有 teacher-api 请求走 getTeacherApiBase()（腾讯云 api 子域） */
 function resolveRequestUrl(path: string): string {
   const trimmed = path.trim()
   if (/^https?:\/\//i.test(trimmed)) {
-    try {
-      const u = new URL(trimmed)
-      if (isMainSiteBrowser() && /api\.huqiyunshiai\.online/i.test(u.hostname) && isTeacherApiPathname(u.pathname)) {
-        const url = `${window.location.origin.replace(/\/$/, '')}${u.pathname}${u.search}`
-        console.log(`${LOG_PREFIX} resolveRequestUrl（api 子域→主站同源）`, { in: trimmed, url })
-        return url
-      }
-    } catch {
-      /* ignore malformed URL */
-    }
     console.log(`${LOG_PREFIX} resolveRequestUrl（绝对地址）`, { url: trimmed })
     return trimmed
   }

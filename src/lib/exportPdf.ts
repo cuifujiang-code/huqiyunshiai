@@ -8,6 +8,26 @@ export interface PdfExportOptions {
   mode?: 'print' | 'digital'
 }
 
+/** 等待元素内所有图片加载完成（导出 PDF 前调用） */
+export async function waitForImagesInElement(element: HTMLElement, timeoutMs = 3000): Promise<void> {
+  const images = Array.from(element.querySelectorAll('img'))
+  await Promise.all(
+    images.map(
+      (img) =>
+        new Promise<void>((resolve) => {
+          if (img.complete && img.naturalWidth > 0) {
+            resolve()
+            return
+          }
+          const done = () => resolve()
+          img.onload = done
+          img.onerror = done
+          setTimeout(done, timeoutMs)
+        }),
+    ),
+  )
+}
+
 export async function exportExamToPdf(element: HTMLElement, filename: string): Promise<void> {
   return exportToPdf(element, filename)
 }
@@ -17,6 +37,8 @@ export async function exportToPdf(
   filename: string,
   options: PdfExportOptions = {},
 ): Promise<void> {
+  await waitForImagesInElement(element)
+
   const scale = options.mode === 'print' ? 2.5 : 2
   const canvas = await html2canvas(element, {
     scale,
@@ -67,6 +89,118 @@ export async function exportToPdf(
   }
 
   pdf.save(filename.endsWith('.pdf') ? filename : `${filename}.pdf`)
+}
+
+/**
+ * 服务端 PDF 导出（通过 Puppeteer 渲染，生成真实文本 PDF）
+ * 相比前端 html2canvas+jsPDF 方案：
+ *   - 真实文本（可选中、可搜索）
+ *   - 矢量公式（KaTeX SVG → PDF 矢量）
+ *   - 正确分页（CSS page-break 生效）
+ *   - 文件体积小（通常 <2MB）
+ */
+export async function exportToServerPdf(
+  html: string,
+  filename: string,
+  meta: { title: string; coverStyle?: string; outline?: { title: string; level?: number }[] },
+): Promise<boolean> {
+  try {
+    const apiBase = import.meta.env.VITE_TEACHER_API_URL || window.location.origin
+    const url = `${apiBase}/api/teacher/books/export-pdf`
+
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        html,
+        title: meta.title,
+        coverStyle: meta.coverStyle || 'academic',
+        outline: meta.outline || [],
+      }),
+    })
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: res.statusText }))
+      throw new Error(err.error || `HTTP ${res.status}`)
+    }
+
+    const blob = await res.blob()
+    const downloadUrl = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = downloadUrl
+    a.download = filename.endsWith('.pdf') ? filename : `${filename}.pdf`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(downloadUrl)
+
+    return true
+  } catch (err) {
+    console.error('[exportToServerPdf] 服务端 PDF 导出失败:', err)
+    throw err
+  }
+}
+
+/** 服务端双版本 PDF 导出（学生版 + 教师版，一次请求返回两个 PDF） */
+export async function exportDualToServerPdf(
+  studentHtml: string,
+  teacherHtml: string,
+  filenameBase: string,
+  meta: { title: string; coverStyle?: string; outline?: { title: string; level?: number }[] },
+): Promise<boolean> {
+  try {
+    const apiBase = import.meta.env.VITE_TEACHER_API_URL || window.location.origin
+    const url = `${apiBase}/api/teacher/books/export-pdf`
+
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        studentHtml,
+        teacherHtml,
+        title: meta.title,
+        coverStyle: meta.coverStyle || 'academic',
+        outline: meta.outline || [],
+      }),
+    })
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: res.statusText }))
+      throw new Error(err.error || `HTTP ${res.status}`)
+    }
+
+    const data = await res.json()
+    if (!data.success) throw new Error(data.error || '导出失败')
+
+    // 下载学生版
+    const studentBytes = Uint8Array.from(atob(data.studentBase64), (c) => c.charCodeAt(0))
+    const studentBlob = new Blob([studentBytes], { type: 'application/pdf' })
+    const studentUrl = URL.createObjectURL(studentBlob)
+    const a1 = document.createElement('a')
+    a1.href = studentUrl
+    a1.download = `${filenameBase}_学生版.pdf`
+    document.body.appendChild(a1)
+    a1.click()
+    document.body.removeChild(a1)
+    URL.revokeObjectURL(studentUrl)
+
+    // 下载教师版
+    const teacherBytes = Uint8Array.from(atob(data.teacherBase64), (c) => c.charCodeAt(0))
+    const teacherBlob = new Blob([teacherBytes], { type: 'application/pdf' })
+    const teacherUrl = URL.createObjectURL(teacherBlob)
+    const a2 = document.createElement('a')
+    a2.href = teacherUrl
+    a2.download = `${filenameBase}_教师版.pdf`
+    document.body.appendChild(a2)
+    a2.click()
+    document.body.removeChild(a2)
+    URL.revokeObjectURL(teacherUrl)
+
+    return true
+  } catch (err) {
+    console.error('[exportDualToServerPdf] 服务端双版本 PDF 导出失败:', err)
+    throw err
+  }
 }
 
 export async function exportExamToWord(element: HTMLElement, filename: string): Promise<void> {

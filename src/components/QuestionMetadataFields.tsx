@@ -1,12 +1,13 @@
 import type { BankQuestion } from '../types/teacher'
 import {
   ABILITY_DIMENSIONS,
-  DIFFICULTIES,
   QUESTION_SOURCE_EXAMPLES,
   SUITABLE_STAGES,
+  TEXTBOOK_VERSIONS,
   inputClass,
 } from '../types/teacher'
 import KnowledgePointTreeSelector from './knowledge/KnowledgePointTreeSelector'
+import QuestionTopicFields from './questionBank/QuestionTopicFields'
 
 interface Props {
   draft: BankQuestion
@@ -91,6 +92,8 @@ export default function QuestionMetadataFields({ draft, onChange, disabled }: Pr
           />
         </label>
       </div>
+
+      <QuestionTopicFields draft={draft} onChange={onChange} disabled={disabled} />
 
       <KnowledgePointTreeSelector
         subject={draft.subject}

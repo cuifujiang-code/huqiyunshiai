@@ -9,7 +9,6 @@ import dotenv from 'dotenv'
 import { createServer } from 'http'
 import { fileURLToPath } from 'url'
 import { dirname, join } from 'path'
-import { registerPaperRoutes } from './server/paperRoute.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const rootEnvLocal = join(__dirname, '..', '.env.local')
@@ -50,7 +49,8 @@ async function safeImport(importPath, label) {
     console.log('[server] ✓ Loaded:', label)
     return mod.default || mod
   } catch (err) {
-    console.error('[server] ✗ Failed to load:', label, '-', String(err.message || err).slice(0, 100))
+    console.error('[server] ✗ Failed to load:', label, '-', String(err.message || err))
+    if (err?.stack) console.error(err.stack.split('\n').slice(0, 4).join('\n'))
     return (req, res) => {
       res.status(503).json({ success: false, message: 'Handler not available: ' + label })
     }
@@ -81,6 +81,8 @@ const handoutOcrProcess = await safeImport('./api/handouts/ocr-process.js', 'han
 const bookDocxImport = await safeImport('./api/teacher/book/docx-import.js', 'book/docx-import')
 const bookDocxClean = await safeImport('./api/teacher/book/docx-clean-chapters.js', 'book/docx-clean-chapters')
 const bookSmartGenerate = await safeImport('./api/teacher/book/smart-generate.js', 'book/smart-generate')
+const catalogRouter = await safeImport('./api/catalog/[...path].js', 'catalog catch-all')
+const paperRouteMod = await safeImport('./server/paperRoute.js', 'paperRoute')
 
 // ─── 注册路由 ───
 
@@ -136,15 +138,11 @@ app.use((req, res, next) => {
   if (!req.path.startsWith('/api/catalog')) return next()
   return catalogRouter(req, res)
 })
-
-// AI & student
 app.all('/api/ai/orchestrate', aiOrchestrate)
 app.all('/api/student/photo-search', photoSearch)
 
-// 高考志愿填报
-app.all('/api/volunteer/generate', volunteerApi)
-app.all('/api/volunteer/schemes', volunteerApi)
-app.all('/api/volunteer/scheme/:id', volunteerApi)
+// 高考志愿填报（含 /api/volunteer/zhejiang/* 浙江扩展）
+app.all(/^\/api\/volunteer(\/.*)?$/, volunteerApi)
 
 app.all('/api/ocr/handwriting-to-handout', handwritingHandout)
 app.all('/api/ocr/handwriting-to-book', handwritingBook)
@@ -152,7 +150,11 @@ app.all('/api/ocr/handwriting-to-book', handwritingBook)
 app.all('/api/handouts/ocr-process', handoutOcrProcess)
 
 // 试题试卷
-registerPaperRoutes(app)
+if (paperRouteMod?.registerPaperRoutes) {
+  paperRouteMod.registerPaperRoutes(app)
+} else if (typeof paperRouteMod === 'function' && paperRouteMod.name === 'registerPaperRoutes') {
+  paperRouteMod(app)
+}
 
 // ─── 404 兜底 ───
 app.use('/api', (req, res) => {

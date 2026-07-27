@@ -7,6 +7,7 @@ interface Props {
 const teacherLinks = [
   { to: '/teacher/dashboard', label: '工作台' },
   { to: '/teacher/exam', label: 'AI出题' },
+  { to: '/teacher/paper-resources', label: '试题试卷' },
   { to: '/teacher/question-bank', label: '我的题库' },
   { to: '/teacher/analytics', label: '学情看板' },
   { to: '/teacher/batch-upload', label: '批量拆题' },
@@ -20,7 +21,9 @@ const teacherLinks = [
 ]
 
 const studentLinks = [
+  { to: '/student/paper-resources', label: '试题试卷' },
   { to: '/student/dashboard', label: '学习中心' },
+  { to: '/student/exam-review', label: '考试复盘' },
   { to: '/student/diagnosis', label: 'AI学习诊断' },
   { to: '/student/planning', label: 'AI教育规划' },
   { to: '/student/photo-search', label: '拍照搜题' },

@@ -140,8 +140,8 @@ export async function resetDecomposeTaskForRetry(taskId) {
       error_message: null,
       result: {
         payload,
-        parsedText: task.result?.parsedText ?? null,
-        meta: task.result?.meta ?? null,
+        parsedText: null,
+        meta: null,
         questions: [],
         batchProgress: null,
       },

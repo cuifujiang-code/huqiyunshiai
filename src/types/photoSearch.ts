@@ -3,11 +3,26 @@ export type PhotoSearchSource = 'bank' | 'ai'
 /** 搜题四种结果状态 */
 export type SearchStatus = 'success' | 'no_match' | 'blurry' | 'network_error'
 
+export interface SimilarQuestionRecommendation {
+  title: string
+  reason?: string
+  bankQuestionId?: string | null
+  subject?: string
+}
+
 export interface PhotoSearchResult {
   ocrText: string
   question: string
   answer: string
   analysis: string
+  /** 思路分析 */
+  thinkingAnalysis?: string
+  /** 分步解答 */
+  stepSolution?: string
+  /** 知识总结 */
+  knowledgeSummary?: string
+  /** 同类题型推荐 */
+  similarRecommendations?: SimilarQuestionRecommendation[]
   knowledgePoints: string[]
   source: PhotoSearchSource
   bankQuestionId: string | null

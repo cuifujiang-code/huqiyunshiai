@@ -1,7 +1,15 @@
-import { recognizeHandwritingBase64, isAlibabaOcrConfigured } from '../alibabaHandwritingOcr.js'
+import {
+  recognizePhotoQuestionDoubao,
+  isDoubaoVisionOcrConfigured,
+} from '../doubaoVisionOcr.js'
 import { callDeepSeekAI, extractJson, getDeepSeekConfig } from '../deepseekClient.js'
 import { getSupabaseAdmin, isSupabaseAdminConfigured } from '../supabaseAdmin.js'
 import { insertPhotoSearchRecord } from './photoSearchStore.js'
+import {
+  PHOTO_SEARCH_SYSTEM_PROMPT,
+  enrichPhotoSearchResult,
+  parseStructuredPhotoSearchJson,
+} from './photoSearchPrompt.js'
 
 const BANK_TABLES = [
   { table: 'teacher_question_bank', label: 'teacher' },
@@ -74,17 +82,7 @@ export async function findSimilarBankQuestions(ocrText, limit = 5) {
     .slice(0, limit)
 }
 
-const SYSTEM_PROMPT = `你是 K12 拍照搜题助手。根据 OCR 识别的题目文字，给出规范题干、答案、分步解析和相关知识点。
-若提供了「题库匹配题」，且与识别文字高度相关，必须优先采用题库中的标准答案与解析，并在 JSON 中标注 source 为 "bank"。
-只输出 JSON，不要 markdown：
-{
-  "question": "规范化后的完整题干",
-  "answer": "标准答案",
-  "analysis": "详细解析（分步骤）",
-  "knowledgePoints": ["知识点1", "知识点2"],
-  "source": "bank" 或 "ai",
-  "bankQuestionId": "题库题目 id 或 null"
-}`
+const SYSTEM_PROMPT = PHOTO_SEARCH_SYSTEM_PROMPT
 
 function buildUserPrompt(ocrText, candidates) {
   const parts = [`OCR 识别文字：\n${ocrText}`]
@@ -99,7 +97,7 @@ function buildUserPrompt(ocrText, candidates) {
   return parts.join('\n')
 }
 
-function mapBankHit(best, ocrText) {
+function mapBankHit(best, ocrText, candidates = []) {
   const kp = best.knowledge_point
     ? String(best.knowledge_point)
         .split(/[,，;；]/)
@@ -107,27 +105,30 @@ function mapBankHit(best, ocrText) {
         .filter(Boolean)
     : []
 
-  return {
-    ocrText,
-    question: best.content || ocrText,
-    answer: best.answer || '暂无',
-    analysis: best.analysis || '暂无',
-    knowledgePoints: kp,
-    source: 'bank',
-    bankQuestionId: String(best.id),
-    bankTable: best._table,
-    matchedQuestion: {
-      id: best.id,
-      content: best.content,
-      answer: best.answer,
-      analysis: best.analysis,
-      knowledge_point: best.knowledge_point,
-      subject: best.subject,
-      question_type: best.question_type,
-      table: best._table,
+  return enrichPhotoSearchResult(
+    {
+      ocrText,
+      question: best.content || ocrText,
+      answer: best.answer || '暂无',
+      analysis: best.analysis || '暂无',
+      knowledgePoints: kp,
+      source: 'bank',
+      bankQuestionId: String(best.id),
+      bankTable: best._table,
+      matchedQuestion: {
+        id: best.id,
+        content: best.content,
+        answer: best.answer,
+        analysis: best.analysis,
+        knowledge_point: best.knowledge_point,
+        subject: best.subject,
+        question_type: best.question_type,
+        table: best._table,
+      },
+      similarity: best._score,
     },
-    similarity: best._score,
-  }
+    candidates.length ? candidates : [best],
+  )
 }
 
 async function solveWithDeepSeek(ocrText, candidates) {
@@ -162,51 +163,13 @@ async function solveWithDeepSeek(ocrText, candidates) {
     parsed = {
       question: ocrText,
       answer: raw.slice(0, 500),
-      analysis: '',
+      stepSolution: '',
       knowledgePoints: [],
       source: 'ai',
     }
   }
 
-  const bankId = parsed.bankQuestionId ? String(parsed.bankQuestionId) : null
-  const matched =
-    bankId && candidates.find((c) => String(c.id) === bankId)
-      ? candidates.find((c) => String(c.id) === bankId)
-      : null
-
-  if (parsed.source === 'bank' && matched) {
-    return {
-      ...mapBankHit(matched, ocrText),
-      question: parsed.question || matched.content,
-      answer: parsed.answer || matched.answer,
-      analysis: parsed.analysis || matched.analysis,
-      knowledgePoints: Array.isArray(parsed.knowledgePoints)
-        ? parsed.knowledgePoints
-        : mapBankHit(matched, ocrText).knowledgePoints,
-    }
-  }
-
-  return {
-    ocrText,
-    question: parsed.question || ocrText,
-    answer: parsed.answer || '',
-    analysis: parsed.analysis || '',
-    knowledgePoints: Array.isArray(parsed.knowledgePoints) ? parsed.knowledgePoints : [],
-    source: 'ai',
-    bankQuestionId: bankId,
-    bankTable: matched?._table ?? null,
-    matchedQuestion: matched
-      ? {
-          id: matched.id,
-          content: matched.content,
-          answer: matched.answer,
-          analysis: matched.analysis,
-          knowledge_point: matched.knowledge_point,
-          table: matched._table,
-        }
-      : null,
-    similarity: matched?._score ?? 0,
-  }
+  return parseStructuredPhotoSearchJson(parsed, ocrText, candidates)
 }
 
 async function runPhotoSearchViaOrchestrator({ userId, imageBase64, imageName, clientOcrText, editedOcrText }) {
@@ -286,13 +249,13 @@ export async function runPhotoSearch({ userId, imageBase64, imageName, clientOcr
     }
   }
 
-  if (!isAlibabaOcrConfigured()) {
-    throw new Error('阿里云 OCR 未配置，请联系管理员设置 ALIBABA_ACCESS_KEY_ID / ALIBABA_ACCESS_KEY_SECRET')
+  if (!isDoubaoVisionOcrConfigured()) {
+    throw new Error('豆包视觉 OCR 未配置，请设置 DOUBAO_API_KEY 与 DOUBAO_VISION_MODEL')
   }
 
   let ocrText
   try {
-    ocrText = await recognizeHandwritingBase64(imageBase64, {
+    ocrText = await recognizePhotoQuestionDoubao(imageBase64, {
       fileName: imageName || 'photo.jpg',
     })
   } catch (ocrErr) {
@@ -316,7 +279,7 @@ export async function runPhotoSearch({ userId, imageBase64, imageName, clientOcr
   let result
   if (best && best._score >= 0.55) {
     // 题库直接命中 → success
-    result = { ...mapBankHit(best, ocrText), searchStatus: 'success' }
+    result = { ...mapBankHit(best, ocrText, candidates), searchStatus: 'success' }
   } else {
     // AI 兜底
     const aiResult = await solveWithDeepSeek(ocrText, candidates)

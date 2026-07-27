@@ -52,6 +52,124 @@ export interface PlanningFormData {
   parentExpectations: string
   specialNotes: string
   createdByRole?: 'teacher' | 'student'
+  /** 所在城市 */
+  city: string
+  /** 户籍类型 */
+  householdType: HouseholdType | ''
+  /** 霍兰德 RIASEC 六维 */
+  hollandScores: HollandScores
+  /** 综合竞争力指数（自动计算） */
+  competencyScore: number
+  /** 主科成绩（语数英） */
+  mainSubjectScores: WizardSubjectScore[]
+  /** 选科成绩 */
+  electiveSubjectScores: WizardSubjectScore[]
+  /** 年均教育预算 */
+  familyBudget: FamilyBudget | ''
+  /** 家长最高学历 */
+  parentEducation: ParentEducation | ''
+  /** 特殊身份资源 */
+  identityResources: string[]
+  /** 期望院校层次 */
+  targetTierLevel: TargetTierLevel | ''
+  /** 特长标签（最多3个） */
+  specialTalents: string[]
+  /** 主目标 */
+  primaryGoal: PrimaryGoal | ''
+  /** 意向专业方向 */
+  targetMajorIntent: string
+}
+
+export type HollandScores = {
+  R: number
+  I: number
+  A: number
+  S: number
+  E: number
+  C: number
+}
+
+export type FamilyBudget = '5万以下' | '5-15万' | '15-30万' | '30万以上'
+export type ExamDifficulty = '校内月考' | '市级联考' | '竞赛级'
+export type HouseholdType = '城市户口' | '农村户口' | '少数民族' | '其他加分项'
+export type PrimaryGoal =
+  | '普通高考'
+  | '艺术生联考'
+  | '体育生'
+  | '科技竞赛（强基计划）'
+  | '出国留学'
+  | '职业技能方向'
+export type TargetTierLevel =
+  | '985/顶尖院校'
+  | '211/双一流'
+  | '省内重点本科'
+  | '普通本科'
+  | '暂时没想好'
+export type ParentEducation = '初中及以下' | '高中/大专' | '本科' | '硕士及以上'
+
+export interface WizardSubjectScore {
+  subject: string
+  score: number | null
+  difficulty: ExamDifficulty
+}
+
+export const WIZARD_MAIN_SUBJECTS = ['语文', '数学', '英语'] as const
+export const WIZARD_ALL_ELECTIVES = ['物理', '化学', '生物', '政治', '历史', '地理'] as const
+export const EXAM_DIFFICULTIES: ExamDifficulty[] = ['校内月考', '市级联考', '竞赛级']
+export const HOUSEHOLD_TYPES: HouseholdType[] = ['城市户口', '农村户口', '少数民族', '其他加分项']
+export const FAMILY_BUDGETS: FamilyBudget[] = ['5万以下', '5-15万', '15-30万', '30万以上']
+export const PARENT_EDUCATIONS: ParentEducation[] = ['初中及以下', '高中/大专', '本科', '硕士及以上']
+export const IDENTITY_RESOURCES = [
+  '军人/军属加分',
+  '烈士子女',
+  '归国华侨',
+  '港澳台背景',
+  '残疾人家庭',
+  '以上均无',
+] as const
+export const SPECIAL_TALENT_TAGS = [
+  '数学竞赛',
+  '物理竞赛',
+  '编程',
+  '写作',
+  '绘画',
+  '音乐',
+  '体育',
+  '辩论',
+  '志愿服务',
+  '学生干部',
+] as const
+export const PRIMARY_GOALS: PrimaryGoal[] = [
+  '普通高考',
+  '艺术生联考',
+  '体育生',
+  '科技竞赛（强基计划）',
+  '出国留学',
+  '职业技能方向',
+]
+export const TARGET_TIER_LEVELS: TargetTierLevel[] = [
+  '985/顶尖院校',
+  '211/双一流',
+  '省内重点本科',
+  '普通本科',
+  '暂时没想好',
+]
+
+export const DEFAULT_HOLLAND_SCORES: HollandScores = {
+  R: 50,
+  I: 50,
+  A: 50,
+  S: 50,
+  E: 50,
+  C: 50,
+}
+
+export function buildDefaultWizardSubjectScores(subjects: readonly string[]): WizardSubjectScore[] {
+  return subjects.map((subject) => ({
+    subject,
+    score: null,
+    difficulty: '校内月考' as ExamDifficulty,
+  }))
 }
 
 export interface AbilityDimension {
@@ -97,6 +215,14 @@ export interface PlanningRisk {
   risk: string
   impact: string
   mitigation: string
+}
+
+/** 推荐升学路径（主路径 / 备选 / 保底） */
+export interface PlanningPathOption {
+  name: string
+  matchScore: number
+  reason: string
+  keyActions: string[]
 }
 
 export interface PlanningReport {
@@ -146,7 +272,9 @@ export interface PlanningReport {
   electiveAdvice?: { subject: string; level?: string; advice: string }[]
   /** 多 AI 协同元数据 */
   orchestrationMeta?: PlanningOrchestrationMeta
-  source?: 'ai' | 'mock' | 'ai-data-driven'
+  /** 推荐路径对比（主路径 / 备选 / 保底） */
+  pathOptions?: PlanningPathOption[]
+  source?: 'ai' | 'mock' | 'ai-data-driven' | 'ai-data-driven-degraded' | 'database-driven' | 'database-driven-degraded'
 }
 
 export interface FiveStagePlanItem {
@@ -162,6 +290,7 @@ export interface FiveStagePlanItem {
 
 export interface UniversityLookupResult {
   matched: boolean
+  degraded?: boolean
   university?: string
   aliases?: string[]
   tier?: string
@@ -170,13 +299,19 @@ export interface UniversityLookupResult {
   year?: number
   admission?: {
     min_score?: number
+    max_score?: number
     min_rank?: number
+    max_rank?: number
     elective_requirement?: string
     notes?: string
+    is_estimate?: boolean
+    estimate_source?: string
   }
   source?: string
   citation?: string
   message?: string
+  strategyHint?: string
+  typicalUniversities?: string[]
   emptyDataRule?: { message?: string; forbid_ai_hallucination?: boolean }
 }
 
@@ -571,9 +706,8 @@ export interface ExamDataReference {
 }
 
 // 教育规划完整表单（增强版）
-export interface EnhancedPlanningFormData {
-  // 基本信息
-  studentName: string
+export interface EnhancedPlanningFormData extends PlanningFormData {
+  // 基本信息（扩展）
   gender: '男' | '女' | ''
   birthDate: string
   
@@ -584,20 +718,13 @@ export interface EnhancedPlanningFormData {
   ranking: StudentRanking
   
   // 目标
-  goalDirections: GoalDirection[]
   targetSchools: string[]    // 目标学校名称列表
-  scoreLevel: ScoreLevel
   
-  // 各科成绩
+  // 各科成绩（兼容旧版）
   subjectScores: SubjectScore[]
   
-  // 兴趣特长
-  interests: InterestTag[]
+  // 兴趣特长（兼容）
   specialties: StudentSpecialty[]
-  
-  // 家长期望
-  parentExpectations: string
-  specialNotes: string
   
   // 考试数据（AI获取）
   examDataRef?: ExamDataReference
@@ -610,6 +737,4 @@ export interface EnhancedPlanningFormData {
   scoreHistory: ExamScoreRecord[]
   /** 客户端预计算的成绩分析 */
   scoreAnalysis?: ScoreAnalysisResult
-
-  createdByRole?: 'teacher' | 'student'
 }

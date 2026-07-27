@@ -12,8 +12,9 @@ export default async function handler(req, res) {
 
   try {
     const subject = req.query?.subject || ''
-    const topics = await questionBank.listTopics(teacherId, subject || undefined)
-    return res.status(200).json({ success: true, topics })
+    const grade = req.query?.grade || ''
+    const result = await questionBank.listTopics(teacherId, subject || undefined, grade || undefined)
+    return res.status(200).json({ success: true, ...result })
   } catch (err) {
     console.error('[questions/topics] 错误', err)
     return res.status(500).json({ success: false, message: err.message })

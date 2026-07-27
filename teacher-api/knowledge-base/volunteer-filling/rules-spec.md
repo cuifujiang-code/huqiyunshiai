@@ -22,7 +22,7 @@
 | E3 | 批次匹配 | `admission.batch_type` 必须等于用户输入的 `batchType`（默认「本科」） |
 | E4 | 选科满足 | 用户 `subjects` 数组必须满足 `admission.subject_requirement` 中的全部必选科目（「不限」则跳过） |
 | E5 | 历史数据量 | 同一院校+专业组合至少拥有 **2 个有效年份** 的录取数据，否则排除 |
-| E6 | 意向专业（可选） | 若用户填写 `intendedMajors` 且非空，则 `major_name` 须与其中任一项模糊匹配（包含关系，忽略大小写） |
+| E6 | 意向专业（可选） | 若用户填写 `intendedMajors` 且非空，则 `major_name` 须与其中任一项模糊匹配（包含关系，忽略大小写）；支持 `major-profiles.json` 中 `intentAliases` 同义词扩展（如「计算机」匹配软件工程、人工智能等） |
 
 **选科解析规则（E4）：**
 

@@ -91,6 +91,9 @@ export default function PlanningPreviewPanel({
               <p className="text-xs text-slate-500">
                 生成时间：{new Date(report.generatedAt).toLocaleString('zh-CN')}
                 {report.source === 'mock' && ' · 示例数据'}
+                {(report.source === 'database-driven' || report.source === 'database-driven-degraded') &&
+                  ' · 数据库驱动'}
+                {report.source === 'ai-data-driven-degraded' && ' · 含估算数据'}
               </p>
             </div>
             <div className="flex flex-wrap gap-2">

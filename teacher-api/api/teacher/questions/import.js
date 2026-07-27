@@ -1,9 +1,9 @@
 /**
  * POST /api/teacher/questions/import — Excel 批量导入题目
  */
-import '../../server/applyUrlShim.js'
+import '../../../server/applyUrlShim.js'
 import { handleTeacherApi } from '../../teacherApiHandler.js'
-import { applyApiHeaders, handleOptions } from '../../server/apiResponse.js'
+import { applyApiHeaders, handleOptions } from '../../../server/apiResponse.js'
 
 export default async function handler(req, res) {
   if (handleOptions(req, res)) return

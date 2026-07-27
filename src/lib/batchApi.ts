@@ -83,8 +83,14 @@ export function normalizeBatchQuestions(raw: unknown): BatchQuestion[] {
   })
 }
 
-async function callBatch<T>(url: string, body: unknown, label: string, method: 'GET' | 'POST' = 'POST') {
-  const r = await postApiJson<T>(url, body, label, { method, timeoutMs: 120000 })
+async function callBatch<T>(
+  url: string,
+  body: unknown,
+  label: string,
+  method: 'GET' | 'POST' = 'POST',
+  timeoutMs = 120000,
+) {
+  const r = await postApiJson<T>(url, body, label, { method, timeoutMs })
   if (r.kind === 'success') return r.data
   throw new Error(r.reason)
 }
@@ -172,6 +178,8 @@ export async function uploadBatchTask(
       ...(options?.knowledgeCoverage ? { knowledgeCoverage: options.knowledgeCoverage } : {}),
     },
     '批量上传',
+    'POST',
+    300000,
   )
   const normalized = normalizeBatchUploadResponse(data)
   if (!normalized.batchId) {

@@ -324,12 +324,33 @@ async function parsePdf(buffer, fileName) {
   return { text, type: 'pdf' }
 }
 
+let enhancedParseExamFile = undefined
+
+/** 优先使用 teacher-api 增强解析（公式图提取、[图片占位符] 等） */
+async function tryEnhancedParseExamFile(buffer, fileName, meta) {
+  if (enhancedParseExamFile === false) return null
+  if (enhancedParseExamFile) {
+    return enhancedParseExamFile(buffer, fileName, meta)
+  }
+  try {
+    const mod = await import('../teacher-api/server/examParser.js')
+    enhancedParseExamFile = mod.parseExamFile
+    return enhancedParseExamFile(buffer, fileName, meta)
+  } catch (err) {
+    console.warn('[试卷解析] 增强解析不可用，使用本地解析', {
+      error: err instanceof Error ? err.message : String(err),
+    })
+    enhancedParseExamFile = false
+    return null
+  }
+}
+
 /**
  * 解析标准试卷：Word(.docx) 或 PDF
- * 对于 DOCX：返回 { text, html?, type, images? }
+ * 对于 DOCX：返回 { text, html?, type, images?, formulaImages? }
  * 对于 PDF：返回 { text, type }
  */
-export async function parseExamFile(buffer, fileName) {
+export async function parseExamFile(buffer, fileName, meta = {}) {
   if (!buffer?.length) {
     throw new Error('试卷文件为空')
   }
@@ -340,6 +361,9 @@ export async function parseExamFile(buffer, fileName) {
   const lower = (fileName || '').toLowerCase()
 
   try {
+    const enhanced = await tryEnhancedParseExamFile(buffer, fileName, meta)
+    if (enhanced) return enhanced
+
     if (lower.endsWith('.docx')) {
       return await parseDocx(buffer, fileName)
     }

@@ -9,17 +9,23 @@ import {
   callDoubaoAI,
   callQianwenAI,
   callDeepSeekWithTimeout,
-  callDeepSeekVisionSafe,
   isDeepSeekAvailable,
   isDoubaoAvailable,
   isQianwenAvailable,
-  isAlibabaOcrAvailable,
-  isVisionUnsupportedError,
-  runDualAlibabaOcr,
+  isDoubaoVisionOcrAvailable,
   safeAiCall,
 } from './aiProviders.js'
+import {
+  recognizePhotoQuestionDoubao,
+} from './doubaoVisionOcr.js'
 import { repairJSON } from './batch/jsonRepairEngine.js'
 import { generateDataDrivenPlan } from './planningEngine.js'
+import {
+  PHOTO_SEARCH_SYSTEM_PROMPT,
+  enrichPhotoSearchResult,
+  mapBankHitForOrchestrator,
+  parseStructuredPhotoSearchJson,
+} from './student/photoSearchPrompt.js'
 
 const SUPPORTED_TASKS = new Set(['photo-search', 'exam-builder', 'education-planning', 'diagnosis'])
 
@@ -125,8 +131,6 @@ async function runPhotoSearchOrchestration(input) {
 
   const preOcr = (clientOcrText || editedOcrText || '').trim()
   let ocrText = ''
-  let textA = ''
-  let textB = ''
 
   if (preOcr) {
     ocrText = preOcr
@@ -145,50 +149,27 @@ async function runPhotoSearchOrchestration(input) {
       throw new Error('请上传题目图片')
     }
 
-    const dual = await runDualAlibabaOcr(imageBase64, imageName)
-    meta.providersUsed.push('alibaba-ocr-standard', 'alibaba-ocr-enhanced')
-
-    textA = dual.standard.ok ? dual.standard.result : ''
-    textB = dual.enhanced.ok ? dual.enhanced.result : ''
-
-    if (!textA && !textB) {
-      meta.degraded = true
-      console.warn('[aiOrchestrator] 阿里云 OCR 双路均失败，触发 DeepSeek 视觉降级')
-      const vision = await safeAiCall('DeepSeek-Vision-fallback', isDeepSeekAvailable, () =>
-        callDeepSeekVisionSafe(
-          '你是 K12 拍照搜题 OCR 专家。请仔细查看图片，提取其中的完整题目文字内容（包括公式和图表标注）。只输出纯文本题目，不要添加解释或评价。',
-          '请识别这张题目图片的完整文字内容，输出原文。',
-          imageBase64,
-          'image/jpeg',
-        ),
+    if (!isDoubaoVisionOcrAvailable()) {
+      throw Object.assign(
+        new Error('豆包视觉 OCR 未配置，请设置 DOUBAO_API_KEY 与 DOUBAO_VISION_MODEL'),
+        { searchStatus: 'blurry' },
       )
-      if (vision.ok) {
-        ocrText = String(vision.result || '').trim()
-        meta.providersUsed.push('deepseek-vision-fallback')
-        meta.ocrFallback = true
-        console.log('[aiOrchestrator] DeepSeek Vision 识别成功', { charCount: ocrText.length })
-      } else if (vision.error && isVisionUnsupportedError(vision.error)) {
-        meta.visionUnsupported = true
-        console.warn('[aiOrchestrator] DeepSeek 视觉模型不支持 image_url', { error: vision.error })
-      }
     }
-  }
 
-  if (!ocrText) {
-    if (!textA && !textB) {
-      if (!isDeepSeekAvailable()) meta.degraded = true
-      const hint = meta.visionUnsupported
-        ? '服务端视觉识别不可用，请使用本机 OCR 重试'
-        : 'OCR 未配置或全部失败，AI 视觉识别也未能成功'
-      throw Object.assign(new Error(hint), {
-        searchStatus: 'blurry',
-        clientOcrSuggested: true,
-      })
+    const doubaoVision = await safeAiCall('Doubao-Vision-OCR', isDoubaoVisionOcrAvailable, () =>
+      recognizePhotoQuestionDoubao(imageBase64, { fileName: imageName }),
+    )
+
+    if (doubaoVision.ok) {
+      ocrText = String(doubaoVision.result || '').trim()
+      meta.providersUsed.push('doubao-vision')
+      console.log('[aiOrchestrator] 豆包视觉 OCR 成功', { charCount: ocrText.length })
+    } else {
+      throw Object.assign(
+        new Error(doubaoVision.error || '豆包视觉 OCR 识别失败'),
+        { searchStatus: 'blurry' },
+      )
     }
-    // 至少有单路 OCR 成功 → 进入仲裁
-    const arbitration = await arbitrateOcrTexts(textA, textB, { imageName })
-    ocrText = arbitration.text
-    meta.ocrArbitration = arbitration
   }
 
   if (normalizeText(ocrText).length < 8) {
@@ -202,7 +183,7 @@ async function runPhotoSearchOrchestration(input) {
   if (isDeepSeekAvailable()) {
     const deepseek = await safeAiCall('DeepSeek-solve', isDeepSeekAvailable, () =>
       callDeepSeekWithTimeout(
-        `你是 K12 拍照搜题助手。只输出 JSON：{"question":"","answer":"","analysis":"","knowledgePoints":[],"source":"bank|ai","bankQuestionId":null}`,
+        PHOTO_SEARCH_SYSTEM_PROMPT,
         `OCR文字：\n${ocrText}\n\n题库候选：\n${candidates.map((c, i) => `[${i + 1}] id=${c.id} 相似${(c._score * 100).toFixed(0)}% ${c.content?.slice(0, 200)}`).join('\n')}`,
         { label: 'PhotoSearch-DeepSeek', temperature: 0.2 },
       ),
@@ -218,17 +199,12 @@ async function runPhotoSearchOrchestration(input) {
   }
 
   if (!solveResult && best && best._score >= 0.55) {
+    const structured = mapBankHitForOrchestrator(best, ocrText, candidates)
     return {
       success: true,
       taskType: 'photo-search',
       result: {
-        ocrText,
-        question: best.content,
-        answer: best.answer || '暂无',
-        analysis: best.analysis || '暂无',
-        knowledgePoints: best.knowledge_point ? [best.knowledge_point] : [],
-        source: 'bank',
-        bankQuestionId: String(best.id),
+        ...structured,
         searchStatus: 'success',
         reviewRequired: false,
         userId,
@@ -238,8 +214,23 @@ async function runPhotoSearchOrchestration(input) {
     }
   }
 
-  const answer = solveResult?.answer || best?.answer || ''
-  const analysis = solveResult?.analysis || best?.analysis || ''
+  const structuredFromAi = solveResult
+    ? parseStructuredPhotoSearchJson(solveResult, ocrText, candidates)
+    : enrichPhotoSearchResult(
+        {
+          ocrText,
+          question: best?.content || ocrText,
+          answer: best?.answer || '',
+          analysis: best?.analysis || '',
+          knowledgePoints: best?.knowledge_point ? [best.knowledge_point] : [],
+          source: best ? 'bank' : 'ai',
+          bankQuestionId: best ? String(best.id) : null,
+        },
+        candidates,
+      )
+
+  const answer = structuredFromAi.answer || best?.answer || ''
+  const analysis = structuredFromAi.stepSolution || structuredFromAi.analysis || best?.analysis || ''
 
   // ============ OCR 降级模式：跳过豆包和千问验证 ============
   if (meta.ocrFallback) {
@@ -248,13 +239,9 @@ async function runPhotoSearchOrchestration(input) {
       success: true,
       taskType: 'photo-search',
       result: {
-        ocrText,
-        question: solveResult?.question || ocrText,
+        ...structuredFromAi,
         answer,
         analysis,
-        knowledgePoints: Array.isArray(solveResult?.knowledgePoints) ? solveResult.knowledgePoints : [],
-        source: solveResult?.source || (best ? 'bank' : 'ai'),
-        bankQuestionId: solveResult?.bankQuestionId ?? (best ? String(best.id) : null),
         searchStatus: 'success',
         reviewRequired: false,
         ocrFallback: true,
@@ -301,13 +288,9 @@ async function runPhotoSearchOrchestration(input) {
     success: true,
     taskType: 'photo-search',
     result: {
-      ocrText,
-      question: solveResult?.question || ocrText,
+      ...structuredFromAi,
       answer: reviewRequired ? `${answer}\n\n【答案需审阅】` : answer,
       analysis,
-      knowledgePoints: Array.isArray(solveResult?.knowledgePoints) ? solveResult.knowledgePoints : [],
-      source: solveResult?.source || (best ? 'bank' : 'ai'),
-      bankQuestionId: solveResult?.bankQuestionId ?? (best ? String(best.id) : null),
       searchStatus: 'success',
       reviewRequired,
       userId,
@@ -411,6 +394,8 @@ async function runEducationPlanningOrchestration(input) {
     form.targetUniversity ||
     enhanced.targetSchools?.[0] ||
     form.targetSchools?.[0] ||
+    enhanced.targetTierLevel ||
+    form.targetTierLevel ||
     ''
   const province =
     form.province ||
@@ -420,7 +405,7 @@ async function runEducationPlanningOrchestration(input) {
   const major = form.targetMajor || enhanced.targetMajor || '通用'
 
   if (!targetUniversity?.trim()) {
-    throw new Error('缺少目标院校，请在「目标学校」中填写至少一所院校')
+    throw new Error('缺少目标院校或院校层次，请在「目标期望」中选择院校层次或填写具体院校')
   }
   if (!province?.trim()) {
     throw new Error('缺少省份信息，请在学校信息中选择省份')
@@ -451,6 +436,7 @@ async function runEducationPlanningOrchestration(input) {
   }
 
   meta.providersUsed.push(...(engineResult.meta?.providersUsed ?? ['planningEngine']))
+  meta.degraded = engineResult.isDegraded || false
   let planRaw = engineResult.report
   const planText = JSON.stringify(planRaw).slice(0, 8000)
 
@@ -607,7 +593,7 @@ export async function orchestrateAITask(taskType, input = {}) {
       deepseek: isDeepSeekAvailable(),
       doubao: isDoubaoAvailable(),
       qianwen: isQianwenAvailable(),
-      alibabaOcr: isAlibabaOcrAvailable(),
+      doubaoVisionOcr: isDoubaoVisionOcrAvailable(),
     },
   })
 

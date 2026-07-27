@@ -1,4 +1,5 @@
 import type { PlanningFormData, PlanningReport } from '../types/planning'
+import { computeFiveDimensionAnalysis } from '../lib/planningWizardUtils'
 
 /** 客户端本地 mock（与 server/mockPlanningData 逻辑对齐的简化版） */
 export function buildLocalPlanningReport(form: PlanningFormData): PlanningReport {
@@ -7,6 +8,8 @@ export function buildLocalPlanningReport(form: PlanningFormData): PlanningReport
 
   const abilityBase =
     form.scoreLevel === '优秀' ? 85 : form.scoreLevel === '良好' ? 72 : form.scoreLevel === '中等' ? 60 : 48
+
+  const fiveDim = computeFiveDimensionAnalysis(form)
 
   return {
     title: `${form.studentName} · ${form.grade} · 个性化教育规划方案`,
@@ -115,6 +118,26 @@ export function buildLocalPlanningReport(form: PlanningFormData): PlanningReport
         risk: '多目标并行可能导致精力分散',
         impact: '中',
         mitigation: '确定主目标与备选目标，阶段性复盘调整',
+      },
+    ],
+    pathOptions: [
+      {
+        name: fiveDim.totalScore >= 85 ? '985冲刺路线' : fiveDim.totalScore >= 70 ? '211/双一流路线' : '省内重本路线',
+        matchScore: Math.min(95, fiveDim.totalScore + 5),
+        reason: '与当前五维总分及成绩水平最匹配的主路径',
+        keyActions: ['锁定主科提分计划', '按目标优化选科组合', '每月模考校准进度'],
+      },
+      {
+        name: '综合评价备选路线',
+        matchScore: Math.max(55, fiveDim.totalScore - 5),
+        reason: '兼顾兴趣特长与录取概率的备选方案',
+        keyActions: ['积累综合素质材料', '关注专项招生窗口', '保持主科稳定'],
+      },
+      {
+        name: '省内公办保底路线',
+        matchScore: Math.max(40, fiveDim.totalScore - 15),
+        reason: '确保有学可上的保底路径',
+        keyActions: ['夯实基础题得分率', '了解高职单招政策', '设定最低可接受院校'],
       },
     ],
     source: 'mock',

@@ -2,7 +2,7 @@ import type { PhotoSearchHistoryItem, PhotoSearchResult, SearchStatus } from '..
 import { postApiJson } from './postApiJson'
 
 export const PHOTO_SEARCH_API = '/api/student/photo-search'
-export const PHOTO_SEARCH_HISTORY_API = '/api/student/photo-search-history'
+export const PHOTO_SEARCH_HISTORY_API = '/api/student/photo-search/history'
 
 const SEARCH_TIMEOUT_MS = 65_000
 

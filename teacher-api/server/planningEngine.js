@@ -10,6 +10,20 @@ import { join, dirname } from 'path'
 import { fileURLToPath } from 'url'
 import { callDeepSeekWithTimeout, isDeepSeekAvailable } from './aiProviders.js'
 import { extractJson } from './deepseekClient.js'
+import {
+  HUQI_PLANNING_SYSTEM_PROMPT,
+  fetchPlanningStudentContext,
+  formatPlanningStudentContextBlock,
+  buildEnrichedUserPromptSections,
+} from '../../server/planning/planningPrompts.js'
+import {
+  resolvePlanningEnrichment,
+  formatExamTrendBlock,
+  normalizePathOptions,
+} from '../../server/planning/planningEnrichment.js'
+import { buildDatabaseDrivenPlanningReport } from '../../server/planning/planningDatabaseReport.js'
+
+const PLANNING_AI_TIMEOUT_MS = Number(process.env.PLANNING_AI_TIMEOUT_MS || 180000)
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const TEMPLATE_PATH = join(__dirname, '..', 'knowledge-base', 'education-planning', 'planning-templates.json')
@@ -35,7 +49,24 @@ const PLAN_OUTPUT_SCHEMA = `{
   "milestones": [{ "date": "", "event": "", "preparationAdvice": "" }],
   "risks": [{ "risk": "", "impact": "高|中|低", "mitigation": "" }],
   "volunteerGuidance": [],
-  "dynamicCalibrationNotes": ""
+  "dynamicCalibrationNotes": "",
+  "professionalReport": {
+    "diagnosis": "现状诊断100字以内",
+    "recommendedPaths": [
+      { "type": "main|backup|fallback", "path": "路径名称", "reason": "匹配理由" }
+    ],
+    "keyTimeline": [{ "month": "精确到月", "event": "事件", "note": "说明" }],
+    "actionList90Days": ["具体可执行任务，至少6条"],
+    "riskAlerts": ["风险提示1-2条"]
+  },
+  "pathOptions": [
+    {
+      "name": "985冲刺路线",
+      "matchScore": 88,
+      "reason": "推荐理由50字以内",
+      "keyActions": ["关键行动1", "关键行动2", "关键行动3"]
+    }
+  ]
 }`
 
 function loadTemplates(force = false) {
@@ -59,6 +90,46 @@ function normalizeName(s) {
     .replace(/\s+/g, '')
     .replace(/[（(].*?[）)]/g, '')
     .replace(/大学$/g, '大学')
+}
+
+/**
+ * 院校层次标签列表 — 当 targetUniversity 是这些标签时，不查具体院校，改用层次估算
+ */
+const TIER_LABELS = [
+  '985/顶尖院校', '985', '顶尖院校', 'C9', '清北',
+  '211/双一流', '211', '双一流',
+  '省内重点本科', '省重点', '省内重点', '重点本科',
+  '普通本科', '本科', '一段线',
+  '暂时没想好', '未定', '待定', '没想好',
+]
+
+function isTierLabel(str) {
+  const normalized = String(str || '').trim().toLowerCase()
+  if (!normalized) return false
+  return TIER_LABELS.some((label) => {
+    const nl = label.toLowerCase()
+    return normalized === nl || normalized.includes(nl) || nl.includes(normalized)
+  })
+}
+
+/**
+ * 根据院校层次标签获取估算录取数据
+ */
+function lookupTierEstimate(tierLabel) {
+  const templates = loadTemplates()
+  const estimates = templates.tier_estimates?.estimates ?? []
+  const query = String(tierLabel || '').trim().toLowerCase()
+
+  for (const est of estimates) {
+    const aliases = [est.tier, ...(est.aliases ?? [])]
+    for (const a of aliases) {
+      const na = a.toLowerCase()
+      if (na === query || query.includes(na) || na.includes(query)) {
+        return est
+      }
+    }
+  }
+  return null
 }
 
 function matchUniversity(targetUniversity) {
@@ -90,11 +161,85 @@ function resolveMajorRecord(provinceData, major) {
 
 /**
  * 检索目标院校录取数据（供前端确认）
+ * 支持两种模式：
+ * 1. 精确匹配 — 当 targetUniversity 是具体院校名时，查 universities 列表
+ * 2. 层级估算 — 当 targetUniversity 是层次标签（如"211/双一流"）时，查 tier_estimates
  */
 export function lookupTargetUniversity(targetUniversity, province, major = '通用') {
   const templates = loadTemplates()
+
+  // 先检测是否为层次标签
+  if (isTierLabel(targetUniversity)) {
+    const tierEst = lookupTierEstimate(targetUniversity)
+    if (tierEst) {
+      return {
+        matched: true,
+        degraded: true,
+        university: tierEst.tier,
+        tier: tierEst.tier,
+        province: String(province || '').trim() || '浙江',
+        major: major || '通用',
+        year: new Date().getFullYear(),
+        admission: {
+          min_score: tierEst.score_range.min,
+          max_score: tierEst.score_range.max,
+          min_rank: tierEst.rank_range.min,
+          max_rank: tierEst.rank_range.max,
+          elective_requirement: tierEst.elective_requirement_hint || '—',
+          is_estimate: true,
+          estimate_source: `基于${tierEst.tier}层次院校录取区间估算`,
+        },
+        source: `层级估算（${tierEst.tier}）`,
+        citation: `数据来源：层级估算（${tierEst.tier}层次院校${tierEst.score_range.min}-${tierEst.score_range.max}分区间），非精确录取数据，仅供参考`,
+        strategyHint: tierEst.strategy_hint,
+        typicalUniversities: tierEst.typical_universities,
+        fiveStageFramework: templates.five_stage_framework,
+        dynamicCalibrationRule: templates.dynamic_calibration_rule,
+        message: templates.empty_data_rule?.degraded_mode_message,
+      }
+    }
+  }
+
+  // 精确匹配具体院校
   const uni = matchUniversity(targetUniversity)
   if (!uni) {
+    // 检查是否允许降级模式
+    const allowDegraded = templates.empty_data_rule?.action === 'warn_and_continue'
+    if (allowDegraded) {
+      // 尝试根据院校名猜测层次
+      const guessedTier = guessTierByName(targetUniversity)
+      if (guessedTier) {
+        const tierEst = lookupTierEstimate(guessedTier)
+        if (tierEst) {
+          return {
+            matched: true,
+            degraded: true,
+            university: targetUniversity,
+            tier: tierEst.tier,
+            province: String(province || '').trim() || '浙江',
+            major: major || '通用',
+            year: new Date().getFullYear(),
+            admission: {
+              min_score: tierEst.score_range.min,
+              max_score: tierEst.score_range.max,
+              min_rank: tierEst.rank_range.min,
+              max_rank: tierEst.rank_range.max,
+              elective_requirement: tierEst.elective_requirement_hint || '—',
+              is_estimate: true,
+              estimate_source: `基于${tierEst.tier}层次院校录取区间估算`,
+            },
+            source: `层级估算（${tierEst.tier}）`,
+            citation: `数据来源：层级估算（${targetUniversity}按${tierEst.tier}层次估算），非精确录取数据，仅供参考`,
+            strategyHint: tierEst.strategy_hint,
+            typicalUniversities: tierEst.typical_universities,
+            fiveStageFramework: templates.five_stage_framework,
+            dynamicCalibrationRule: templates.dynamic_calibration_rule,
+            message: templates.empty_data_rule?.degraded_mode_message,
+          }
+        }
+      }
+    }
+
     return {
       matched: false,
       message: templates.empty_data_rule?.message,
@@ -105,6 +250,38 @@ export function lookupTargetUniversity(targetUniversity, province, major = '通�
   const prov = String(province || '').trim()
   const provinceData = uni.admission_by_province?.[prov]
   if (!provinceData) {
+    // 省份不匹配，也尝试降级
+    const allowDegraded = templates.empty_data_rule?.action === 'warn_and_continue'
+    if (allowDegraded) {
+      const tierEst = lookupTierEstimate(uni.tier) || lookupTierEstimate('普通本科')
+      if (tierEst) {
+        return {
+          matched: true,
+          degraded: true,
+          university: uni.name,
+          tier: uni.tier || tierEst.tier,
+          province: prov || '浙江',
+          major: major || '通用',
+          year: new Date().getFullYear(),
+          admission: {
+            min_score: tierEst.score_range.min,
+            max_score: tierEst.score_range.max,
+            min_rank: tierEst.rank_range.min,
+            max_rank: tierEst.rank_range.max,
+            elective_requirement: tierEst.elective_requirement_hint || '—',
+            is_estimate: true,
+            estimate_source: `基于${tierEst.tier}层次院校录取区间估算`,
+          },
+          source: `层级估算（${tierEst.tier}）`,
+          citation: `数据来源：层级估算（${uni.name}按${tierEst.tier}层次估算），非精确录取数据，仅供参考`,
+          strategyHint: tierEst.strategy_hint,
+          fiveStageFramework: templates.five_stage_framework,
+          dynamicCalibrationRule: templates.dynamic_calibration_rule,
+          message: templates.empty_data_rule?.degraded_mode_message,
+        }
+      }
+    }
+
     return {
       matched: false,
       university: uni.name,
@@ -133,6 +310,7 @@ export function lookupTargetUniversity(targetUniversity, province, major = '通�
 
   return {
     matched: true,
+    degraded: false,
     university: uni.name,
     aliases: uni.aliases,
     tier: uni.tier,
@@ -145,6 +323,27 @@ export function lookupTargetUniversity(targetUniversity, province, major = '通�
     fiveStageFramework: templates.five_stage_framework,
     dynamicCalibrationRule: templates.dynamic_calibration_rule,
   }
+}
+
+/**
+ * 根据院校名猜测其层次
+ */
+function guessTierByName(name) {
+  const n = String(name || '').trim()
+  if (!n) return null
+
+  const tierKeywords = [
+    { pattern: /清华|北大|北京大学|清华|复旦|上海交通|浙大|浙江大|中科|南京大|人民大|北航|北师/, tier: '985/顶尖院校' },
+    { pattern: /985|C9|顶尖/, tier: '985/顶尖院校' },
+    { pattern: /211|双一流|武大|武汉大|华科|华中科技|东南大|同济|厦大|厦门大|中山大|华南理工|电子科技|西安电子|北京邮|北邮|中央财经|上海财经|对外经贸/, tier: '211/双一流' },
+    { pattern: /杭电|杭州电子|宁波大|浙江师范|温州医科|浙江理工|杭州师范|浙江工商|浙工大|浙江工业/, tier: '省内重点本科' },
+    { pattern: /学院|文理|农林|纺织|科技学院/, tier: '普通本科' },
+  ]
+
+  for (const { pattern, tier } of tierKeywords) {
+    if (pattern.test(n)) return tier
+  }
+  return '普通本科'
 }
 
 function computeGapBand(gap, templates) {
@@ -248,26 +447,68 @@ export async function generateDataDrivenPlan(targetUniversity, province, major, 
   const lookup = lookupTargetUniversity(targetUniversity, province, major)
 
   if (!lookup.matched) {
+    // 检查是否允许降级模式
+    const allowDegraded = templates.empty_data_rule?.action === 'warn_and_continue'
+    if (!allowDegraded) {
+      return {
+        success: false,
+        error: 'EMPTY_DATA',
+        message: lookup.message || templates.empty_data_rule?.message,
+        emptyDataRule: templates.empty_data_rule,
+        forbidAiHallucination: templates.empty_data_rule?.forbid_ai_hallucination ?? true,
+      }
+    }
+    // 如果允许降级但仍未匹配，使用最通用的估算
+    const fallbackEst = lookupTierEstimate('普通本科')
+    if (fallbackEst) {
+      // 构建降级 lookup
+      const degradedLookup = {
+        matched: true,
+        degraded: true,
+        university: targetUniversity || '目标院校',
+        tier: fallbackEst.tier,
+        province: String(province || '').trim() || '浙江',
+        major: major || '通用',
+        year: new Date().getFullYear(),
+        admission: {
+          min_score: fallbackEst.score_range.min,
+          max_score: fallbackEst.score_range.max,
+          min_rank: fallbackEst.rank_range.min,
+          max_rank: fallbackEst.rank_range.max,
+          elective_requirement: fallbackEst.elective_requirement_hint || '—',
+          is_estimate: true,
+          estimate_source: `基于${fallbackEst.tier}层次院校录取区间估算`,
+        },
+        source: `层级估算（${fallbackEst.tier}）`,
+        citation: `数据来源：层级估算（按${fallbackEst.tier}层次估算），非精确录取数据，仅供参考`,
+        strategyHint: fallbackEst.strategy_hint,
+        fiveStageFramework: templates.five_stage_framework,
+        dynamicCalibrationRule: templates.dynamic_calibration_rule,
+        message: templates.empty_data_rule?.degraded_mode_message,
+      }
+      return _generatePlanWithLookup(degradedLookup, templates, formContext, province, major)
+    }
+
     return {
       success: false,
       error: 'EMPTY_DATA',
       message: lookup.message || templates.empty_data_rule?.message,
       emptyDataRule: templates.empty_data_rule,
-      forbidAiHallucination: templates.empty_data_rule?.forbid_ai_hallucination ?? true,
+      forbidAiHallucination: false,
     }
   }
 
-  if (!isDeepSeekAvailable()) {
-    return {
-      success: false,
-      error: 'AI_UNAVAILABLE',
-      message: 'DeepSeek API 未配置，无法生成数据驱动规划',
-    }
-  }
+  return _generatePlanWithLookup(lookup, templates, formContext, province, major)
+}
 
-  const citation = buildCitation(templates, lookup)
+/**
+ * 内部函数：基于 lookup 结果生成规划（支持精确模式和降级模式）
+ */
+async function _generatePlanWithLookup(lookup, templates, formContext, province, major) {
+  const isDegraded = !!lookup.degraded
+
+  const citation = lookup.citation || buildCitation(templates, lookup)
   const { form, enhanced } = extractParams(formContext)
-  const studentName = form.studentName || enhanced.studentName || '学生'
   const grade = form.grade || enhanced.schoolInfo?.grade || ''
   const currentScore = enhanced.scoreAnalysis?.subjectInsights?.length
     ? enhanced.subjectScores?.reduce((sum, s) => sum + (s.score || 0), 0)
@@ -277,87 +518,157 @@ export async function generateDataDrivenPlan(targetUniversity, province, major, 
   const gapBand = gap != null ? computeGapBand(gap, templates) : null
   const fiveStagePlan = mapFiveStages(templates, lookup, gapBand)
 
-  const systemPrompt = `你是华祺云师AI数据驱动升学规划专家。
-【硬性规则】
-1. 必须严格基于用户提供的院校录取数据生成规划，禁止编造分数线、位次、招生计划。
-2. 输出 JSON 必须包含 dataSourceCitations 数组，且至少一条与给定 citation 一致。
-3. fiveStagePlan 必须包含完整的 5 个阶段，与知识库五阶段框架对应。
-4. 必须引用 dynamic_calibration_rule 中的策略调整规划强度。
-5. 只输出合法 JSON，不要 markdown 代码块。`
+  const studentUserId =
+    formContext.studentUserId ||
+    formContext.userId ||
+    enhanced.studentUserId ||
+    form.studentUserId ||
+    ''
+  const clientEnrichment = formContext._planningEnrichment || null
+  const hollandOverride = clientEnrichment?.hollandScores || form.hollandScores || enhanced.hollandScores
+  const studentContext = await fetchPlanningStudentContext(studentUserId, {
+    hollandScores: hollandOverride,
+  })
+  const studentContextBlock = formatPlanningStudentContextBlock(studentContext)
+  const planningEnrichment = resolvePlanningEnrichment(form, enhanced, clientEnrichment)
+  const examTrendBlock = formatExamTrendBlock(studentContext.recentExamRecords ?? [])
 
-  const userPrompt = `【权威录取数据 — 不可篡改】
-院校：${lookup.university}
-省份：${lookup.province}
-专业：${lookup.major}
-年份：${lookup.year}
-最低分：${lookup.admission?.min_score ?? '—'}
-最低位次：${lookup.admission?.min_rank ?? '—'}
-选科要求：${lookup.admission?.elective_requirement ?? '—'}
+  const dbReportCtx = {
+    lookup,
+    templates,
+    form,
+    enhanced,
+    planningEnrichment,
+    studentContext,
+    fiveStagePlan,
+    gapBand,
+    citation,
+    isDegraded,
+  }
+
+  const finishReport = (parsed, providersUsed, sourceTag) => {
+    parsed.fiveStagePlan = parsed.fiveStagePlan?.length >= 5 ? parsed.fiveStagePlan : fiveStagePlan
+    parsed.targetUniversity = lookup.university
+    parsed.targetMajor = lookup.major || form.targetMajorIntent || major
+    parsed.dataSourceCitations = parsed.dataSourceCitations ?? []
+    let report = ensureDataSourceCitations(parsed, citation)
+
+    if (isDegraded) {
+      report.degradedMode = true
+      report.degradedWarning = lookup.message || templates.empty_data_rule?.degraded_mode_message
+      if (!report.dataSourceCitations.some((c) => c.includes('估算'))) {
+        report.dataSourceCitations.push(
+          '注意：部分录取数据为层级估算值，非精确数据，志愿填报时请以教育考试院公布数据为准',
+        )
+      }
+    }
+
+    if (!report.scoreGapAnalysis && gap != null) {
+      report.scoreGapAnalysis = {
+        currentEstimate: currentScore,
+        targetMinScore: targetMin,
+        gap,
+        gapBand: gapBand?.band ?? 'unknown',
+      }
+    }
+
+    report.dynamicCalibrationNotes = report.dynamicCalibrationNotes || gapBand?.strategy || ''
+    report.generatedAt = report.generatedAt || new Date().toISOString()
+
+    const fiveDimTotal = planningEnrichment.fiveDimension?.totalScore ?? form.competencyScore ?? 60
+    report.pathOptions = normalizePathOptions(report, fiveDimTotal, { ...form, ...enhanced })
+
+    if (planningEnrichment.fiveDimension) {
+      report.abilityDimensions = [
+        { label: '学科成绩', score: planningEnrichment.fiveDimension.academicScore },
+        { label: '综合能力', score: planningEnrichment.fiveDimension.abilityScore },
+        { label: '兴趣匹配', score: planningEnrichment.fiveDimension.interestScore },
+        { label: '家庭资源', score: planningEnrichment.fiveDimension.resourceScore },
+        { label: '目标期望', score: planningEnrichment.fiveDimension.targetScore },
+      ]
+    }
+
+    report.source = sourceTag
+
+    return {
+      success: true,
+      report,
+      lookup,
+      citation,
+      fiveStagePlan,
+      gapBand,
+      isDegraded,
+      meta: {
+        engine: 'planningEngine',
+        templateVersion: templates.version,
+        providersUsed,
+        degradedMode: isDegraded,
+        dataSources: [
+          'planning-templates.json',
+          studentUserId ? 'supabase:profiles,exam_records' : null,
+          clientEnrichment ? 'form:planningEnrichment' : null,
+        ].filter(Boolean),
+      },
+    }
+  }
+
+  // 优先 DeepSeek；失败或未配置则使用数据库 + 知识库结构化报告
+  if (isDeepSeekAvailable()) {
+    try {
+      const enrichedFormSection = buildEnrichedUserPromptSections(
+        form,
+        enhanced,
+        studentContextBlock,
+        planningEnrichment,
+        examTrendBlock,
+      )
+
+      const degradedWarning = isDegraded
+        ? `
+【⚠️ 降级模式提示】
+当前目标「${lookup.university}」采用层级估算录取区间。
+${lookup.message || ''}
+`
+        : ''
+
+      const systemPrompt = `${HUQI_PLANNING_SYSTEM_PROMPT}
+${degradedWarning}
+【JSON 映射要求】
+- professionalReport 五大模块 + pathOptions 三条路径`
+
+      const admissionDataBlock = isDegraded
+        ? `层次：${lookup.university}（${lookup.tier || '估算'}）
+分数区间：${lookup.admission?.min_score ?? '—'} ~ ${lookup.admission?.max_score ?? '—'}`
+        : `院校：${lookup.university}
+最低分：${lookup.admission?.min_score ?? '—'}`
+
+      const userPrompt = `【录取数据】
+${admissionDataBlock}
 数据引用：${citation}
 
-【动态校准】
-${gap != null ? `当前估算总分约 ${currentScore}，与目标线差距 ${gap} 分，档位：${gapBand?.label ?? '待评估'}` : '暂无总分，请基于成绩水平估算'}
-校准策略：${gapBand?.strategy ?? templates.dynamic_calibration_rule?.description}
-
-【五阶段框架】
-${JSON.stringify(fiveStagePlan, null, 2)}
-
-【学生表单】
-${JSON.stringify({ ...form, _enhanced: enhanced }, null, 2)}
+${enrichedFormSection}
 
 请生成完整规划 JSON，结构：
 ${PLAN_OUTPUT_SCHEMA}`
 
-  const aiResult = await callDeepSeekWithTimeout(systemPrompt, userPrompt, {
-    label: 'PlanningEngine-DeepSeek',
-    temperature: 0.35,
-    maxTokens: 8000,
-  })
+      const aiResult = await callDeepSeekWithTimeout(systemPrompt, userPrompt, {
+        label: 'PlanningEngine-DeepSeek',
+        temperature: 0.35,
+        maxTokens: 8000,
+        timeoutMs: PLANNING_AI_TIMEOUT_MS,
+      })
 
-  let parsed
-  try {
-    parsed = JSON.parse(extractJson(aiResult))
-  } catch (err) {
-    return {
-      success: false,
-      error: 'PARSE_FAILED',
-      message: `AI 返回格式解析失败: ${err instanceof Error ? err.message : String(err)}`,
-      raw: String(aiResult).slice(0, 500),
+      const parsed = JSON.parse(extractJson(aiResult))
+      return finishReport(parsed, ['DeepSeek-planningEngine'], isDegraded ? 'ai-data-driven-degraded' : 'ai-data-driven')
+    } catch (err) {
+      console.warn('[planningEngine] AI 生成失败，降级为数据库驱动', err instanceof Error ? err.message : err)
     }
+  } else {
+    console.warn('[planningEngine] DeepSeek 未配置，使用数据库驱动报告')
   }
 
-  parsed.fiveStagePlan = parsed.fiveStagePlan?.length >= 5 ? parsed.fiveStagePlan : fiveStagePlan
-  parsed.targetUniversity = lookup.university
-  parsed.targetMajor = lookup.major
-  parsed.dataSourceCitations = parsed.dataSourceCitations ?? []
-  parsed = ensureDataSourceCitations(parsed, citation)
-
-  if (!parsed.scoreGapAnalysis && gap != null) {
-    parsed.scoreGapAnalysis = {
-      currentEstimate: currentScore,
-      targetMinScore: targetMin,
-      gap,
-      gapBand: gapBand?.band ?? 'unknown',
-    }
-  }
-
-  parsed.dynamicCalibrationNotes = parsed.dynamicCalibrationNotes || gapBand?.strategy || ''
-  parsed.source = 'ai-data-driven'
-  parsed.generatedAt = parsed.generatedAt || new Date().toISOString()
-
-  return {
-    success: true,
-    report: parsed,
-    lookup,
-    citation,
-    fiveStagePlan,
-    gapBand,
-    meta: {
-      engine: 'planningEngine',
-      templateVersion: templates.version,
-      providersUsed: ['DeepSeek-planningEngine'],
-    },
-  }
+  const dbReport = buildDatabaseDrivenPlanningReport(dbReportCtx)
+  return finishReport(dbReport, ['database-driven'], dbReport.source)
 }
 
 /** 强制刷新模板缓存（管理/测试用） */
@@ -365,4 +676,4 @@ export function reloadPlanningTemplates() {
   return loadTemplates(true)
 }
 
-export { loadTemplates, matchUniversity }
+export { loadTemplates, matchUniversity, isTierLabel, lookupTierEstimate }

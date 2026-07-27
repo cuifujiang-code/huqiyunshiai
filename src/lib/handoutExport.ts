@@ -1,5 +1,6 @@
 import type { ExportMode, HandoutContent, HandoutModule } from '../types/teacher'
 import { countMissingAnswers } from './handoutImportUtils'
+import { renderLatexText } from '../components/common/MathRenderer'
 
 export interface HandoutExportOptions {
   mode?: ExportMode
@@ -48,6 +49,9 @@ const BASE_CSS = `
 .handout-toc li { margin: 8px 0; }
 .handout-module { margin-bottom: 24px; }
 .handout-module h2 { border-left: 4px solid #2563eb; padding-left: 8px; margin: 0 0 12px; }
+.handout-module-content { line-height: 1.75; word-break: break-word; }
+.handout-module-content .katex { font-size: 1.05em; }
+.handout-module-content .katex-display { margin: 0.6em 0; overflow-x: auto; }
 .handout-doc-header { border-bottom: 1px solid #d1d5db; padding-bottom: 8px; margin-bottom: 20px; font-size: 12px; color: #6b7280; text-align: center; }
 .handout-doc-footer { border-top: 1px solid #d1d5db; padding-top: 8px; margin-top: 32px; font-size: 12px; color: #6b7280; text-align: center; }
 .missing-answer-badge { display:inline-block;background:#fef3c7;color:#92400e;padding:2px 8px;border-radius:4px;font-size:12px;margin-left:8px; }
@@ -93,7 +97,7 @@ export function handoutToExportHtml(content: HandoutContent, options: HandoutExp
     body += `<h2 style="${moduleStyle(m)}">${escapeHtml(m.title)}`
     if (m.missingAnswer) body += `<span class="missing-answer-badge">答案待补充</span>`
     body += `</h2>`
-    body += `<div style="${moduleStyle(m)}">${escapeHtml(m.content).replace(/\n/g, '<br/>')}</div>`
+    body += `<div class="handout-module-content" style="${moduleStyle(m)}">${renderLatexText(m.content)}</div>`
     body += `</div>`
   })
 

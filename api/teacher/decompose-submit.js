@@ -44,7 +44,8 @@ export default async function handler(req, res) {
       },
     })
 
-    triggerDecomposeProcess(taskId)
+    const { runInBackground } = await import('../../server/runInBackground.js')
+    runInBackground(() => triggerDecomposeProcess(taskId))
 
     return res.status(200).json({
       success: true,

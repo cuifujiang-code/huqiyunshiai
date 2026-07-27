@@ -23,6 +23,13 @@ const CORE_CARDS = [
     badge: '已生成 12 套试卷',
   },
   {
+    icon: '📑',
+    title: '试题试卷',
+    desc: '试卷上传、分类浏览、在线预览与下载',
+    path: '/teacher/paper-resources',
+    badge: '试卷资源库',
+  },
+  {
     icon: '📚',
     title: '我的题库',
     desc: '管理所有自建试题，支持 PDF 批量导入',
@@ -40,7 +47,7 @@ const CORE_CARDS = [
     icon: '📥',
     title: '批量拆题',
     desc: '上传 PDF 试卷自动拆题入库',
-    path: '/teacher/task-center',
+    path: '/teacher/batch-upload',
     badge: '已拆 183 道',
   },
 ]

@@ -2,8 +2,8 @@
  * POST /api/teacher/book/smart-generate
  * 教辅书智能生成主端点（最强版）
  */
-import { smartGenerateBook } from '../../server/teacher/bookSmartGenerator.js'
-import { saveBook } from '../../server/teacher/bookStore.js'
+import { smartGenerateBook } from '../../../server/teacher/bookSmartGenerator.js'
+import { saveBook } from '../../../server/teacher/bookStore.js'
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {

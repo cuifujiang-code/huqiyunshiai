@@ -1,6 +1,5 @@
-import { callDeepSeekAI, extractJson } from '../deepseekClient.js'
-import { safeJsonParse } from './safeJson.js'
-import { BATCH_SYSTEM_PROMPT, buildBatchSplitPrompt, normalizeBatchQuestions } from './batchPrompt.js'
+import { callDeepSeekAI } from '../deepseekClient.js'
+import { BATCH_SYSTEM_PROMPT, buildBatchSplitPrompt, parseBatchSplitAiResponse } from './batchPrompt.js'
 import {
   countItemsByStatus,
   fetchPendingItems,
@@ -77,8 +76,7 @@ async function processOneItem(item, meta, sortOffset) {
       maxTokens: 4096,
       label: 'batch-split',
     })
-    const raw = safeJsonParse(extractJson(content))
-    const questions = normalizeBatchQuestions(raw, meta, sortOffset)
+    const { questions } = await parseBatchSplitAiResponse(content, meta, sortOffset)
     console.log('[batchWorker] AI 拆题完成', { itemId: item.id, questionCount: questions.length })
     await markItemCompleted(item.id, questions)
     return { success: true, questions, itemId: item.id }
@@ -127,7 +125,15 @@ export async function runBatchWorker(batchId) {
     return { skipped: true, status: 'completed' }
   }
 
-  const meta = { subject: task.subject, grade: task.grade }
+  const taskMeta = task.meta && typeof task.meta === 'object' ? task.meta : {}
+  const meta = {
+    subject: task.subject,
+    grade: task.grade,
+    formulaImages: taskMeta.formulaImages || taskMeta.formula_images || [],
+    images: taskMeta.images || taskMeta.extracted_images || [],
+    _formulaIdx: 0,
+    _imageIdx: 0,
+  }
 
   if (task.status === 'pending') {
     console.log('[batchWorker] 标记任务 running', { batchId })

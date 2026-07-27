@@ -38,11 +38,11 @@ export async function handwritingToHandout(input) {
   }
 
   const content = workbuddyJsonToHandoutContent(wbJson, { title, subject, grade, teacherName })
-  if (ocrProvider === 'doubao-vision') {
+  if (ocrProvider === 'doubao-vision' || ocrProvider === 'deepseek-vision') {
     content.ocrMeta = {
       ...(content.ocrMeta || {}),
-      source: 'doubao-vision',
-      provider: 'doubao',
+      source: ocrProvider,
+      provider: ocrProvider === 'doubao-vision' ? 'doubao' : 'deepseek',
       importedAt: new Date().toISOString(),
     }
   }

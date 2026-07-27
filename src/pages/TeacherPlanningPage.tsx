@@ -9,6 +9,7 @@ import GanttChart from '../components/planning/GanttChart'
 import WeeklyReportCard from '../components/planning/WeeklyReportCard'
 import MonthlyReportCard from '../components/planning/MonthlyReportCard'
 import ParentBindingPanel from '../components/planning/ParentBindingPanel'
+import PlanningToolkitPanel from '../components/planning/PlanningToolkitPanel'
 import { printPlanningReport, exportPlanningReportPdf } from '../components/planning/PlanPrintView'
 import { useAuth } from '../context/AuthContext'
 import { analyzeScoreHistory } from '../lib/scoreAnalysis'
@@ -18,6 +19,7 @@ import {
   fetchTeacherOverview, fetchPlanRoutes, fetchGanttData,
   fetchWeeklyReport, fetchMonthlyReport,
 } from '../lib/educationPlanning'
+import { inferProvinceFromCity, resolvePlanningTarget } from '../lib/planningTierUtils'
 import type {
   EnhancedPlanningFormData, PlanningReport, PlanRoute, GanttData,
   WeeklyReport as WeeklyReportType, MonthlyReport as MonthlyReportType,
@@ -25,7 +27,7 @@ import type {
   UniversityLookupResult,
 } from '../types/planning'
 
-type Tab = 'create' | 'overview' | 'detail' | 'reports' | 'binding' | 'archive'
+type Tab = 'create' | 'overview' | 'detail' | 'reports' | 'binding' | 'archive' | 'toolkit'
 
 export default function TeacherPlanningPage() {
   const { profile } = useAuth()
@@ -98,39 +100,62 @@ export default function TeacherPlanningPage() {
     } catch { /* 静默 */ }
   }, [])
 
-  const buildPayload = (confirmed?: UniversityLookupResult) => {
-    const scoreAnalysis = analyzeScoreHistory(form.scoreHistory, form.electiveSubjects)
+  const buildPayload = (confirmed?: UniversityLookupResult, activeForm = form) => {
+    const scoreAnalysis = analyzeScoreHistory(activeForm.scoreHistory, activeForm.electiveSubjects)
     return {
-      studentName: form.studentName,
-      grade: form.schoolInfo.grade as EnhancedPlanningFormData['schoolInfo']['grade'],
-      goalDirections: form.goalDirections,
-      scoreLevel: form.scoreLevel,
-      interests: form.interests,
-      parentExpectations: form.parentExpectations,
-      specialNotes: form.specialNotes,
+      studentName: activeForm.studentName,
+      grade: activeForm.grade,
+      city: activeForm.city,
+      householdType: activeForm.householdType,
+      hollandScores: activeForm.hollandScores,
+      competencyScore: activeForm.competencyScore,
+      mainSubjectScores: activeForm.mainSubjectScores,
+      electiveSubjectScores: activeForm.electiveSubjectScores,
+      familyBudget: activeForm.familyBudget,
+      parentEducation: activeForm.parentEducation,
+      identityResources: activeForm.identityResources,
+      targetTierLevel: activeForm.targetTierLevel,
+      specialTalents: activeForm.specialTalents,
+      primaryGoal: activeForm.primaryGoal,
+      targetMajorIntent: activeForm.targetMajorIntent,
+      goalDirections: activeForm.goalDirections,
+      scoreLevel: activeForm.scoreLevel,
+      interests: activeForm.interests,
+      parentExpectations: activeForm.parentExpectations,
+      specialNotes: activeForm.specialNotes,
       createdByRole: 'teacher' as const,
-      targetUniversity: confirmed?.university || form.targetSchools[0] || '',
-      targetMajor: confirmMajor || confirmed?.major || '通用',
+      targetUniversity: confirmed?.university || resolvePlanningTarget(activeForm),
+      targetMajor: confirmMajor || confirmed?.major || activeForm.targetMajorIntent || '通用',
       confirmedUniversityData: confirmed,
       _enhanced: {
-        gender: form.gender,
-        birthDate: form.birthDate,
-        schoolInfo: form.schoolInfo,
-        ranking: form.ranking,
-        targetSchools: form.targetSchools,
-        subjectScores: form.subjectScores,
-        specialties: form.specialties,
-        examDataRef: form.examDataRef,
-        academicTerm: form.academicTerm,
-        electiveSubjects: form.electiveSubjects,
-        scoreHistory: form.scoreHistory,
+        gender: activeForm.gender,
+        birthDate: activeForm.birthDate,
+        schoolInfo: activeForm.schoolInfo,
+        ranking: activeForm.ranking,
+        targetSchools: activeForm.targetSchools,
+        subjectScores: activeForm.subjectScores,
+        specialties: activeForm.specialties,
+        examDataRef: activeForm.examDataRef,
+        academicTerm: activeForm.academicTerm,
+        electiveSubjects: activeForm.electiveSubjects,
+        scoreHistory: activeForm.scoreHistory,
         scoreAnalysis,
-        targetMajor: confirmMajor || confirmed?.major || '通用',
+        targetMajor: confirmMajor || confirmed?.major || activeForm.targetMajorIntent || '通用',
+        hollandScores: activeForm.hollandScores,
+        competencyScore: activeForm.competencyScore,
+        familyBudget: activeForm.familyBudget,
+        parentEducation: activeForm.parentEducation,
+        identityResources: activeForm.identityResources,
+        specialTalents: activeForm.specialTalents,
+        primaryGoal: activeForm.primaryGoal,
+        targetTierLevel: activeForm.targetTierLevel,
+        mainSubjectScores: activeForm.mainSubjectScores,
+        electiveSubjectScores: activeForm.electiveSubjectScores,
       },
     }
   }
 
-  const runGenerate = async (confirmed?: UniversityLookupResult) => {
+  const runGenerate = async (confirmed?: UniversityLookupResult, activeForm = form) => {
     setLoading(true)
     setMessage(null)
     setIsWarning(false)
@@ -154,17 +179,24 @@ export default function TeacherPlanningPage() {
     }
   }
 
-  const handleGenerate = async () => {
-    if (!form.studentName.trim()) { setMessage('请填写学生姓名'); setIsWarning(true); return }
-    const targetUni = form.targetSchools[0]?.trim()
-    const province = form.schoolInfo.province?.trim()
+  const handleGenerate = async (finalForm?: EnhancedPlanningFormData) => {
+    const activeForm = finalForm ?? form
+    if (finalForm) setForm(finalForm)
+
+    if (!activeForm.studentName.trim()) { setMessage('请填写学生姓名'); setIsWarning(true); return }
+    const targetUni = resolvePlanningTarget(activeForm)
+    const province =
+      activeForm.schoolInfo.province?.trim() ||
+      inferProvinceFromCity(activeForm.city || activeForm.schoolInfo.city || '')
+    const major = activeForm.targetMajorIntent?.trim() || confirmMajor || '通用'
+
     if (!targetUni) {
-      setMessage('请在「目标学校」中添加至少一所目标院校（如：清华大学）')
+      setMessage('请选择期望院校层次')
       setIsWarning(true)
       return
     }
     if (!province) {
-      setMessage('请先选择省份')
+      setMessage('请填写所在城市（需包含省份信息，如：浙江金华）')
       setIsWarning(true)
       return
     }
@@ -175,18 +207,18 @@ export default function TeacherPlanningPage() {
     const lookupRes = await lookupPlanningUniversity({
       targetUniversity: targetUni,
       province,
-      major: confirmMajor,
+      major,
     })
 
-    if (!lookupRes.lookup) {
-      setMessage(lookupRes.message ?? '院校检索失败')
-      setIsWarning(true)
+    // 层级标签或层级估算模式：展示估算确认后生成；检索失败则仍尝试生成（后端降级）
+    if (lookupRes.lookup?.matched) {
+      setUniversityLookup(lookupRes.lookup)
+      setConfirmMajor(lookupRes.lookup.major || major || '通用')
+      setShowUniversityConfirm(true)
       return
     }
 
-    setUniversityLookup(lookupRes.lookup)
-    setConfirmMajor(lookupRes.lookup.major || '通用')
-    setShowUniversityConfirm(true)
+    runGenerate(undefined, activeForm)
   }
 
   const handleConfirmUniversityAndGenerate = () => {
@@ -256,6 +288,12 @@ export default function TeacherPlanningPage() {
           <TabBtn active={tab === 'archive'} onClick={() => { setTab('archive'); setArchiveViewingRecord(null) }}>
             规划归档
             {archiveRecords.length > 0 && <span className="ml-1.5 inline-flex h-5 min-w-[20px] items-center justify-center rounded-full bg-[#2584FF]/30 px-1.5 text-xs">{archiveRecords.length}</span>}
+          </TabBtn>
+          <TabBtn active={tab === 'toolkit'} onClick={() => setTab('toolkit')}>
+            <span className="inline-flex items-center gap-1.5">
+              <WrenchIcon className={tab === 'toolkit' ? 'text-white' : 'text-current'} />
+              规划工具箱
+            </span>
           </TabBtn>
         </div>
 
@@ -556,6 +594,9 @@ export default function TeacherPlanningPage() {
             </div>
           </div>
         )}
+
+        {/* Tab: 规划工具箱 */}
+        {tab === 'toolkit' && <PlanningToolkitPanel />}
       </main>
     </div>
   )
@@ -583,5 +624,17 @@ function TabBtn({ active, onClick, children }: { active: boolean; onClick: () =>
     >
       {children}
     </button>
+  )
+}
+
+function WrenchIcon({ className = '' }: { className?: string }) {
+  return (
+    <svg className={`h-4 w-4 ${className}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z"
+      />
+    </svg>
   )
 }

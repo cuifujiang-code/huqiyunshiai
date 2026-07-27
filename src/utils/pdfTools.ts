@@ -9,11 +9,11 @@
  *   const images = await pdfToImages(file, { scale: 2.0, format: 'png' })
  */
 
-import * as pdfjsLib from 'pdfjs-dist'
+import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.mjs'
 
 // --------------- Worker 路径配置 ---------------
-// 使用 pdfjs-dist 内置 worker；Vite 会将 ?url 导入解析为静态资源路径
-import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
+// legacy 构建含 toHex 等 polyfill，兼容 Chrome 139 及以下
+import pdfjsWorker from 'pdfjs-dist/legacy/build/pdf.worker.min.mjs?url'
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker
 
@@ -86,6 +86,23 @@ const FORMAT_MIME: Record<ImageFormat, string> = {
   webp: 'image/webp',
 }
 
+/** pdfjs v6：PDFDocumentProxy 仅有 cleanup，完整释放需 loadingTask.destroy */
+async function releasePdfDocument(
+  pdf: { cleanup?: (keepLoadedFonts?: boolean) => unknown },
+  loadingTask?: { destroy?: () => Promise<void> },
+): Promise<void> {
+  try {
+    pdf.cleanup?.()
+  } catch {
+    /* ignore */
+  }
+  try {
+    await loadingTask?.destroy?.()
+  } catch {
+    /* ignore */
+  }
+}
+
 /**
  * PDF 文件转图片 Blob 数组
  *
@@ -125,67 +142,85 @@ export async function pdfToImages(
 
   const pdf = await loadingTask.promise
 
-  const totalPages = pdf.numPages
-  const startPage = Math.max(1, opts.startPage)
-  const endPage = Math.min(totalPages, opts.endPage, maxPages)
-  const pageCount = endPage - startPage + 1
+  try {
+    const totalPages = pdf.numPages
+    const startPage = Math.max(1, opts.startPage)
+    const endPage = Math.min(totalPages, opts.endPage, maxPages)
+    const pageCount = endPage - startPage + 1
 
-  const pages: PdfPageImage[] = []
+    const pages: PdfPageImage[] = []
 
-  for (let pageNum = startPage; pageNum <= endPage; pageNum++) {
-    // 检查取消
-    if (options.signal?.aborted) {
-      throw new DOMException('操作已取消', 'AbortError')
+    for (let pageNum = startPage; pageNum <= endPage; pageNum++) {
+      // 检查取消
+      if (options.signal?.aborted) {
+        throw new DOMException('操作已取消', 'AbortError')
+      }
+
+      const page = await pdf.getPage(pageNum)
+      const viewport = page.getViewport({ scale })
+
+      // 创建离屏 Canvas
+      const canvas = document.createElement('canvas')
+      const ctx = canvas.getContext('2d')!
+      canvas.width = Math.floor(viewport.width)
+      canvas.height = Math.floor(viewport.height)
+
+      ctx.fillStyle = '#ffffff'
+      ctx.fillRect(0, 0, canvas.width, canvas.height)
+
+      // 渲染页面到 Canvas（避免部分 PDF 色彩空间 toHex 报错）
+      try {
+        await page.render({
+          canvasContext: ctx,
+          viewport,
+          canvas,
+          intent: 'print',
+        }).promise
+      } catch (renderErr) {
+        console.warn(`[pdfTools] 第 ${pageNum} 页 print 渲染失败，尝试 display`, renderErr)
+        ctx.fillStyle = '#ffffff'
+        ctx.fillRect(0, 0, canvas.width, canvas.height)
+        await page.render({
+          canvasContext: ctx,
+          viewport,
+          canvas,
+          intent: 'display',
+        }).promise
+      }
+
+      // Canvas → Blob
+      const blob = await new Promise<Blob>((resolve, reject) => {
+        canvas.toBlob(
+          (b) => {
+            if (b) resolve(b)
+            else reject(new Error(`第 ${pageNum} 页转换失败`))
+          },
+          FORMAT_MIME[format],
+          quality,
+        )
+      })
+
+      const objectUrl = URL.createObjectURL(blob)
+
+      pages.push({
+        pageNumber: pageNum,
+        blob,
+        width: canvas.width,
+        height: canvas.height,
+        objectUrl,
+      })
+
+      // 清理 page 资源
+      page.cleanup()
+
+      // 进度回调
+      onProgress?.(pageNum - startPage + 1, pageCount)
     }
 
-    const page = await pdf.getPage(pageNum)
-    const viewport = page.getViewport({ scale })
-
-    // 创建离屏 Canvas
-    const canvas = document.createElement('canvas')
-    const ctx = canvas.getContext('2d')!
-    canvas.width = Math.floor(viewport.width)
-    canvas.height = Math.floor(viewport.height)
-
-    // 渲染页面到 Canvas
-    await page.render({
-      canvasContext: ctx,
-      viewport,
-    }).promise
-
-    // Canvas → Blob
-    const blob = await new Promise<Blob>((resolve, reject) => {
-      canvas.toBlob(
-        (b) => {
-          if (b) resolve(b)
-          else reject(new Error(`第 ${pageNum} 页转换失败`))
-        },
-        FORMAT_MIME[format],
-        quality,
-      )
-    })
-
-    const objectUrl = URL.createObjectURL(blob)
-
-    pages.push({
-      pageNumber: pageNum,
-      blob,
-      width: canvas.width,
-      height: canvas.height,
-      objectUrl,
-    })
-
-    // 清理 page 资源
-    page.cleanup()
-
-    // 进度回调
-    onProgress?.(pageNum - startPage + 1, pageCount)
+    return { pages, totalPages, format }
+  } finally {
+    await releasePdfDocument(pdf, loadingTask)
   }
-
-  // 清理 PDF 文档
-  pdf.destroy()
-
-  return { pages, totalPages, format }
 }
 
 /**
@@ -254,6 +289,34 @@ export async function pdfToSingleImage(
   })
 }
 
+/** 检测 PDF 是否含可提取文字层（用于区分扫描版） */
+export async function pdfHasExtractableText(file: File | Blob, minChars = 80): Promise<boolean> {
+  const arrayBuffer = await file.arrayBuffer()
+  const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer })
+  const pdf = await loadingTask.promise
+
+  try {
+    const samplePages = Math.min(pdf.numPages, 3)
+    let chars = 0
+
+    for (let p = 1; p <= samplePages; p++) {
+      const page = await pdf.getPage(p)
+      const content = await page.getTextContent()
+      for (const item of content.items) {
+        if ('str' in item && typeof item.str === 'string') {
+          chars += item.str.replace(/\s/g, '').length
+        }
+      }
+      page.cleanup()
+      if (chars >= minChars) break
+    }
+
+    return chars >= minChars
+  } finally {
+    await releasePdfDocument(pdf, loadingTask)
+  }
+}
+
 /**
  * 获取 PDF 信息（页数、是否加密等）
  */
@@ -263,14 +326,16 @@ export async function getPdfInfo(file: File): Promise<{
   fingerprint: string
 }> {
   const arrayBuffer = await file.arrayBuffer()
-  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise
+  const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer })
+  const pdf = await loadingTask.promise
 
-  const info = {
-    totalPages: pdf.numPages,
-    isEncrypted: false, // pdfjs-dist 会自动处理加密
-    fingerprint: pdf.fingerprints?.[0] ?? '',
+  try {
+    return {
+      totalPages: pdf.numPages,
+      isEncrypted: false, // pdfjs-dist 会自动处理加密
+      fingerprint: pdf.fingerprints?.[0] ?? '',
+    }
+  } finally {
+    await releasePdfDocument(pdf, loadingTask)
   }
-
-  pdf.destroy()
-  return info
 }

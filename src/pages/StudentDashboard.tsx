@@ -1,39 +1,61 @@
 import { useNavigate } from 'react-router-dom'
+import type { ReactNode } from 'react'
 import DashboardHeader from '../components/layout/DashboardHeader'
+import ClipboardListIcon from '../components/icons/ClipboardListIcon'
 import { useAuth } from '../context/AuthContext'
 import { useMembership } from '../context/MembershipContext'
 
-const FEATURES = [
+const FEATURES: {
+  icon: ReactNode
+  title: string
+  desc: string
+  path: string
+  cta: string
+}[] = [
   {
-    icon: '📊',
+    icon: <span className="text-4xl">📑</span>,
+    title: '试题试卷',
+    desc: '浏览、预览、下载试卷资源，加入资源篮收藏',
+    path: '/student/paper-resources',
+    cta: '进入资源库',
+  },
+  {
+    icon: <span className="text-4xl">📊</span>,
     title: 'AI学习诊断',
     desc: '输入考试信息，获取失分归因、薄弱知识点与提升计划',
     path: '/student/diagnosis',
     cta: '开始诊断',
   },
   {
-    icon: '🎯',
+    icon: <span className="text-4xl">🎯</span>,
     title: 'AI教育规划',
     desc: '基于年级、兴趣与目标，生成个性化培养路径与阶段性任务',
     path: '/student/planning',
     cta: '查看规划',
   },
   {
-    icon: '🎓',
+    icon: <span className="text-4xl">🎓</span>,
     title: '高考志愿填报',
     desc: '输入分数位次与选科，智能生成冲稳保志愿推荐方案',
     path: '/student/volunteer',
     cta: '开始填报',
   },
   {
-    icon: '📷',
+    icon: <span className="text-4xl">📷</span>,
     title: '拍照搜题',
     desc: '拍照或上传题目，OCR 识别后智能搜题，优先匹配题库标准答案',
     path: '/student/photo-search',
     cta: '开始搜题',
   },
   {
-    icon: '👨‍👩‍👧',
+    icon: <ClipboardListIcon className="mx-auto h-10 w-10" />,
+    title: '考试复盘',
+    desc: '录入期中考成绩，AI 生成诊断分析与 4 周冲刺计划',
+    path: '/student/exam-review',
+    cta: '开始复盘',
+  },
+  {
+    icon: <span className="text-4xl">👨‍👩‍👧</span>,
     title: '家长绑定',
     desc: '生成邀请码分享给家长，支持多名家长绑定同一学生账号',
     path: '/student/parent-bind',
@@ -71,7 +93,7 @@ export default function StudentDashboard() {
               key={f.path}
               className="group rounded-2xl border border-blue-500/20 bg-slate-900/60 p-6 text-center shadow-xl shadow-blue-900/10 transition hover:-translate-y-1 hover:border-blue-400/40"
             >
-              <span className="text-4xl">{f.icon}</span>
+              <div className="flex justify-center">{f.icon}</div>
               <h3 className="mt-4 text-lg font-semibold text-blue-100">{f.title}</h3>
               <p className="mt-2 text-sm text-slate-400">{f.desc}</p>
               <button

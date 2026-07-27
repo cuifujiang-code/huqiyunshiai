@@ -1,6 +1,12 @@
 import { buildMockPlanningReport } from './mockPlanningData.js'
 import { callDeepSeekAI, extractJson, serializeError } from './deepseekClient.js'
 import { buildKnowledgeSystemPrompt } from './knowledgeBase.js'
+import {
+  HUQI_PLANNING_SYSTEM_PROMPT,
+  fetchPlanningStudentContext,
+  formatPlanningStudentContextBlock,
+  buildEnrichedUserPromptSections,
+} from './planning/planningPrompts.js'
 
 const MOCK_FALLBACK_MESSAGE = 'AI服务暂不可用，已展示示例教育规划方案'
 
@@ -55,32 +61,39 @@ const PLANNING_JSON_SCHEMA = `{
   ],
   "risks": [
     { "risk": "风险描述", "impact": "高|中|低", "mitigation": "备选方案或补救措施" }
-  ]
+  ],
+  "professionalReport": {
+    "diagnosis": "现状诊断100字以内",
+    "recommendedPaths": [
+      { "type": "main", "path": "主路径", "reason": "理由" },
+      { "type": "backup", "path": "备选路径", "reason": "理由" },
+      { "type": "fallback", "path": "保底路径", "reason": "理由" }
+    ],
+    "keyTimeline": [{ "month": "2025年9月", "event": "事件", "note": "说明" }],
+    "actionList90Days": ["任务1", "任务2", "任务3", "任务4", "任务5", "任务6"],
+    "riskAlerts": ["风险提示"]
+  }
 }`
 
-function buildUserPrompt(form) {
+function buildUserPrompt(form, studentContextBlock = '') {
+  const enhanced = form._enhanced ?? {}
+  const enriched = buildEnrichedUserPromptSections(form, enhanced, studentContextBlock)
   return `请为以下学生生成完整的教育规划方案 JSON。
 
-【学生信息】
-- 姓名：${form.studentName}
-- 年级：${form.grade}
-- 目标方向：${(form.goalDirections ?? []).join('、') || '未指定'}
-- 当前成绩水平：${form.scoreLevel}
-- 兴趣标签：${(form.interests ?? []).join('、') || '未填写'}
-- 家长期望：${form.parentExpectations || '未填写'}
-- 特殊需求：${form.specialNotes || '无'}
-- 规划发起角色：${form.createdByRole === 'teacher' ? '教师' : '学生本人'}
+${enriched}
 
 【输出要求】
 1. 只返回 JSON，不要 markdown 代码块
-2. 严格遵循以下结构（6大模块全部包含）：
+2. 必须包含 professionalReport 五大模块（现状诊断、三条路径、时间节点、90天行动清单、风险提示）
+3. 严格遵循以下结构（6大模块全部包含）：
 ${PLANNING_JSON_SCHEMA}
-3. abilityDimensions 必须包含6个维度且 score 为 0-100 整数
-4. stageGoals 至少3个节点，形成时间轴
-5. subjectPaths 至少4个学科
-6. phaseTasks 至少2个阶段，每阶段至少2个任务
-7. milestones 至少4个关键节点
-8. risks 至少2条，需结合该生实际情况`
+4. abilityDimensions 必须包含6个维度且 score 为 0-100 整数
+5. stageGoals 至少3个节点，形成时间轴
+6. subjectPaths 至少4个学科
+7. phaseTasks 至少2个阶段，每阶段至少2个任务
+8. milestones 至少4个关键节点，时间精确到月份
+9. risks 至少2条，需结合该生实际情况
+10. 针对浙江新高考选科说明对专业报考的影响`
 }
 
 export function normalizeReport(raw, form) {
@@ -117,8 +130,15 @@ export function normalizeReport(raw, form) {
 
 export async function generatePlanning(form) {
   try {
-    const systemPrompt = buildKnowledgeSystemPrompt()
-    const aiContent = await callDeepSeekAI(systemPrompt, buildUserPrompt(form))
+    const studentContext = await fetchPlanningStudentContext(
+      form.studentUserId || form.userId,
+    )
+    const studentContextBlock = formatPlanningStudentContextBlock(studentContext)
+    const systemPrompt = `${HUQI_PLANNING_SYSTEM_PROMPT}\n\n${buildKnowledgeSystemPrompt()}`
+    const aiContent = await callDeepSeekAI(
+      systemPrompt,
+      buildUserPrompt(form, studentContextBlock),
+    )
     const parsed = JSON.parse(extractJson(aiContent))
     const report = normalizeReport(parsed, form)
     return {

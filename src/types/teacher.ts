@@ -85,6 +85,34 @@ export interface QuestionStats {
   updated_at?: string
 }
 
+export interface MathTopicTag {
+  tag: string
+  count: number
+}
+
+export interface MathTopicGroup {
+  group: string
+  count: number
+  tags: MathTopicTag[]
+}
+
+export type TopicGroup = MathTopicGroup
+
+export interface TopicsGroupedResponse {
+  grouped: true
+  subject: string
+  grade?: string
+  groups: MathTopicGroup[]
+  total: number
+}
+
+export interface TopicsFlatResponse {
+  grouped: false
+  topics: Record<string, { topic: string; count: number }[]>
+}
+
+export type TopicsResponse = TopicsGroupedResponse | TopicsFlatResponse
+
 export interface BankQuestion {
   id?: string
   teacher_id?: string
@@ -104,6 +132,9 @@ export interface BankQuestion {
   ability_dimension?: string
   suitable_stage?: string
   textbook_version?: string
+  topic_group?: string
+  topic_tag?: string
+  latex_blocks?: string[]
   estimated_time?: number
   tags: string[]
   visibility?: 'personal' | 'public'
@@ -208,6 +239,8 @@ export interface BookBlock {
   type: 'knowledge' | 'example' | 'exercise' | 'summary'
   title: string
   content: string
+  /** 与 content 中【嵌入图形】占位符按序对应的 img 标签（导入 Word 时分离存储） */
+  figures?: string[]
   questionId?: string
   missingAnswer?: boolean
   style?: HandoutModuleStyle

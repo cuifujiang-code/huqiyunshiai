@@ -1,4 +1,6 @@
 import type { BookCoverStyle, BookRecord, ExportMode, KnowledgeGraph } from '../types/teacher'
+import { renderLatexText } from '../components/common/MathRenderer'
+import { mergeEmbeddedFigures, EMBEDDED_FIGURE_TOKEN } from './embeddedImages'
 import { getLayoutTemplate, type BookLayoutTemplateId } from './bookLayoutTemplates'
 
 export interface BookExportOptions {
@@ -74,6 +76,28 @@ function knowledgeGraphHtml(graph: KnowledgeGraph | null | undefined): string {
   return html
 }
 
+function normalizeImgSrcInHtml(html: string): string {
+  if (typeof window === 'undefined') return html
+  return html.replace(/<img([^>]*?)src="([^"]+)"/gi, (match, attrs, src) => {
+    if (src.startsWith('data:') || src.startsWith('http')) return match
+    try {
+      const full = new URL(src, window.location.origin).href
+      return `<img${attrs}src="${full}"`
+    } catch {
+      return match
+    }
+  })
+}
+
+function renderBlockContent(content: string, figures?: string[]): string {
+  if (!content.trim()) return '<p style="color:#9ca3af;font-style:italic">（暂无正文）</p>'
+  let text = content
+  if (figures?.length && content.includes(EMBEDDED_FIGURE_TOKEN)) {
+    text = mergeEmbeddedFigures(content, figures)
+  }
+  return normalizeImgSrcInHtml(renderLatexText(text))
+}
+
 function renderBlock(b: BookRecord['chapters'][0]['sections'][0]['blocks'][0], templateId: BookLayoutTemplateId): string {
   const cls =
     templateId === 'knowledge-example' && b.type === 'knowledge'
@@ -85,8 +109,18 @@ function renderBlock(b: BookRecord['chapters'][0]['sections'][0]['blocks'][0], t
           : ''
 
   const style = b.style
-    ? `font-size:${b.style.fontSize ?? 14}px;color:${b.style.color ?? 'inherit'};font-family:${b.style.fontFamily ?? 'inherit'};`
-    : ''
+  const layoutBits = [
+    style?.fontSize ? `font-size:${style.fontSize}px` : '',
+    style?.color ? `color:${style.color}` : '',
+    style?.fontFamily ? `font-family:${style.fontFamily}` : '',
+    style?.align ? `text-align:${style.align}` : '',
+    style?.marginTop ? `margin-top:${style.marginTop}px` : '',
+    style?.width === 'half' ? 'display:inline-block;width:48%;vertical-align:top;margin-right:2%' : '',
+  ]
+    .filter(Boolean)
+    .join(';')
+
+  const styleAttr = layoutBits ? `${layoutBits};` : ''
 
   let html = `<div class="${cls}">`
   html += `<h4 class="block-title">${escapeHtml(b.title)}`
@@ -95,9 +129,9 @@ function renderBlock(b: BookRecord['chapters'][0]['sections'][0]['blocks'][0], t
 
   if (templateId === 'cornell') {
     html += `<div class="cornell-row"><div class="cornell-cue">${escapeHtml(b.type === 'knowledge' ? '要点' : '关键词')}</div>`
-    html += `<div class="cornell-notes" style="${style}">${escapeHtml(b.content).replace(/\n/g, '<br/>')}</div></div>`
+    html += `<div class="cornell-notes" style="${styleAttr}">${renderBlockContent(b.content, b.figures)}</div></div>`
   } else {
-    html += `<div class="block-content" style="${style}">${escapeHtml(b.content).replace(/\n/g, '<br/>')}</div>`
+    html += `<div class="block-content" style="${styleAttr}">${renderBlockContent(b.content, b.figures)}</div>`
   }
   html += `</div>`
   return html
@@ -145,6 +179,80 @@ export function bookToExportHtml(book: BookRecord, options: BookExportOptions = 
   return html
 }
 
+/**
+ * 生成发送到服务端 Puppeteer PDF 引擎的完整 HTML body（不含 <style> 标签）
+ * 服务端会用自己的专业排版 CSS 包裹
+ */
+export function bookToExportBodyHtml(book: BookRecord, options: BookExportOptions = {}): string {
+  const style = book.coverStyle ?? 'academic'
+  const templateId = (book.layoutTemplate ?? 'classic') as BookLayoutTemplateId
+  const mode = options.mode ?? book.exportMode ?? 'print'
+  const tpl = getLayoutTemplate(templateId)
+
+  let html = ''
+
+  // 封面
+  html += `<div class="cover-page">`
+  html += `<h1>${escapeHtml(book.title)}</h1>`
+  html += `<div class="decorator"></div>`
+  html += `<p class="subtitle">${escapeHtml(book.grade)} · ${escapeHtml(book.level)}</p>`
+  if (book.foreword) {
+    const shortForeword = book.foreword.length > 120 ? book.foreword.slice(0, 120) + '…' : book.foreword
+    html += `<p class="meta">${escapeHtml(shortForeword)}</p>`
+  }
+  html += `</div>`
+
+  // 前言
+  if (book.foreword?.trim()) {
+    html += `<div class="foreword" style="page-break-after:always">`
+    html += `<h2>前言</h2>`
+    html += `<div>${escapeHtml(book.foreword).replace(/\n/g, '<br/>')}</div>`
+    html += `</div>`
+  }
+
+  // 知识网络图
+  html += knowledgeGraphHtml(book.knowledgeGraph)
+
+  // 正文章节
+  const colWrap = templateId === 'two-column' ? 'book-body-columns' : ''
+  html += `<div class="${colWrap} ${tpl.bodyClass}">`
+
+  for (const ch of book.chapters) {
+    html += `<h2 class="chapter-title">${escapeHtml(ch.title)}</h2>`
+    for (const sec of ch.sections) {
+      html += `<h3 class="section-title">${escapeHtml(sec.title)}</h3>`
+      for (const b of sec.blocks) {
+        html += renderBlock(b, templateId)
+      }
+    }
+  }
+  html += `</div>`
+
+  // 后记
+  if (book.epilogue?.trim()) {
+    html += `<div class="epilogue" style="page-break-before:always">`
+    html += `<h2>后记</h2>`
+    html += `<div>${escapeHtml(book.epilogue).replace(/\n/g, '<br/>')}</div>`
+    html += `</div>`
+  }
+
+  return html
+}
+
+/** 导出双版本 body HTML（学生版 + 教师版），用于服务端 Puppeteer PDF 渲染 */
+export function bookToDualExportBodyHtml(book: BookRecord, options: BookExportOptions = {}): {
+  studentHtml: string
+  teacherHtml: string
+} {
+  const teacherHtml = bookToExportBodyHtml(book, options)
+
+  // 学生版：过滤掉答案/解析内容
+  const studentBook = filterBookForStudentVersion(book)
+  const studentHtml = bookToExportBodyHtml(studentBook, options)
+
+  return { studentHtml, teacherHtml }
+}
+
 export function bookBookmarkOutline(book: BookRecord): { title: string; level: number }[] {
   const items: { title: string; level: number }[] = [{ title: book.title, level: 0 }]
   if (book.foreword?.trim()) items.push({ title: '前言', level: 1 })
@@ -154,4 +262,80 @@ export function bookBookmarkOutline(book: BookRecord): { title: string; level: n
   }
   if (book.epilogue?.trim()) items.push({ title: '后记', level: 1 })
   return items
+}
+
+export interface DualExportOptions {
+  studentVersion: boolean
+  format: 'pdf' | 'word'
+}
+
+const ANSWER_LINE_RE = /^\[?(解答|答案|解析)\]?/i
+
+function stripStudentAnswers(content: string): string {
+  return content
+    .split('\n')
+    .filter((line) => !ANSWER_LINE_RE.test(line.trim()))
+    .join('\n')
+    .replace(/\[解答\][\s\S]*?(?=\n\[题目\]|$)/gi, '')
+    .replace(/\[答案\][\s\S]*?(?=\n\[题目\]|$)/gi, '')
+    .trim()
+}
+
+function filterBookForStudentVersion(book: BookRecord): BookRecord {
+  const filtered: BookRecord = JSON.parse(JSON.stringify(book))
+  filtered.chapters = filtered.chapters.map((chapter) => ({
+    ...chapter,
+    sections: chapter.sections.map((section) => ({
+      ...section,
+      blocks: section.blocks
+        .filter((block) => {
+          if (block.title && ANSWER_LINE_RE.test(block.title)) return false
+          if (block.content && /^\[?(解答|答案)\]?/.test(block.content.trim().slice(0, 20))) return false
+          return true
+        })
+        .map((block) => ({
+          ...block,
+          content: stripStudentAnswers(block.content),
+          missingAnswer: undefined,
+        })),
+    })),
+  }))
+  return filtered
+}
+
+/** 双版本导出：学生版（无解析/答案）与教师版 */
+export async function exportBookDualVersion(
+  book: BookRecord,
+  options: DualExportOptions,
+  helpers: {
+    exportPdf: (el: HTMLElement, filename: string, opts?: { mode?: ExportMode; bookmarks?: { title: string; level?: number }[] }) => Promise<void>
+    exportWord: (html: string, filename: string, opts?: { mode?: ExportMode; title?: string }) => void
+    waitForImages?: (el: HTMLElement) => Promise<void>
+    createExportElement: (html: string) => HTMLElement
+  },
+): Promise<void> {
+  const filteredBook = options.studentVersion ? filterBookForStudentVersion(book) : book
+  const suffix = options.studentVersion ? '学生版' : '教师版'
+  const filename = `${book.title}_${suffix}`
+  const html = bookToExportHtml(filteredBook, { mode: book.exportMode ?? 'print' })
+  const el = helpers.createExportElement(html)
+
+  try {
+    if (helpers.waitForImages) {
+      await helpers.waitForImages(el)
+    }
+    if (options.format === 'pdf') {
+      await helpers.exportPdf(el, `${filename}.pdf`, {
+        mode: book.exportMode ?? 'print',
+        bookmarks: bookBookmarkOutline(filteredBook),
+      })
+    } else {
+      helpers.exportWord(html, filename, {
+        mode: book.exportMode ?? 'print',
+        title: filename,
+      })
+    }
+  } finally {
+    el.remove()
+  }
 }

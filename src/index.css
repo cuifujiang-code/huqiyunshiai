@@ -1,5 +1,80 @@
 @import "tailwindcss";
 
+.paper-docx-preview img,
+.paper-docx-preview img.paper-docx-img,
+.paper-docx-preview img.paper-docx-formula {
+  max-width: 100%;
+  height: auto;
+  vertical-align: middle;
+}
+
+.paper-docx-preview img.paper-docx-img {
+  display: block;
+  margin: 0.5rem auto;
+  object-fit: contain;
+}
+
+.paper-docx-preview img.paper-docx-formula {
+  display: inline-block;
+  margin: 0 2px;
+  max-width: min(100%, 640px);
+  height: auto;
+  vertical-align: middle;
+  object-fit: contain;
+  image-rendering: -webkit-optimize-contrast;
+}
+
+.paper-docx-preview img.paper-docx-formula-inline {
+  max-width: min(100%, 480px);
+}
+
+.paper-docx-preview p img.paper-docx-formula:only-child {
+  display: block;
+  margin: 0.5rem auto;
+  max-width: min(100%, 720px);
+}
+
+.paper-docx-preview table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 0.75rem 0;
+  font-size: 0.875rem;
+}
+
+.paper-docx-preview td,
+.paper-docx-preview th {
+  border: 1px solid #d1d5db;
+  padding: 4px 8px;
+  vertical-align: top;
+}
+
+.paper-docx-preview .paper-formula-ph {
+  display: inline-block;
+  padding: 1px 6px;
+  margin: 0 2px;
+  background: #eff6ff;
+  border: 1px dashed #93c5fd;
+  color: #1d4ed8;
+  font-size: 0.75rem;
+  line-height: 1.4;
+  vertical-align: middle;
+}
+
+.paper-docx-preview p {
+  margin: 0.35rem 0;
+}
+
+.paper-docx-preview .katex {
+  font-size: 1.05em;
+}
+
+.paper-docx-preview .katex-display {
+  display: block;
+  margin: 0.5em 0;
+  overflow-x: auto;
+  text-align: center;
+}
+
 /* ============================================================
    华祺云师AI · 全局设计体系 (Design Tokens)
    主色：#2584FF｜页面底色：#121722｜卡片底色：#1C2332
@@ -242,6 +317,34 @@ body {
   text-align: initial;
 }
 
+/* 题目内嵌图片（PNG/Storage URL） */
+.question-content-render .math-renderer img,
+.math-renderer img {
+  display: block;
+  max-width: min(100%, 480px);
+  height: auto;
+  margin: 0.5rem 0;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.question-content-render .math-renderer img[style*="inline"],
+.math-renderer img[style*="inline"] {
+  display: inline-block;
+  vertical-align: middle;
+  margin: 0 0.25rem;
+  max-width: 100%;
+}
+
+.photo-search-math .katex-display {
+  margin: 0.5em 0;
+  text-align: left;
+}
+.photo-search-math .katex {
+  color: inherit;
+}
+
 /* 淡入动画 */
 @keyframes fadeIn {
   from { opacity: 0; transform: translateY(8px); }
@@ -257,4 +360,47 @@ body {
   border-radius: 6px;
   box-shadow: 0 4px 12px rgba(37, 132, 255, 0.35);
   animation: fadeIn 0.3s ease;
+}
+
+/* 考试复盘 · 打印样式（window.print） */
+@media print {
+  body.exam-review-printing,
+  body.exam-review-printing * {
+    visibility: hidden;
+  }
+  body.exam-review-printing .exam-review-print-area,
+  body.exam-review-printing .exam-review-print-area * {
+    visibility: visible;
+  }
+  body.exam-review-printing .exam-review-print-area {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    padding: 16px;
+    background: #fff !important;
+    color: #111 !important;
+  }
+  body.exam-review-printing .no-print {
+    display: none !important;
+  }
+  body.exam-review-printing .exam-review-print-area table {
+    border-collapse: collapse;
+  }
+  body.exam-review-printing .exam-review-print-area th,
+  body.exam-review-printing .exam-review-print-area td {
+    border: 1px solid #ccc;
+    padding: 6px 8px;
+    color: #111 !important;
+  }
+  body.exam-review-printing .exam-review-print-area section {
+    border: 1px solid #ddd;
+    background: #fff !important;
+    color: #111 !important;
+    page-break-inside: avoid;
+  }
+  body.exam-review-printing .exam-review-print-area h3,
+  body.exam-review-printing .exam-review-print-area p {
+    color: #111 !important;
+  }
 }

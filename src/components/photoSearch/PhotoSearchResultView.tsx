@@ -1,36 +1,81 @@
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
+import MathRenderer from '../common/MathRenderer'
+import { preparePhotoSearchMath } from '../../lib/photoSearchMath'
+import { normalizePhotoSearchSections, splitSolutionSteps } from '../../lib/photoSearchFormat'
 import type { PhotoSearchResult, SearchStatus } from '../../types/photoSearch'
 
 interface Props {
   result: PhotoSearchResult | null
   searchStatus: SearchStatus
-  /** 成功状态 — 加入错题本 */
   onAddToMistakeBook?: () => void
-  /** 成功状态 — 同类题练习 */
   onSimilarQuestions?: () => void
-  /** no_match — 编辑题干文本 */
   editedOcrText: string
   onEditOcrText: (text: string) => void
-  /** no_match — 用编辑后的题干重新搜索 */
   onReSearch: () => void
-  /** blurry — 重新拍照 */
   onRetake: () => void
-  /** blurry — 从相册重选 */
   onReselect: () => void
-  /** network_error — 重试 */
   onRetry: () => void
-  /** network_error — 取消 */
   onCancelNetworkError: () => void
-  /** 通知消息 */
   notice?: string | null
 }
 
-/** 状态标签配置 */
 const STATUS_CONFIG: Record<SearchStatus, { icon: string; label: string; bg: string; text: string }> = {
   success: { icon: '✓', label: '识别成功', bg: 'bg-emerald-500/15', text: 'text-emerald-300' },
   no_match: { icon: '?', label: '未匹配到原题', bg: 'bg-amber-500/15', text: 'text-amber-300' },
   blurry: { icon: '!', label: '无法识别', bg: 'bg-red-500/15', text: 'text-red-300' },
   network_error: { icon: '✕', label: '网络异常', bg: 'bg-red-500/15', text: 'text-red-300' },
+}
+
+function SectionCard({
+  icon,
+  title,
+  accent,
+  children,
+}: {
+  icon: string
+  title: string
+  accent: string
+  children: ReactNode
+}) {
+  return (
+    <section className={`rounded-xl border ${accent} bg-slate-950/40 p-4`}>
+      <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold text-white">
+        <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-white/5 text-base">{icon}</span>
+        {title}
+      </h3>
+      {children}
+    </section>
+  )
+}
+
+function MathBlock({ text, className = '' }: { text: string; className?: string }) {
+  if (!text?.trim()) return <p className="text-sm italic text-slate-500">暂无内容</p>
+  const prepared = preparePhotoSearchMath(text)
+  return (
+    <MathRenderer
+      text={prepared}
+      className={`photo-search-math math-renderer text-sm leading-relaxed text-slate-200 ${className}`}
+    />
+  )
+}
+
+function StepSolution({ text }: { text: string }) {
+  const steps = splitSolutionSteps(text)
+  if (steps.length <= 1) {
+    return <MathBlock text={text} />
+  }
+  return (
+    <ol className="space-y-4">
+      {steps.map((step, i) => (
+        <li key={`step-${i}`} className="flex gap-3">
+          <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-cyan-500/20 text-xs font-bold text-cyan-300">
+            {i + 1}
+          </span>
+          <MathBlock text={step} className="flex-1" />
+        </li>
+      ))}
+    </ol>
+  )
 }
 
 export default function PhotoSearchResultView({
@@ -51,7 +96,6 @@ export default function PhotoSearchResultView({
 
   const statusCfg = STATUS_CONFIG[searchStatus]
 
-  // ==================== State 4: Network Error Dialog ====================
   if (searchStatus === 'network_error') {
     if (!showNetworkDialog) return null
     return (
@@ -94,7 +138,6 @@ export default function PhotoSearchResultView({
     )
   }
 
-  // ==================== State 3: Blurry / OCR Failed ====================
   if (searchStatus === 'blurry') {
     return (
       <div className="space-y-5 rounded-2xl border border-red-500/30 bg-red-950/20 p-5">
@@ -128,32 +171,25 @@ export default function PhotoSearchResultView({
     )
   }
 
-  // ==================== State 2: No Match ====================
   if (searchStatus === 'no_match') {
     return (
       <div className="space-y-5 rounded-2xl border border-amber-500/25 bg-slate-900/70 p-5">
-        {/* Status badge */}
         <span className={`inline-flex items-center gap-1.5 rounded-full ${statusCfg.bg} px-3 py-1 text-xs font-medium ${statusCfg.text}`}>
           <span>{statusCfg.icon}</span> {statusCfg.label}
         </span>
 
-        {/* OCR 原文 */}
         <section>
           <h3 className="text-sm font-medium text-slate-400">识别原文（OCR）</h3>
-          <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-slate-300">
-            {result?.ocrText || '—'}
-          </p>
+          <div className="mt-2 rounded-lg bg-slate-950/50 p-3">
+            <MathBlock text={result?.ocrText || '—'} />
+          </div>
         </section>
 
-        {/* 未搜到原题提示 */}
         <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-4">
           <p className="text-sm font-medium text-amber-200">未搜到原题</p>
-          <p className="mt-1 text-xs text-amber-400/80">
-            题库中未找到匹配题目，AI 服务暂时不可用。您可以手动编辑识别文字后再次搜索。
-          </p>
+          <p className="mt-1 text-xs text-amber-400/80">题库中未找到匹配题目。您可以手动编辑识别文字后再次搜索。</p>
         </div>
 
-        {/* 编辑题干文本框 */}
         <section>
           <h3 className="text-sm font-medium text-slate-400">手动编辑题干</h3>
           <textarea
@@ -165,9 +201,7 @@ export default function PhotoSearchResultView({
           />
         </section>
 
-        {notice && (
-          <p className="rounded-lg bg-amber-500/10 px-3 py-2 text-xs text-amber-300">{notice}</p>
-        )}
+        {notice && <p className="rounded-lg bg-amber-500/10 px-3 py-2 text-xs text-amber-300">{notice}</p>}
 
         <button
           type="button"
@@ -181,90 +215,98 @@ export default function PhotoSearchResultView({
     )
   }
 
-  // ==================== State 1: Success ====================
   if (!result) return null
 
   const fromBank = result.source === 'bank'
+  const sections = normalizePhotoSearchSections(result)
 
   return (
-    <div className="space-y-5 rounded-2xl border border-blue-500/25 bg-slate-900/70 p-5">
-      {/* Status badge */}
-      {fromBank && (
-        <span className="inline-block rounded-full bg-emerald-500/20 px-3 py-1 text-xs font-medium text-emerald-300">
-          题库标准答案
-        </span>
-      )}
-      {!fromBank && result.source === 'ai' && !result.isMockFallback && (
-        <span className="inline-block rounded-full bg-cyan-500/20 px-3 py-1 text-xs font-medium text-cyan-300">
-          AI 智能解答
-        </span>
-      )}
+    <div className="space-y-4 rounded-2xl border border-blue-500/25 bg-slate-900/70 p-5">
+      <div className="flex flex-wrap items-center gap-2">
+        {fromBank ? (
+          <span className="rounded-full bg-emerald-500/20 px-3 py-1 text-xs font-medium text-emerald-300">
+            题库标准答案
+          </span>
+        ) : (
+          <span className="rounded-full bg-cyan-500/20 px-3 py-1 text-xs font-medium text-cyan-300">AI 智能解答</span>
+        )}
+        {result.knowledgePoints.slice(0, 3).map((kp) => (
+          <span
+            key={kp}
+            className="rounded-full border border-violet-500/30 bg-violet-500/10 px-2.5 py-0.5 text-[11px] text-violet-200"
+          >
+            {kp}
+          </span>
+        ))}
+      </div>
 
-      {/* OCR 原文 */}
-      <section>
-        <h3 className="text-sm font-medium text-slate-400">识别原文（OCR）</h3>
-        <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-slate-300">{result.ocrText}</p>
+      <section className="rounded-xl border border-slate-700/80 bg-slate-950/30 p-4">
+        <h3 className="mb-2 text-xs font-medium uppercase tracking-wide text-slate-500">题目</h3>
+        <MathBlock text={result.question} className="text-base text-white" />
       </section>
 
-      {/* 原题 */}
-      <section>
-        <h3 className="text-sm font-medium text-blue-200">原题</h3>
-        <p className="mt-2 whitespace-pre-wrap text-base leading-relaxed text-white">{result.question}</p>
+      <section className="rounded-xl border border-amber-500/30 bg-gradient-to-br from-amber-500/10 to-orange-500/5 p-4">
+        <h3 className="mb-2 text-xs font-medium text-amber-300">最终答案</h3>
+        <MathBlock text={result.answer} className="text-base font-medium text-amber-50" />
       </section>
 
-      {/* 答案 */}
-      <section>
-        <h3 className="text-sm font-medium text-amber-200">答案</h3>
-        <p className="mt-2 whitespace-pre-wrap text-base leading-relaxed text-amber-50/95">{result.answer}</p>
-      </section>
+      <SectionCard icon="🧠" title="思路分析" accent="border-indigo-500/25">
+        <MathBlock text={sections.thinking} />
+      </SectionCard>
 
-      {/* 解析 */}
-      <section>
-        <h3 className="text-sm font-medium text-cyan-200">解析</h3>
-        <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-slate-200">{result.analysis || '暂无解析'}</p>
-      </section>
+      <SectionCard icon="📋" title="步骤解答" accent="border-cyan-500/25">
+        <StepSolution text={sections.steps} />
+      </SectionCard>
 
-      {/* 知识点 */}
-      {result.knowledgePoints.length > 0 && (
-        <section>
-          <h3 className="text-sm font-medium text-violet-200">相关知识点</h3>
-          <div className="mt-2 flex flex-wrap gap-2">
-            {result.knowledgePoints.map((kp) => (
-              <span
-                key={kp}
-                className="rounded-lg border border-violet-500/30 bg-violet-500/10 px-3 py-1 text-sm text-violet-200"
+      <SectionCard icon="📚" title="知识总结" accent="border-violet-500/25">
+        <MathBlock text={sections.knowledgeSummary} />
+      </SectionCard>
+
+      <SectionCard icon="🔄" title="同类题型推荐" accent="border-emerald-500/25">
+        {sections.similarQuestions.length > 0 ? (
+          <ul className="space-y-2">
+            {sections.similarQuestions.map((item, i) => (
+              <li
+                key={`sim-${i}-${item.title.slice(0, 24)}`}
+                className="rounded-lg border border-slate-700/60 bg-slate-900/50 px-3 py-2.5"
               >
-                {kp}
-              </span>
+                <p className="text-sm font-medium text-slate-100">{item.title}</p>
+                {item.reason && <p className="mt-1 text-xs text-slate-400">{item.reason}</p>}
+              </li>
             ))}
-          </div>
-        </section>
-      )}
+          </ul>
+        ) : (
+          <p className="text-sm text-slate-400">暂无推荐，可点击底部「同类题练习」获取更多训练题。</p>
+        )}
+      </SectionCard>
+
+      <details className="rounded-lg border border-slate-800 bg-slate-950/30">
+        <summary className="cursor-pointer px-4 py-2.5 text-xs text-slate-500 hover:text-slate-300">
+          查看 OCR 识别原文
+        </summary>
+        <div className="border-t border-slate-800 px-4 py-3">
+          <MathBlock text={result.ocrText} className="text-xs text-slate-400" />
+        </div>
+      </details>
 
       {result.isMockFallback && (
         <p className="text-xs text-amber-400/90">AI 服务未配置或不可用，仅展示有限结果。</p>
       )}
 
       {result.ocrFallback && (
-        <p className="rounded-lg bg-amber-500/10 px-3 py-2 text-xs text-amber-300 border border-amber-500/20">
-          ⚡ OCR 服务繁忙，已使用 AI 直接识别
+        <p className="rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
+          OCR 服务繁忙，已使用备用识别通道
         </p>
       )}
 
-      {notice && (
-        <p className="rounded-lg bg-emerald-500/10 px-3 py-2 text-xs text-emerald-300">{notice}</p>
-      )}
+      {notice && <p className="rounded-lg bg-emerald-500/10 px-3 py-2 text-xs text-emerald-300">{notice}</p>}
 
-      {/* 底部操作按钮 */}
       <div className="flex gap-3 border-t border-slate-700/60 pt-4">
         <button
           type="button"
           onClick={onAddToMistakeBook}
           className="flex flex-1 items-center justify-center gap-1.5 rounded-xl border border-amber-500/40 bg-amber-500/10 py-2.5 text-sm font-medium text-amber-200 transition hover:bg-amber-500/20"
         >
-          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m0 0l-6-6m6 6l6-6" />
-          </svg>
           加入错题本
         </button>
         <button
@@ -272,9 +314,6 @@ export default function PhotoSearchResultView({
           onClick={onSimilarQuestions}
           className="flex flex-1 items-center justify-center gap-1.5 rounded-xl border border-cyan-500/40 bg-cyan-500/10 py-2.5 text-sm font-medium text-cyan-200 transition hover:bg-cyan-500/20"
         >
-          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-          </svg>
           同类题练习
         </button>
       </div>

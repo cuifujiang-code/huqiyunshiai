@@ -50,7 +50,7 @@ export default function HandoutOcrImportModal({ open, onClose, onImportJson, onI
           </label>
 
           <label className="block">
-            <span className="mb-1 block text-xs text-slate-400">手写 PDF（最多 15 页）</span>
+            <span className="mb-1 block text-xs text-slate-400">手写 PDF（最多 8 页，识别较慢请耐心等待）</span>
             <input
               type="file"
               accept=".pdf,application/pdf"
